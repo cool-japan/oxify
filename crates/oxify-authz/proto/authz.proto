@@ -1,0 +1,150 @@
+syntax = "proto3";
+
+package oxify.authz.v1;
+
+// Authorization Service - High-performance ReBAC engine
+service AuthorizationService {
+  // Check if a subject has permission on a resource
+  rpc Check(CheckRequest) returns (CheckResponse);
+
+  // Batch check multiple permissions in one call
+  rpc BatchCheck(BatchCheckRequest) returns (BatchCheckResponse);
+
+  // Write a relation tuple
+  rpc Write(WriteRequest) returns (WriteResponse);
+
+  // Delete a relation tuple
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+
+  // Expand all subjects with a permission on a resource
+  rpc Expand(ExpandRequest) returns (ExpandResponse);
+
+  // List all tuples for a resource
+  rpc ListTuples(ListTuplesRequest) returns (ListTuplesResponse);
+
+  // Watch for changes to authorization data (streaming)
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
+}
+
+// RelationTuple represents a relationship between a subject and a resource
+message RelationTuple {
+  Resource resource = 1;
+  string relation = 2;
+  Subject subject = 3;
+  optional string tenant_id = 4;
+}
+
+// Resource identifier
+message Resource {
+  string namespace = 1;
+  string object_id = 2;
+}
+
+// Subject can be a user or another resource
+message Subject {
+  oneof subject_type {
+    string user_id = 1;
+    SubjectSet subject_set = 2;
+  }
+}
+
+// SubjectSet represents all subjects with a specific relation to a resource
+message SubjectSet {
+  Resource resource = 1;
+  string relation = 2;
+}
+
+// RequestContext for conditional permissions
+message RequestContext {
+  optional string ip_address = 1;
+  map<string, string> attributes = 2;
+  optional int64 timestamp = 3;
+}
+
+// Check if subject has permission on resource
+message CheckRequest {
+  Resource resource = 1;
+  string relation = 2;
+  Subject subject = 3;
+  optional string tenant_id = 4;
+  optional RequestContext context = 5;
+}
+
+message CheckResponse {
+  bool allowed = 1;
+  optional string reason = 2;
+  optional int64 latency_us = 3; // Latency in microseconds
+}
+
+// Batch check multiple permissions
+message BatchCheckRequest {
+  repeated CheckRequest checks = 1;
+}
+
+message BatchCheckResponse {
+  repeated CheckResponse results = 1;
+  optional int64 total_latency_us = 2;
+}
+
+// Write a relation tuple
+message WriteRequest {
+  RelationTuple tuple = 1;
+}
+
+message WriteResponse {
+  bool success = 1;
+  optional string error = 2;
+}
+
+// Delete a relation tuple
+message DeleteRequest {
+  RelationTuple tuple = 1;
+}
+
+message DeleteResponse {
+  bool success = 1;
+  optional string error = 2;
+}
+
+// Expand all subjects with permission
+message ExpandRequest {
+  Resource resource = 1;
+  string relation = 2;
+  optional string tenant_id = 3;
+}
+
+message ExpandResponse {
+  repeated Subject subjects = 1;
+  int32 count = 2;
+}
+
+// List tuples for a resource
+message ListTuplesRequest {
+  Resource resource = 1;
+  optional string tenant_id = 2;
+  optional int32 limit = 3;
+  optional string page_token = 4;
+}
+
+message ListTuplesResponse {
+  repeated RelationTuple tuples = 1;
+  optional string next_page_token = 2;
+}
+
+// Watch for changes
+message WatchRequest {
+  optional string tenant_id = 1;
+  repeated string namespaces = 2; // Filter by namespaces
+}
+
+message WatchResponse {
+  enum ChangeType {
+    UNKNOWN = 0;
+    CREATED = 1;
+    DELETED = 2;
+  }
+
+  ChangeType change_type = 1;
+  RelationTuple tuple = 2;
+  int64 timestamp = 3;
+}

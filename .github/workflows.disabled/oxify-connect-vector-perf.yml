@@ -1,0 +1,90 @@
+name: oxify-connect-vector Performance Regression
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'crates/oxify-connect-vector/**'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark-comparison:
+    name: Performance Regression Testing
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository (PR branch)
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run benchmarks (PR branch)
+        working-directory: crates/oxify-connect-vector
+        run: |
+          cargo bench --bench vector_bench -- --save-baseline pr_branch
+          cargo bench --bench hybrid_bench -- --save-baseline pr_branch
+          cargo bench --bench cache_bench -- --save-baseline pr_branch
+          cargo bench --bench colbert_bench -- --save-baseline pr_branch
+
+      - name: Checkout repository (main branch)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          clean: false
+
+      - name: Run benchmarks (main branch)
+        working-directory: crates/oxify-connect-vector
+        run: |
+          cargo bench --bench vector_bench -- --save-baseline main_branch
+          cargo bench --bench hybrid_bench -- --save-baseline main_branch
+          cargo bench --bench cache_bench -- --save-baseline main_branch
+          cargo bench --bench colbert_bench -- --save-baseline main_branch
+
+      - name: Install critcmp
+        run: cargo install critcmp
+
+      - name: Compare benchmarks
+        working-directory: crates/oxify-connect-vector
+        run: |
+          echo "# Performance Comparison: PR vs Main" > comparison_report.md
+          echo "" >> comparison_report.md
+          echo "## Vector Search Benchmarks" >> comparison_report.md
+          critcmp main_branch pr_branch --export vector_comparison || true
+          echo '```' >> comparison_report.md
+          critcmp main_branch pr_branch >> comparison_report.md || echo "No significant changes" >> comparison_report.md
+          echo '```' >> comparison_report.md
+          cat comparison_report.md
+
+      - name: Upload comparison report
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-comparison
+          path: crates/oxify-connect-vector/comparison_report.md
+          retention-days: 30
+
+      - name: Check for regression
+        working-directory: crates/oxify-connect-vector
+        run: |
+          # Check if there's significant performance degradation (>10%)
+          # This is a simple check - can be enhanced with proper thresholds
+          if critcmp main_branch pr_branch | grep -E '\+[0-9]{2}\.[0-9]+%'; then
+            echo "⚠️ Warning: Potential performance regression detected"
+            echo "Review the benchmark comparison report for details"
+          else
+            echo "✅ No significant performance regression detected"
+          fi

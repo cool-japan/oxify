@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: oxify
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - configmap.yaml
+  - secret.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - hpa.yaml
+  - pdb.yaml
+
+commonLabels:
+  app: oxify-server
+  managed-by: kustomize
+
+# Images
+images:
+  - name: oxify-server
+    newName: oxify-server
+    newTag: latest
+
+# Replicas (can be overridden per environment)
+replicas:
+  - name: oxify-server
+    count: 3

@@ -1,0 +1,85 @@
+[workspace]
+members = [
+    "crates/oxify",
+    "crates/oxify-api",
+    "crates/oxify-authn",
+    "crates/oxify-authz",
+    "crates/oxify-cli",
+    "crates/oxify-connect-llm",
+    "crates/oxify-connect-vector",
+    "crates/oxify-connect-vision",
+    "crates/oxify-engine",
+    "crates/oxify-mcp",
+    "crates/oxify-model",
+    "crates/oxify-server",
+    "crates/oxify-storage",
+    "crates/oxify-ui",
+    "crates/oxify-vector",
+]
+exclude = [
+    "examples/*",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["OxiFY Contributors"]
+license = "Apache-2.0"
+repository = "https://github.com/cool-japan/oxify"
+
+[workspace.dependencies]
+# Core dependencies
+tokio = { version = "1.49.0", features = ["full"] }
+async-trait = "0.1.89"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+serde_yaml = "0.9"
+thiserror = "2.0.18"
+anyhow = "1.0.100"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.22"
+
+# Web framework
+axum = { version = "0.8.8", features = ["macros", "ws"] }
+tower = "0.5.3"
+tower-http = { version = "0.6.8", features = ["cors", "trace"] }
+hyper = { version = "1.8", features = ["full"] }
+
+# GraphQL
+async-graphql = { version = "7.2", features = ["chrono"] }
+async-graphql-axum = "7.2"
+
+# LLM & Vector DB clients
+reqwest = { version = "0.12.28", features = ["json", "stream"] }
+qdrant-client = "1.16.0"
+sqlx = { version = "0.9.0-alpha.1", features = ["runtime-tokio", "sqlite", "chrono", "uuid"] }
+
+# Utilities
+clap = { version = "4.5.54", features = ["derive"] }
+uuid = { version = "1.19.0", features = ["v4", "serde"] }
+chrono = { version = "0.4.43", features = ["serde"] }
+futures = "0.3"
+tokio-stream = "0.1"
+cron = "0.15"
+rand = "0.9"
+rayon = "1.11"
+num_cpus = "1.17"
+toml = "0.8"
+dirs = "6.0"
+
+# Code execution
+rhai = { version = "1.23", features = ["sync"] }
+wasmer = "6.1"
+
+# OpenTelemetry
+opentelemetry = { version = "0.31", features = ["trace", "metrics"] }
+opentelemetry_sdk = { version = "0.31", features = ["trace", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.31", features = ["trace", "grpc-tonic"] }
+opentelemetry-semantic-conventions = "0.31"
+tracing-opentelemetry = "0.32"
+
+# Testing & Benchmarking
+criterion = { version = "0.8", features = ["html_reports"] }
+tempfile = "3.24"
+proptest = "1.9"

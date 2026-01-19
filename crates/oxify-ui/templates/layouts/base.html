@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}OxiFY{% endblock %}</title>
+
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            primary: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              200: '#bae6fd',
+              300: '#7dd3fc',
+              400: '#38bdf8',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+              800: '#075985',
+              900: '#0c4a6e',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- HTMX -->
+  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/sse.js"></script>
+
+  <!-- Alpine.js for minimal interactivity -->
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+  <style>
+    [x-cloak] { display: none !important; }
+    .htmx-indicator { opacity: 0; transition: opacity 200ms ease-in; }
+    .htmx-request .htmx-indicator { opacity: 1; }
+    .htmx-request.htmx-indicator { opacity: 1; }
+    /* Compact mode styles */
+    .compact-mode main { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+    .compact-mode .space-y-6 > * + * { margin-top: 0.75rem; }
+    .compact-mode .p-6 { padding: 1rem; }
+    .compact-mode .py-6 { padding-top: 1rem; padding-bottom: 1rem; }
+  </style>
+
+  <!-- User Preferences (load early to prevent flash) -->
+  <script src="/static/js/preferences.js"></script>
+
+  <!-- SSE Multiplexer for monitoring multiple executions -->
+  <script src="/static/js/sse-multiplexer.js"></script>
+
+  <script>
+    // Apply preferences immediately to prevent flash of unstyled content
+    (function() {
+      try {
+        const stored = localStorage.getItem('oxify_preferences');
+        if (stored) {
+          const prefs = JSON.parse(stored);
+          if (prefs.darkMode) {
+            document.documentElement.classList.add('dark');
+          }
+          if (prefs.compactMode) {
+            document.body.classList.add('compact-mode');
+          }
+        }
+      } catch (e) {}
+    })();
+  </script>
+
+  {% block head %}{% endblock %}
+</head>
+<body class="h-full bg-gray-50 dark:bg-gray-900" x-data="appState()" x-init="init()" :class="{ 'dark': darkMode, 'compact-mode': compactMode }">
+  <div class="min-h-full">
+    <!-- Sidebar for mobile -->
+    <div x-show="sidebarOpen" class="relative z-50 lg:hidden" x-cloak>
+      <div x-show="sidebarOpen" x-transition:enter="transition-opacity ease-linear duration-300" x-transition:leave="transition-opacity ease-linear duration-300" class="fixed inset-0 bg-gray-900/80"></div>
+      <div class="fixed inset-0 flex">
+        <div x-show="sidebarOpen" x-transition:enter="transition ease-in-out duration-300 transform" x-transition:enter-start="-translate-x-full" x-transition:enter-end="translate-x-0" x-transition:leave="transition ease-in-out duration-300 transform" x-transition:leave-start="translate-x-0" x-transition:leave-end="-translate-x-full" class="relative mr-16 flex w-full max-w-xs flex-1">
+          <div class="flex grow flex-col gap-y-5 overflow-y-auto bg-white dark:bg-gray-800 px-6 pb-4">
+            {% include "layouts/_sidebar_content.html" %}
+          </div>
+        </div>
+        <div class="w-14 flex-shrink-0" @click="sidebarOpen = false"></div>
+      </div>
+    </div>
+
+    <!-- Static sidebar for desktop -->
+    <div class="hidden lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:w-64 lg:flex-col">
+      <div class="flex grow flex-col gap-y-5 overflow-y-auto border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-6 pb-4">
+        {% include "layouts/_sidebar_content.html" %}
+      </div>
+    </div>
+
+    <!-- Main content -->
+    <div class="lg:pl-64">
+      <!-- Top navbar -->
+      <div class="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
+        <button type="button" class="-m-2.5 p-2.5 text-gray-700 dark:text-gray-200 lg:hidden" @click="sidebarOpen = true">
+          <span class="sr-only">Open sidebar</span>
+          <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+          </svg>
+        </button>
+
+        <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 lg:hidden"></div>
+
+        <div class="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
+          <!-- Search -->
+          <form class="relative flex flex-1" action="/search" method="GET">
+            <label for="search-field" class="sr-only">Search</label>
+            <svg class="pointer-events-none absolute inset-y-0 left-0 h-full w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd" />
+            </svg>
+            <input id="search-field" class="block h-full w-full border-0 bg-transparent py-0 pl-8 pr-0 text-gray-900 dark:text-white placeholder:text-gray-400 focus:ring-0 sm:text-sm" placeholder="Search workflows and executions..." type="search" name="q">
+          </form>
+
+          <div class="flex items-center gap-x-4 lg:gap-x-6">
+            <!-- Dark mode toggle -->
+            <button type="button" @click="toggleDarkMode()" class="-m-2.5 p-2.5 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300">
+              <span class="sr-only">Toggle dark mode</span>
+              <svg x-show="!darkMode" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
+              </svg>
+              <svg x-show="darkMode" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" x-cloak>
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
+              </svg>
+            </button>
+
+            <!-- Notifications -->
+            <button type="button" class="-m-2.5 p-2.5 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300">
+              <span class="sr-only">View notifications</span>
+              <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Page content -->
+      <main class="py-6">
+        <div class="px-4 sm:px-6 lg:px-8">
+          {% block content %}{% endblock %}
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2"></div>
+
+  <!-- Global Alpine.js app state -->
+  <script>
+    function appState() {
+      return {
+        sidebarOpen: false,
+        darkMode: false,
+        compactMode: false,
+
+        init() {
+          // Load preferences from the global userPreferences instance
+          if (window.userPreferences) {
+            this.darkMode = window.userPreferences.get('darkMode', false);
+            this.compactMode = window.userPreferences.get('compactMode', false);
+
+            // Subscribe to preference changes
+            window.userPreferences.subscribe('darkMode', (newValue) => {
+              this.darkMode = newValue;
+            });
+            window.userPreferences.subscribe('compactMode', (newValue) => {
+              this.compactMode = newValue;
+            });
+          } else {
+            // Fallback to localStorage
+            this.darkMode = localStorage.getItem('darkMode') === 'true';
+          }
+        },
+
+        toggleDarkMode() {
+          if (window.userPreferences) {
+            this.darkMode = window.userPreferences.toggle('darkMode');
+          } else {
+            this.darkMode = !this.darkMode;
+            localStorage.setItem('darkMode', this.darkMode);
+          }
+        },
+
+        toggleCompactMode() {
+          if (window.userPreferences) {
+            this.compactMode = window.userPreferences.toggle('compactMode');
+          } else {
+            this.compactMode = !this.compactMode;
+          }
+        }
+      };
+    }
+  </script>
+
+  <!-- Service Worker Registration -->
+  <script>
+    // Register service worker for offline support
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('/static/js/service-worker.js')
+          .then(function(registration) {
+            console.log('[App] Service Worker registered with scope:', registration.scope);
+
+            // Listen for updates
+            registration.addEventListener('updatefound', function() {
+              const newWorker = registration.installing;
+              newWorker.addEventListener('statechange', function() {
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  console.log('[App] New service worker available');
+                  // Optionally show a notification to user that an update is available
+                  if (window.userPreferences) {
+                    window.userPreferences.set('serviceWorkerUpdateAvailable', true);
+                  }
+                }
+              });
+            });
+          })
+          .catch(function(error) {
+            console.error('[App] Service Worker registration failed:', error);
+          });
+
+        // Listen for messages from service worker
+        navigator.serviceWorker.addEventListener('message', function(event) {
+          if (event.data && event.data.type === 'CACHE_UPDATED') {
+            console.log('[App] Cache updated:', event.data.url);
+          }
+        });
+
+        // Listen for controller change (new service worker activated)
+        navigator.serviceWorker.addEventListener('controllerchange', function() {
+          console.log('[App] Service Worker controller changed');
+          // Optionally reload the page to use the new service worker
+          // window.location.reload();
+        });
+      });
+    }
+
+    // Helper function to clear cache (can be called from settings page)
+    window.clearServiceWorkerCache = function() {
+      if ('serviceWorker' in navigator) {
+        return navigator.serviceWorker.ready.then(function(registration) {
+          return registration.active.postMessage({ type: 'CLEAR_CACHE' });
+        }).then(function() {
+          console.log('[App] Service Worker cache cleared');
+          return true;
+        }).catch(function(error) {
+          console.error('[App] Failed to clear cache:', error);
+          return false;
+        });
+      }
+      return Promise.resolve(false);
+    };
+  </script>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

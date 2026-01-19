@@ -1,0 +1,226 @@
+name: oxify-connect-vector CI
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'crates/oxify-connect-vector/**'
+      - '.github/workflows/oxify-connect-vector-ci.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'crates/oxify-connect-vector/**'
+      - '.github/workflows/oxify-connect-vector-ci.yml'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-target-
+
+      - name: Run unit tests
+        working-directory: crates/oxify-connect-vector
+        run: cargo test --lib --bins
+
+      - name: Run doc tests
+        working-directory: crates/oxify-connect-vector
+        run: cargo test --doc
+
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
+          - 6334:6334
+        options: >-
+          --health-cmd "curl -f http://localhost:6333/health || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      postgres:
+        image: pgvector/pgvector:pg16
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: vectordb
+        options: >-
+          --health-cmd "pg_isready -U test -d vectordb"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      chromadb:
+        image: chromadb/chroma:latest
+        ports:
+          - 8000:8000
+        env:
+          IS_PERSISTENT: TRUE
+          ANONYMIZED_TELEMETRY: FALSE
+        options: >-
+          --health-cmd "curl -f http://localhost:8000/api/v1/heartbeat || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Initialize PostgreSQL with pgvector
+        env:
+          PGPASSWORD: test
+        run: |
+          psql -h localhost -U test -d vectordb -f crates/oxify-connect-vector/tests/init.sql
+
+      - name: Wait for services
+        run: |
+          echo "Waiting for Qdrant..."
+          timeout 60 bash -c 'until curl -f http://localhost:6333/health; do sleep 2; done'
+          echo "Waiting for ChromaDB..."
+          timeout 60 bash -c 'until curl -f http://localhost:8000/api/v1/heartbeat; do sleep 2; done'
+          echo "Waiting for PostgreSQL..."
+          timeout 60 bash -c 'until pg_isready -h localhost -U test -d vectordb; do sleep 2; done'
+
+      - name: Run integration tests
+        working-directory: crates/oxify-connect-vector
+        run: cargo test --test integration_test -- --include-ignored
+        env:
+          QDRANT_URL: http://localhost:6333
+          POSTGRES_URL: postgres://test:test@localhost/vectordb
+          CHROMADB_URL: http://localhost:8000
+
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt
+
+      - name: Check formatting
+        working-directory: crates/oxify-connect-vector
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run clippy
+        working-directory: crates/oxify-connect-vector
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  benchmark:
+    name: Benchmark (no regression testing)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run benchmarks
+        working-directory: crates/oxify-connect-vector
+        run: cargo bench --no-fail-fast -- --output-format bencher | tee benchmark_output.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: crates/oxify-connect-vector/benchmark_output.txt
+          retention-days: 30

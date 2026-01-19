@@ -1,0 +1,15 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "oxify-server.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oxify-server.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "oxify-server.selectorLabels" . | nindent 6 }}
+  unhealthyPodEvictionPolicy: IfHealthyBudget
+{{- end }}

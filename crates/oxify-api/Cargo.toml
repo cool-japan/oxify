@@ -1,0 +1,67 @@
+[package]
+name = "oxify-api"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "GraphQL and REST API server for OxiFY AI orchestration platform"
+repository = "https://github.com/cool-japan/oxify"
+categories = ["web-programming", "api-bindings", "asynchronous"]
+keywords = ["graphql", "rest-api", "ai", "orchestration", "workflow"]
+
+[[bin]]
+name = "oxify-api"
+path = "src/main.rs"
+
+[dependencies]
+oxify-model = { version = "0.1.0", path = "../oxify-model", features = ["openapi"] }
+oxify-engine = { version = "0.1.0", path = "../oxify-engine" }
+oxify-authn = { version = "0.1.0", path = "../oxify-authn" }
+oxify-authz = { version = "0.1.0", path = "../oxify-authz" }
+oxify-mcp = { version = "0.1.0", path = "../oxify-mcp" }
+oxify-server = { version = "0.1.0", path = "../oxify-server" }
+oxify-storage = { version = "0.1.0", path = "../oxify-storage" }
+oxify-connect-vector = { version = "0.1.0", path = "../oxify-connect-vector" }
+axum = { workspace = true, features = ["macros"] }
+tower = { workspace = true }
+tower-http = { workspace = true, features = ["cors", "trace", "compression-br", "compression-gzip"] }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+uuid = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+tokio-stream = { workspace = true }
+utoipa = { version = "5.4.0", features = ["axum_extras", "chrono", "uuid"] }
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
+tower_governor = "0.8.0"
+dotenv = "0.15"
+hex = "0.4"
+
+# GraphQL support (optional feature)
+async-graphql = { workspace = true, optional = true }
+async-graphql-axum = { workspace = true, optional = true }
+
+# OpenTelemetry support (optional feature)
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+
+[features]
+default = ["openapi"]
+openapi = []
+graphql = ["async-graphql", "async-graphql-axum"]
+otel = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tracing-opentelemetry"]
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "api_benchmarks"
+harness = false

@@ -1,0 +1,37 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: oxify
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secret.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - hpa.yaml
+
+commonLabels:
+  app.kubernetes.io/name: oxify-api
+  app.kubernetes.io/component: api
+  app.kubernetes.io/part-of: oxify
+
+images:
+  - name: oxify-api
+    newName: your-registry/oxify-api
+    newTag: latest
+
+# Namespace-scoped resources
+namePrefix: ""
+
+# ConfigMap and Secret generators (optional)
+# configMapGenerator:
+#   - name: oxify-api-config
+#     envs:
+#       - config.env
+
+# secretGenerator:
+#   - name: oxify-api-secret
+#     envs:
+#       - secret.env

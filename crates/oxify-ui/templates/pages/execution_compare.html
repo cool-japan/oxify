@@ -1,0 +1,179 @@
+{% extends "layouts/base.html" %}
+
+{% block title %}Compare Executions - OxiFY{% endblock %}
+
+{% block content %}
+<div class="space-y-6" x-data="executionCompare()">
+  <!-- Header -->
+  <div class="sm:flex sm:items-center sm:justify-between">
+    <div>
+      <nav class="flex" aria-label="Breadcrumb">
+        <ol role="list" class="flex items-center space-x-2">
+          <li><a href="/executions" class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">Executions</a></li>
+          <li><svg class="h-5 w-5 flex-shrink-0 text-gray-300 dark:text-gray-600" fill="currentColor" viewBox="0 0 20 20"><path d="M5.555 17.776l8-16 .894.448-8 16-.894-.448z" /></svg></li>
+          <li><span class="text-sm font-medium text-gray-900 dark:text-white">Compare</span></li>
+        </ol>
+      </nav>
+      <h1 class="mt-2 text-2xl font-bold text-gray-900 dark:text-white">Compare Executions</h1>
+    </div>
+    <div class="mt-4 sm:mt-0">
+      <button @click="clearComparison" class="inline-flex items-center rounded-md bg-white dark:bg-gray-700 px-3 py-2 text-sm font-semibold text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600">
+        Clear Selection
+      </button>
+    </div>
+  </div>
+
+  <!-- Execution IDs -->
+  <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+    <div class="flex items-center">
+      <svg class="h-5 w-5 text-blue-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
+        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clip-rule="evenodd" />
+      </svg>
+      <p class="text-sm text-blue-700 dark:text-blue-300">
+        Comparing {{ execution_count }} execution{% if execution_count != 1 %}s{% endif %}
+      </p>
+    </div>
+  </div>
+
+  <!-- Summary Comparison -->
+  <div class="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+    <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+      <h2 class="text-lg font-medium text-gray-900 dark:text-white">Summary</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+        <thead class="bg-gray-50 dark:bg-gray-900">
+          <tr>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Property</th>
+            {% for exec in executions %}
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+              <a href="/executions/{{ exec.id }}" class="hover:text-blue-500">Execution {{ loop.index }}</a>
+            </th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+          <tr>
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">Status</td>
+            {% for exec in executions %}
+            <td class="px-6 py-4 whitespace-nowrap text-sm">
+              <span class="px-2 py-1 text-xs font-medium rounded-full {% if exec.status == "running" %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% else if exec.status == "completed" %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200{% else if exec.status == "failed" %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200{% else %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200{% endif %}">
+                {{ exec.status }}
+              </span>
+            </td>
+            {% endfor %}
+          </tr>
+          <tr>
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">Progress</td>
+            {% for exec in executions %}
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+              <div class="flex items-center gap-2">
+                <div class="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                  <div class="bg-blue-500 h-2 rounded-full" style="width: {{ exec.progress }}%"></div>
+                </div>
+                <span class="text-xs">{{ exec.progress }}%</span>
+              </div>
+            </td>
+            {% endfor %}
+          </tr>
+          <tr>
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">Duration</td>
+            {% for exec in executions %}
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+              {{ exec.duration }}
+            </td>
+            {% endfor %}
+          </tr>
+          <tr>
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">Started At</td>
+            {% for exec in executions %}
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+              {{ exec.started_at }}
+            </td>
+            {% endfor %}
+          </tr>
+          <tr>
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">Completed At</td>
+            {% for exec in executions %}
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+              {{ exec.completed_at }}
+            </td>
+            {% endfor %}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Node Results Comparison -->
+  <div class="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+    <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+      <h2 class="text-lg font-medium text-gray-900 dark:text-white">Node Results</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+        <thead class="bg-gray-50 dark:bg-gray-900">
+          <tr>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider sticky left-0 bg-gray-50 dark:bg-gray-900">Node</th>
+            {% for exec in executions %}
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Execution {{ loop.index }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+          {% for node_row in node_comparison %}
+          <tr>
+            <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white sticky left-0 bg-white dark:bg-gray-800">{{ node_row.node_name }}</td>
+            {% for result in node_row.results %}
+            <td class="px-6 py-4 text-sm">
+              {% match result %}
+              {% when Some with (data) %}
+              <div class="space-y-1">
+                <span class="px-2 py-1 text-xs font-medium rounded-full {% if data.status == "completed" %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200{% else if data.status == "failed" %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200{% else %}bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200{% endif %}">
+                  {{ data.status }}
+                </span>
+                <div class="text-xs text-gray-500 dark:text-gray-400">{{ data.duration }}</div>
+              </div>
+              {% when None %}
+              <span class="text-xs text-gray-400 dark:text-gray-500">N/A</span>
+              {% endmatch %}
+            </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Execution Graphs -->
+  <div class="grid grid-cols-1 gap-6 {% if execution_count == 2 %}lg:grid-cols-2{% endif %}">
+    {% for exec in executions %}
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
+      <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+        <h3 class="text-md font-medium text-gray-900 dark:text-white">Execution {{ loop.index }} Graph</h3>
+        <a href="/executions/{{ exec.id }}" class="text-xs text-blue-500 hover:text-blue-600">View Details →</a>
+      </div>
+      <div class="p-6">
+        <div class="aspect-video bg-gray-50 dark:bg-gray-900 rounded-lg" hx-get="/htmx/executions/{{ exec.id }}/graph" hx-trigger="load" hx-swap="innerHTML">
+          <!-- DAG will be loaded here -->
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function executionCompare() {
+  return {
+    clearComparison() {
+      // Navigate back to executions list
+      window.location.href = '/executions';
+    }
+  };
+}
+</script>
+{% endblock %}

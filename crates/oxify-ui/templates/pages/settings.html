@@ -1,0 +1,440 @@
+{% extends "layouts/base.html" %}
+
+{% block title %}{{ title }} - OxiFY{% endblock %}
+
+{% block head %}
+<script src="/static/js/preferences.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="space-y-6" x-data="settingsPage()">
+  <div class="sm:flex sm:items-center sm:justify-between">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
+      <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Manage your preferences</p>
+    </div>
+    <div class="mt-4 sm:mt-0 flex gap-2">
+      <button type="button" @click="exportSettings()" class="inline-flex items-center rounded-md bg-white dark:bg-gray-700 px-3 py-2 text-sm font-semibold text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600">
+        <svg class="-ml-0.5 mr-1.5 h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M9.25 13.25a.75.75 0 001.5 0V4.636l2.955 3.129a.75.75 0 001.09-1.03l-4.25-4.5a.75.75 0 00-1.09 0l-4.25 4.5a.75.75 0 101.09 1.03L9.25 4.636v8.614z" />
+          <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
+        </svg>
+        Export
+      </button>
+      <label class="inline-flex items-center rounded-md bg-white dark:bg-gray-700 px-3 py-2 text-sm font-semibold text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 cursor-pointer">
+        <svg class="-ml-0.5 mr-1.5 h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M10.75 2.75a.75.75 0 00-1.5 0v8.614L6.295 8.235a.75.75 0 10-1.09 1.03l4.25 4.5a.75.75 0 001.09 0l4.25-4.5a.75.75 0 00-1.09-1.03l-2.955 3.129V2.75z" />
+          <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
+        </svg>
+        Import
+        <input type="file" accept=".json" class="hidden" @change="importSettings($event)">
+      </label>
+      <button type="button" @click="resetSettings()" class="inline-flex items-center rounded-md bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm font-semibold text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/40">
+        Reset
+      </button>
+    </div>
+  </div>
+
+  <div class="bg-white dark:bg-gray-800 rounded-lg shadow divide-y divide-gray-200 dark:divide-gray-700">
+    <!-- Appearance -->
+    <div class="p-6">
+      <h2 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Appearance</h2>
+      <div class="space-y-4">
+        <!-- Dark Mode -->
+        <div class="flex items-center justify-between">
+          <div>
+            <label for="dark-mode" class="text-sm font-medium text-gray-700 dark:text-gray-200">Dark Mode</label>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Use dark theme for the interface</p>
+          </div>
+          <button type="button" role="switch" :aria-checked="prefs.darkMode" @click="togglePref('darkMode')"
+                  :class="prefs.darkMode ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'"
+                  class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2">
+            <span :class="prefs.darkMode ? 'translate-x-5' : 'translate-x-0'" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+          </button>
+        </div>
+
+        <!-- Compact Mode -->
+        <div class="flex items-center justify-between">
+          <div>
+            <label for="compact-mode" class="text-sm font-medium text-gray-700 dark:text-gray-200">Compact Mode</label>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Reduce spacing for denser layout</p>
+          </div>
+          <button type="button" role="switch" :aria-checked="prefs.compactMode" @click="togglePref('compactMode')"
+                  :class="prefs.compactMode ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'"
+                  class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2">
+            <span :class="prefs.compactMode ? 'translate-x-5' : 'translate-x-0'" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+          </button>
+        </div>
+
+        <!-- Sidebar Collapsed by Default -->
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-200">Collapsed Sidebar</label>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Start with sidebar collapsed</p>
+          </div>
+          <button type="button" role="switch" :aria-checked="prefs.sidebarCollapsed" @click="togglePref('sidebarCollapsed')"
+                  :class="prefs.sidebarCollapsed ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'"
+                  class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2">
+            <span :class="prefs.sidebarCollapsed ? 'translate-x-5' : 'translate-x-0'" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Editor Settings -->
+    <div class="p-6">
+      <h2 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Editor Settings</h2>
+      <div class="space-y-4">
+        <!-- Snap to Grid -->
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-200">Snap to Grid</label>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Align nodes to grid when moving</p>
+          </div>
+          <button type="button" role="switch" :aria-checked="prefs.editor.snapToGrid" @click="togglePref('editor.snapToGrid')"
+                  :class="prefs.editor.snapToGrid ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'"
+                  class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2">
+            <span :class="prefs.editor.snapToGrid ? 'translate-x-5' : 'translate-x-0'" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+          </button>
+        </div>
+
+        <!-- Grid Size -->
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-200">Grid Size</label>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Size of the alignment grid in pixels</p>
+          </div>
+          <select x-model.number="prefs.editor.gridSize" @change="setPref('editor.gridSize', prefs.editor.gridSize)"
+                  class="rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white text-sm focus:ring-primary-500 focus:border-primary-500">
+            <option value="10">10px</option>
+            <option value="20">20px</option>
+            <option value="40">40px</option>
+          </select>
+        </div>
+
+        <!-- Auto Save -->
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-200">Auto Save</label>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Automatically save workflow changes</p>
+          </div>
+          <button type="button" role="switch" :aria-checked="prefs.editor.autoSave" @click="togglePref('editor.autoSave')"
+                  :class="prefs.editor.autoSave ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'"
+                  class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2">
+            <span :class="prefs.editor.autoSave ? 'translate-x-5' : 'translate-x-0'" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- List View Settings -->
+    <div class="p-6">
+      <h2 class="text-lg font-medium text-gray-900 dark:text-white mb-4">List View Settings</h2>
+      <div class="space-y-4">
+        <!-- Workflows Per Page -->
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-200">Workflows Per Page</label>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Number of workflows shown per page</p>
+          </div>
+          <select x-model.number="prefs.lists.workflowsPerPage" @change="setPref('lists.workflowsPerPage', prefs.lists.workflowsPerPage)"
+                  class="rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white text-sm focus:ring-primary-500 focus:border-primary-500">
+            <option value="10">10</option>
+            <option value="20">20</option>
+            <option value="50">50</option>
+          </select>
+        </div>
+
+        <!-- Executions Per Page -->
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-200">Executions Per Page</label>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Number of executions shown per page</p>
+          </div>
+          <select x-model.number="prefs.lists.executionsPerPage" @change="setPref('lists.executionsPerPage', prefs.lists.executionsPerPage)"
+                  class="rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white text-sm focus:ring-primary-500 focus:border-primary-500">
+            <option value="10">10</option>
+            <option value="20">20</option>
+            <option value="50">50</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notifications -->
+    <div class="p-6">
+      <h2 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Notifications</h2>
+      <div class="space-y-4">
+        <!-- Show Toasts -->
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-200">Show Toast Notifications</label>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Display popup notifications for actions</p>
+          </div>
+          <button type="button" role="switch" :aria-checked="prefs.notifications.showToasts" @click="togglePref('notifications.showToasts')"
+                  :class="prefs.notifications.showToasts ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'"
+                  class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2">
+            <span :class="prefs.notifications.showToasts ? 'translate-x-5' : 'translate-x-0'" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+          </button>
+        </div>
+
+        <!-- Toast Duration -->
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-200">Toast Duration</label>
+            <p class="text-sm text-gray-500 dark:text-gray-400">How long toasts remain visible</p>
+          </div>
+          <select x-model.number="prefs.notifications.toastDuration" @change="setPref('notifications.toastDuration', prefs.notifications.toastDuration)"
+                  class="rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white text-sm focus:ring-primary-500 focus:border-primary-500">
+            <option value="3000">3 seconds</option>
+            <option value="5000">5 seconds</option>
+            <option value="10000">10 seconds</option>
+          </select>
+        </div>
+
+        <!-- Execution Complete Notification -->
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-200">Execution Complete</label>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Notify when executions complete</p>
+          </div>
+          <button type="button" role="switch" :aria-checked="prefs.notifications.executionComplete" @click="togglePref('notifications.executionComplete')"
+                  :class="prefs.notifications.executionComplete ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'"
+                  class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2">
+            <span :class="prefs.notifications.executionComplete ? 'translate-x-5' : 'translate-x-0'" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+          </button>
+        </div>
+
+        <!-- Execution Failed Notification -->
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-200">Execution Failed</label>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Notify when executions fail</p>
+          </div>
+          <button type="button" role="switch" :aria-checked="prefs.notifications.executionFailed" @click="togglePref('notifications.executionFailed')"
+                  :class="prefs.notifications.executionFailed ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'"
+                  class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2">
+            <span :class="prefs.notifications.executionFailed ? 'translate-x-5' : 'translate-x-0'" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- API Configuration -->
+    <div class="p-6">
+      <h2 class="text-lg font-medium text-gray-900 dark:text-white mb-4">API Configuration</h2>
+      <div class="space-y-4">
+        <div>
+          <label for="api-url" class="block text-sm font-medium text-gray-700 dark:text-gray-200">API Base URL</label>
+          <input type="url" name="api-url" id="api-url" value="{{ api_url }}" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6">
+          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">The base URL for the OxiFY API backend</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- LLM Providers -->
+    <div class="p-6">
+      <h2 class="text-lg font-medium text-gray-900 dark:text-white mb-4">LLM Providers</h2>
+      <div class="space-y-4">
+        <!-- OpenAI -->
+        <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-green-500 flex items-center justify-center text-white font-bold">AI</div>
+            <div>
+              <div class="text-sm font-medium text-gray-900 dark:text-white">OpenAI</div>
+              <div class="text-sm text-gray-500 dark:text-gray-400">GPT-4, GPT-3.5</div>
+            </div>
+          </div>
+          <span class="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Connected</span>
+        </div>
+
+        <!-- Anthropic -->
+        <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-orange-500 flex items-center justify-center text-white font-bold">A</div>
+            <div>
+              <div class="text-sm font-medium text-gray-900 dark:text-white">Anthropic</div>
+              <div class="text-sm text-gray-500 dark:text-gray-400">Claude 3.5, Claude 3</div>
+            </div>
+          </div>
+          <span class="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Connected</span>
+        </div>
+
+        <!-- Ollama -->
+        <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-blue-500 flex items-center justify-center text-white font-bold">O</div>
+            <div>
+              <div class="text-sm font-medium text-gray-900 dark:text-white">Ollama</div>
+              <div class="text-sm text-gray-500 dark:text-gray-400">Local models</div>
+            </div>
+          </div>
+          <span class="px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200">Not configured</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Vector Databases -->
+    <div class="p-6">
+      <h2 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Vector Databases</h2>
+      <div class="space-y-4">
+        <!-- Qdrant -->
+        <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-purple-500 flex items-center justify-center text-white font-bold">Q</div>
+            <div>
+              <div class="text-sm font-medium text-gray-900 dark:text-white">Qdrant</div>
+              <div class="text-sm text-gray-500 dark:text-gray-400">Vector similarity search</div>
+            </div>
+          </div>
+          <span class="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Connected</span>
+        </div>
+
+        <!-- pgvector -->
+        <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold">PG</div>
+            <div>
+              <div class="text-sm font-medium text-gray-900 dark:text-white">pgvector</div>
+              <div class="text-sm text-gray-500 dark:text-gray-400">PostgreSQL extension</div>
+            </div>
+          </div>
+          <span class="px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200">Not configured</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function settingsPage() {
+  return {
+    prefs: {
+      darkMode: false,
+      compactMode: false,
+      sidebarCollapsed: false,
+      editor: {
+        snapToGrid: true,
+        gridSize: 20,
+        autoSave: true,
+      },
+      lists: {
+        workflowsPerPage: 10,
+        executionsPerPage: 10,
+      },
+      notifications: {
+        showToasts: true,
+        toastDuration: 5000,
+        executionComplete: true,
+        executionFailed: true,
+      }
+    },
+
+    init() {
+      // Load preferences from global instance
+      if (window.userPreferences) {
+        this.prefs = {
+          darkMode: window.userPreferences.get('darkMode', false),
+          compactMode: window.userPreferences.get('compactMode', false),
+          sidebarCollapsed: window.userPreferences.get('sidebarCollapsed', false),
+          editor: {
+            snapToGrid: window.userPreferences.get('editor.snapToGrid', true),
+            gridSize: window.userPreferences.get('editor.gridSize', 20),
+            autoSave: window.userPreferences.get('editor.autoSave', true),
+          },
+          lists: {
+            workflowsPerPage: window.userPreferences.get('lists.workflowsPerPage', 10),
+            executionsPerPage: window.userPreferences.get('lists.executionsPerPage', 10),
+          },
+          notifications: {
+            showToasts: window.userPreferences.get('notifications.showToasts', true),
+            toastDuration: window.userPreferences.get('notifications.toastDuration', 5000),
+            executionComplete: window.userPreferences.get('notifications.executionComplete', true),
+            executionFailed: window.userPreferences.get('notifications.executionFailed', true),
+          }
+        };
+      }
+    },
+
+    togglePref(path) {
+      if (window.userPreferences) {
+        const newValue = window.userPreferences.toggle(path);
+        // Update local state
+        const parts = path.split('.');
+        let obj = this.prefs;
+        for (let i = 0; i < parts.length - 1; i++) {
+          obj = obj[parts[i]];
+        }
+        obj[parts[parts.length - 1]] = newValue;
+      }
+    },
+
+    setPref(path, value) {
+      if (window.userPreferences) {
+        window.userPreferences.set(path, value);
+      }
+    },
+
+    exportSettings() {
+      if (window.userPreferences) {
+        const json = window.userPreferences.export();
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'oxify-settings.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        // Show toast
+        htmx.ajax('GET', '/htmx/toast?message=Settings exported successfully&type=success', {
+          target: '#toast-container',
+          swap: 'beforeend',
+        });
+      }
+    },
+
+    importSettings(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        if (window.userPreferences && window.userPreferences.import(e.target.result)) {
+          // Reload page to apply all settings
+          htmx.ajax('GET', '/htmx/toast?message=Settings imported. Reloading...&type=success', {
+            target: '#toast-container',
+            swap: 'beforeend',
+          });
+          setTimeout(() => location.reload(), 1500);
+        } else {
+          htmx.ajax('GET', '/htmx/toast?message=Failed to import settings&type=error', {
+            target: '#toast-container',
+            swap: 'beforeend',
+          });
+        }
+      };
+      reader.readAsText(file);
+      event.target.value = '';
+    },
+
+    resetSettings() {
+      if (confirm('Are you sure you want to reset all settings to defaults?')) {
+        if (window.userPreferences) {
+          window.userPreferences.reset();
+          htmx.ajax('GET', '/htmx/toast?message=Settings reset to defaults. Reloading...&type=success', {
+            target: '#toast-container',
+            swap: 'beforeend',
+          });
+          setTimeout(() => location.reload(), 1500);
+        }
+      }
+    }
+  };
+}
+</script>
+{% endblock %}

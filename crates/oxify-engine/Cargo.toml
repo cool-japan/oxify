@@ -1,0 +1,59 @@
+[package]
+name = "oxify-engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Workflow execution engine for OxiFY - DAG orchestration, scheduling, and state management"
+repository = "https://github.com/cool-japan/oxify"
+categories = ["algorithms", "asynchronous", "concurrency"]
+keywords = ["workflow", "dag", "orchestration", "scheduler", "execution-engine"]
+
+[dependencies]
+oxify-model = { version = "0.1.0", path = "../oxify-model" }
+oxify-connect-llm = { version = "0.1.0", path = "../oxify-connect-llm" }
+oxify-connect-vector = { version = "0.1.0", path = "../oxify-connect-vector" }
+oxify-connect-vision = { version = "0.1.0", path = "../oxify-connect-vision" }
+oxify-mcp = { version = "0.1.0", path = "../oxify-mcp" }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+cron = { workspace = true }
+regex = "1.12"
+evalexpr = "13.1"
+serde_json_path = "0.7"
+rhai = { workspace = true }
+wasmer = { workspace = true, optional = true }
+reqwest = { workspace = true }
+futures = { workspace = true }
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+rand = { workspace = true }
+toml = { workspace = true }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+tokio-tungstenite = { version = "0.28", optional = true }
+url = "2.5"
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["async_tokio"] }
+tokio-test = "0.4"
+proptest = { workspace = true }
+
+[features]
+default = []
+wasm = ["wasmer"]
+otel = ["opentelemetry", "opentelemetry_sdk"]
+websocket = ["tokio-tungstenite"]
+
+[[bench]]
+name = "engine_bench"
+harness = false

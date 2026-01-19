@@ -1,0 +1,13 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: oxify-server-pdb
+  namespace: oxify
+  labels:
+    app: oxify-server
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: oxify-server
+  unhealthyPodEvictionPolicy: IfHealthyBudget

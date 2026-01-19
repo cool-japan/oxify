@@ -1,0 +1,79 @@
+[package]
+name = "oxify-connect-vision"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Vision/OCR connector for OxiFY workflows"
+repository = "https://github.com/cool-japan/oxify"
+categories = ["multimedia::images", "api-bindings", "computer-vision"]
+keywords = ["vision", "ocr", "image-processing", "computer-vision"]
+
+[dependencies]
+oxify-model = { version = "0.1.0", path = "../oxify-model" }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }
+
+# Image processing
+image = "0.25"
+imageproc = "0.26"
+ndarray = "0.17"
+
+# ONNX Runtime for Surya/PaddleOCR
+ort = { version = "2.0.0-rc.11", optional = true }
+
+# Tesseract OCR (using leptess which provides Tesseract bindings)
+leptess = { version = "0.14", optional = true }
+
+# Parallel processing
+rayon = { workspace = true }
+
+# Base64 encoding for image data
+base64 = "0.22"
+
+# UUID for temp file names
+uuid = { workspace = true }
+
+# CPU detection for batch processing
+num_cpus = { workspace = true }
+
+# Model downloading
+dirs = { workspace = true }
+sha2 = "0.10"
+reqwest = { workspace = true }
+
+# Configuration
+serde_yaml = "0.9"
+toml = { workspace = true }
+
+# Timestamps for benchmarking
+chrono = { workspace = true }
+
+[features]
+default = ["mock"]
+mock = []
+tesseract = ["leptess"]
+onnx = ["ort"]
+surya = ["onnx"]
+paddle = ["onnx"]
+google-vision = []
+cuda = []
+coreml = []
+redis = []
+sqlite = []
+all-providers = ["mock", "tesseract", "surya", "paddle", "google-vision"]
+all-features = ["all-providers", "redis", "sqlite", "cuda", "coreml"]
+
+[dev-dependencies]
+tokio-test = "0.4"
+criterion = { workspace = true, features = ["async_tokio"] }
+tempfile = { workspace = true }
+
+[[bench]]
+name = "vision_bench"
+harness = false

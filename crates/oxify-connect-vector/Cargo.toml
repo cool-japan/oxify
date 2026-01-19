@@ -1,0 +1,60 @@
+[package]
+name = "oxify-connect-vector"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Vector database connectors for OxiFY - Qdrant, in-memory vector search"
+repository = "https://github.com/cool-japan/oxify"
+categories = ["database", "api-bindings", "algorithms"]
+keywords = ["vector-database", "qdrant", "embeddings", "similarity-search"]
+
+[dependencies]
+oxify-model = { version = "0.1.0", path = "../oxify-model" }
+oxify-connect-llm = { version = "0.1.0", path = "../oxify-connect-llm", optional = true }
+oxify-vector = { version = "0.1.0", path = "../oxify-vector", optional = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+qdrant-client = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["async_tokio"] }
+
+[features]
+default = []
+embeddings = ["oxify-connect-llm"]
+simd = ["oxify-vector"]
+
+[[bench]]
+name = "vector_bench"
+harness = false
+
+[[bench]]
+name = "hybrid_bench"
+harness = false
+
+[[bench]]
+name = "cache_bench"
+harness = false
+
+[[bench]]
+name = "colbert_bench"
+harness = false
+
+[[bench]]
+name = "simd_bench"
+harness = false
+
+[[bench]]
+name = "sparse_bench"
+harness = false
+
+[[bench]]
+name = "parallel_bench"
+harness = false

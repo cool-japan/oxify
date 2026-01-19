@@ -1,0 +1,193 @@
+{
+  "metadata": {
+    "id": "660e8400-e29b-41d4-a716-446655440000",
+    "name": "Multimodal Intelligence Pipeline",
+    "description": "Advanced workflow combining Vision, LLM, and Vector search for intelligent document processing",
+    "version": "1.0.0",
+    "author": "OxiFY Team",
+    "tags": ["multimodal", "vision", "llm", "rag", "enterprise"]
+  },
+  "nodes": [
+    {
+      "id": "660e8400-e29b-41d4-a716-446655440001",
+      "name": "Start",
+      "kind": { "type": "Start" }
+    },
+    {
+      "id": "660e8400-e29b-41d4-a716-446655440002",
+      "name": "Document OCR",
+      "kind": {
+        "type": "Vision",
+        "config": {
+          "provider": "paddle",
+          "model_path": null,
+          "output_format": "json",
+          "use_gpu": true,
+          "language": "{{input.language}}",
+          "image_input": "{{input.document_image}}",
+          "options": { "detect_tables": true }
+        }
+      }
+    },
+    {
+      "id": "660e8400-e29b-41d4-a716-446655440003",
+      "name": "Check Document Type",
+      "kind": {
+        "type": "Switch",
+        "config": {
+          "expression": "{{ocr_result.detected_type}}",
+          "cases": [
+            { "value": "invoice", "target": "process_invoice" },
+            { "value": "receipt", "target": "process_receipt" },
+            { "value": "form", "target": "process_form" }
+          ],
+          "default_target": "process_generic"
+        }
+      }
+    },
+    {
+      "id": "660e8400-e29b-41d4-a716-446655440010",
+      "name": "Process Invoice",
+      "kind": {
+        "type": "LLM",
+        "config": {
+          "provider": "anthropic",
+          "model": "claude-3-5-sonnet",
+          "system_prompt": "Extract structured invoice data: vendor, date, items, amounts, tax, total.",
+          "prompt_template": "Extract invoice data from:\n{{ocr_result.text}}\n\nOutput as JSON.",
+          "temperature": 0.1,
+          "max_tokens": 2000,
+          "extra_params": null
+        }
+      }
+    },
+    {
+      "id": "660e8400-e29b-41d4-a716-446655440011",
+      "name": "Process Receipt",
+      "kind": {
+        "type": "LLM",
+        "config": {
+          "provider": "anthropic",
+          "model": "claude-3-5-sonnet",
+          "system_prompt": "Extract receipt data: store, date, items, prices, total.",
+          "prompt_template": "Extract receipt data from:\n{{ocr_result.text}}\n\nOutput as JSON.",
+          "temperature": 0.1,
+          "max_tokens": 1500,
+          "extra_params": null
+        }
+      }
+    },
+    {
+      "id": "660e8400-e29b-41d4-a716-446655440012",
+      "name": "Process Form",
+      "kind": {
+        "type": "LLM",
+        "config": {
+          "provider": "anthropic",
+          "model": "claude-3-5-sonnet",
+          "system_prompt": "Extract form fields and their values as key-value pairs.",
+          "prompt_template": "Extract form data from:\n{{ocr_result.text}}\n\nOutput as JSON.",
+          "temperature": 0.1,
+          "max_tokens": 2000,
+          "extra_params": null
+        }
+      }
+    },
+    {
+      "id": "660e8400-e29b-41d4-a716-446655440013",
+      "name": "Process Generic",
+      "kind": {
+        "type": "LLM",
+        "config": {
+          "provider": "openai",
+          "model": "gpt-4",
+          "system_prompt": "Summarize and extract key information from the document.",
+          "prompt_template": "Analyze document:\n{{ocr_result.text}}\n\nProvide summary and key points.",
+          "temperature": 0.3,
+          "max_tokens": 2000,
+          "extra_params": null
+        }
+      }
+    },
+    {
+      "id": "660e8400-e29b-41d4-a716-446655440020",
+      "name": "Parallel Processing",
+      "kind": {
+        "type": "Parallel",
+        "config": {
+          "branches": ["similarity_search", "entity_extraction"],
+          "wait_for_all": true
+        }
+      }
+    },
+    {
+      "id": "660e8400-e29b-41d4-a716-446655440021",
+      "name": "Find Similar Documents",
+      "kind": {
+        "type": "Retriever",
+        "config": {
+          "db_type": "qdrant",
+          "collection": "documents",
+          "query_template": "{{extracted_data.summary}}",
+          "top_k": 5,
+          "score_threshold": 0.7,
+          "extra_params": { "with_payload": true }
+        }
+      }
+    },
+    {
+      "id": "660e8400-e29b-41d4-a716-446655440022",
+      "name": "Extract Entities",
+      "kind": {
+        "type": "LLM",
+        "config": {
+          "provider": "openai",
+          "model": "gpt-4",
+          "system_prompt": "Extract named entities (people, organizations, dates, amounts, locations).",
+          "prompt_template": "Extract entities from:\n{{extracted_data.text}}\n\nOutput as JSON with entity types.",
+          "temperature": 0.0,
+          "max_tokens": 1000,
+          "extra_params": null
+        }
+      }
+    },
+    {
+      "id": "660e8400-e29b-41d4-a716-446655440030",
+      "name": "Aggregate Results",
+      "kind": {
+        "type": "Code",
+        "config": {
+          "language": "javascript",
+          "code": "const ocrResult = context.get('ocr_result');\nconst extracted = context.get('extracted_data');\nconst similar = context.get('similar_documents') || [];\nconst entities = context.get('entities') || {};\n\nreturn {\n  document_id: crypto.randomUUID(),\n  processed_at: new Date().toISOString(),\n  ocr: {\n    provider: ocrResult.provider,\n    confidence: ocrResult.metadata?.confidence || 0,\n    text_length: ocrResult.text.length\n  },\n  extracted_data: extracted,\n  similar_documents: similar.map(d => ({ id: d.id, score: d.score })),\n  entities: entities,\n  ready_for_storage: true\n};",
+          "timeout_ms": 5000
+        }
+      }
+    },
+    {
+      "id": "660e8400-e29b-41d4-a716-446655440040",
+      "name": "End",
+      "kind": { "type": "End" }
+    }
+  ],
+  "edges": [
+    { "from": "660e8400-e29b-41d4-a716-446655440001", "to": "660e8400-e29b-41d4-a716-446655440002" },
+    { "from": "660e8400-e29b-41d4-a716-446655440002", "to": "660e8400-e29b-41d4-a716-446655440003" },
+    { "from": "660e8400-e29b-41d4-a716-446655440003", "to": "660e8400-e29b-41d4-a716-446655440010", "condition": "invoice" },
+    { "from": "660e8400-e29b-41d4-a716-446655440003", "to": "660e8400-e29b-41d4-a716-446655440011", "condition": "receipt" },
+    { "from": "660e8400-e29b-41d4-a716-446655440003", "to": "660e8400-e29b-41d4-a716-446655440012", "condition": "form" },
+    { "from": "660e8400-e29b-41d4-a716-446655440003", "to": "660e8400-e29b-41d4-a716-446655440013", "condition": "default" },
+    { "from": "660e8400-e29b-41d4-a716-446655440010", "to": "660e8400-e29b-41d4-a716-446655440020" },
+    { "from": "660e8400-e29b-41d4-a716-446655440011", "to": "660e8400-e29b-41d4-a716-446655440020" },
+    { "from": "660e8400-e29b-41d4-a716-446655440012", "to": "660e8400-e29b-41d4-a716-446655440020" },
+    { "from": "660e8400-e29b-41d4-a716-446655440013", "to": "660e8400-e29b-41d4-a716-446655440020" },
+    { "from": "660e8400-e29b-41d4-a716-446655440020", "to": "660e8400-e29b-41d4-a716-446655440021" },
+    { "from": "660e8400-e29b-41d4-a716-446655440020", "to": "660e8400-e29b-41d4-a716-446655440022" },
+    { "from": "660e8400-e29b-41d4-a716-446655440021", "to": "660e8400-e29b-41d4-a716-446655440030" },
+    { "from": "660e8400-e29b-41d4-a716-446655440022", "to": "660e8400-e29b-41d4-a716-446655440030" },
+    { "from": "660e8400-e29b-41d4-a716-446655440030", "to": "660e8400-e29b-41d4-a716-446655440040" }
+  ],
+  "variables": {
+    "input.document_image": "base64_or_path",
+    "input.language": "en"
+  }
+}

@@ -1,0 +1,70 @@
+[package]
+name = "oxify-authz"
+version = "0.1.0"
+edition = "2021"
+authors = ["OxiFY Contributors"]
+license = "MIT OR Apache-2.0"
+description = "ReBAC (Relationship-Based Access Control) authorization engine - Google Zanzibar implementation"
+repository = "https://github.com/cool-japan/oxify"
+categories = ["authentication", "algorithms", "database-implementations"]
+keywords = ["authorization", "rebac", "zanzibar", "access-control", "permissions"]
+
+[dependencies]
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Graph algorithms for reachability
+petgraph = "0.8"
+
+# Caching for authorization checks
+moka = { version = "0.12", features = ["future"] }
+
+# Bloom filter for quick negative lookups
+bloomfilter = "3.0"
+
+# Concurrent execution for batch operations
+futures = { workspace = true }
+
+# Redis for L2 distributed cache
+redis = { version = "0.32", features = ["tokio-comp", "connection-manager"] }
+deadpool-redis = "0.22"
+
+# Audit logging integrity
+md5 = "0.8"
+
+# Random sampling for audit logging
+rand = { workspace = true }
+
+# gRPC server for high-performance authorization service
+tonic = { version = "0.14", optional = true }
+prost = { version = "0.14", optional = true }
+tonic-prost = { version = "0.14", optional = true }
+tokio-stream = { version = "0.1", features = ["sync"], optional = true }
+
+# Property-based testing support
+proptest = { workspace = true, optional = true }
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["async_tokio"] }
+rand = { workspace = true }
+proptest = { workspace = true }
+tokio-test = "0.4"
+
+[build-dependencies]
+tonic-prost-build = { version = "0.14", optional = true }
+
+[features]
+default = []
+grpc = ["tonic", "prost", "tonic-prost", "tonic-prost-build", "tokio-stream"]
+proptest-support = ["proptest"]
+
+[[bench]]
+name = "authz_bench"
+harness = false

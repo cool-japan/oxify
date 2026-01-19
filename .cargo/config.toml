@@ -1,0 +1,10 @@
+# Cargo configuration for the oxify workspace
+
+[alias]
+# Test all crates with safe features (no CUDA requirement)
+# Usage: cargo test-safe
+test-safe = "nextest run --workspace --exclude oxify-storage --exclude oxify-api --exclude oxify-server --exclude oxify-ui"
+
+# Test with all features except cuda (for machines without CUDA toolkit)
+# Usage: cargo test-all-safe
+test-all-safe = "nextest run --workspace --exclude oxify-storage --exclude oxify-api --exclude oxify-server --exclude oxify-ui -F oxify-vector/parallel -F oxify-vector/mmap -F oxify-vector/zerocopy -F oxify-vector/otel -F oxify-vector/fp16"

@@ -1,0 +1,94 @@
+{
+  "metadata": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Document OCR and Analysis Workflow",
+    "description": "Process a document image with OCR, extract text, and analyze with LLM",
+    "version": "1.0.0",
+    "author": "OxiFY Team",
+    "tags": ["ocr", "vision", "document-analysis", "llm"]
+  },
+  "nodes": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440001",
+      "name": "Start",
+      "kind": {
+        "type": "Start"
+      }
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440002",
+      "name": "OCR Processing",
+      "kind": {
+        "type": "Vision",
+        "config": {
+          "provider": "surya",
+          "model_path": null,
+          "output_format": "markdown",
+          "use_gpu": true,
+          "language": "en",
+          "image_input": "{{input.image_data}}",
+          "options": {}
+        }
+      }
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440003",
+      "name": "Document Analysis",
+      "kind": {
+        "type": "LLM",
+        "config": {
+          "provider": "openai",
+          "model": "gpt-4",
+          "system_prompt": "You are a document analysis expert. Analyze the extracted text and provide a structured summary.",
+          "prompt_template": "Please analyze the following document text extracted via OCR:\n\n{{ocr_result.markdown}}\n\nProvide:\n1. Document type (invoice, receipt, letter, form, etc.)\n2. Key information extracted\n3. Summary of content\n4. Any notable observations",
+          "temperature": 0.3,
+          "max_tokens": 2000,
+          "extra_params": null
+        }
+      }
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440004",
+      "name": "Output Formatter",
+      "kind": {
+        "type": "Code",
+        "config": {
+          "language": "javascript",
+          "code": "const ocrResult = context.get('ocr_result');\nconst analysis = context.get('analysis');\n\nreturn {\n  success: true,\n  document: {\n    raw_text: ocrResult.text,\n    formatted_markdown: ocrResult.markdown,\n    blocks: ocrResult.blocks,\n    analysis: analysis\n  },\n  metadata: {\n    ocr_provider: ocrResult.provider,\n    processing_time_ms: ocrResult.metadata?.processing_time_ms || 0\n  }\n};",
+          "timeout_ms": 5000
+        }
+      }
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440005",
+      "name": "End",
+      "kind": {
+        "type": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "550e8400-e29b-41d4-a716-446655440001",
+      "to": "550e8400-e29b-41d4-a716-446655440002"
+    },
+    {
+      "from": "550e8400-e29b-41d4-a716-446655440002",
+      "to": "550e8400-e29b-41d4-a716-446655440003",
+      "condition": null
+    },
+    {
+      "from": "550e8400-e29b-41d4-a716-446655440003",
+      "to": "550e8400-e29b-41d4-a716-446655440004",
+      "condition": null
+    },
+    {
+      "from": "550e8400-e29b-41d4-a716-446655440004",
+      "to": "550e8400-e29b-41d4-a716-446655440005",
+      "condition": null
+    }
+  ],
+  "variables": {
+    "input.image_data": "base64_encoded_image_or_file_path"
+  }
+}

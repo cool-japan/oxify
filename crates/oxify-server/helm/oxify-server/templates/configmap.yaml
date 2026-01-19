@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oxify-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oxify-server.labels" . | nindent 4 }}
+data:
+  qdrant-url: {{ .Values.config.qdrantUrl | quote }}
+  log-level: {{ .Values.config.logLevel | quote }}
+  host: {{ .Values.config.host | quote }}
+  port: {{ .Values.config.port | quote }}
+  rate-limit-requests: {{ .Values.config.rateLimitRequests | quote }}
+  rate-limit-window: {{ .Values.config.rateLimitWindow | quote }}
+  max-request-size: {{ .Values.config.maxRequestSize | quote }}
+  request-timeout: {{ .Values.config.requestTimeout | quote }}
+  cache-size: {{ .Values.config.cacheSize | quote }}
+  cache-ttl: {{ .Values.config.cacheTtl | quote }}
+  db-pool-max-connections: {{ .Values.config.dbPoolMaxConnections | quote }}
+  db-pool-min-connections: {{ .Values.config.dbPoolMinConnections | quote }}

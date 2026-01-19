@@ -1,0 +1,353 @@
+<div class="space-y-4" x-data="nodeFormData()" x-init="initForm()">
+  <input type="hidden" name="node_type" :value="nodeType">
+
+  {% if node_type == "llm" %}
+  <!-- LLM Node Configuration -->
+  <div>
+    <label for="provider" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Provider</label>
+    <select name="provider" id="provider" x-model="config.provider" @change="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6">
+      <option value="">Select provider...</option>
+      <option value="openai">OpenAI</option>
+      <option value="anthropic">Anthropic</option>
+      <option value="azure">Azure OpenAI</option>
+      <option value="google">Google AI</option>
+      <option value="ollama">Ollama (Local)</option>
+    </select>
+  </div>
+  <div>
+    <label for="model" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Model</label>
+    <select name="model" id="model" x-model="config.model" @change="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6">
+      <option value="">Select model...</option>
+      <template x-if="config.provider === 'openai'">
+        <template x-for="m in ['gpt-4o', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo']">
+          <option :value="m" x-text="m"></option>
+        </template>
+      </template>
+      <template x-if="config.provider === 'anthropic'">
+        <template x-for="m in ['claude-opus-4-5-20251101', 'claude-sonnet-4-20250514', 'claude-3-7-sonnet-20250219', 'claude-3-5-haiku-20241022']">
+          <option :value="m" x-text="m"></option>
+        </template>
+      </template>
+      <template x-if="config.provider === 'google'">
+        <template x-for="m in ['gemini-2.0-flash-exp', 'gemini-1.5-pro', 'gemini-1.5-flash']">
+          <option :value="m" x-text="m"></option>
+        </template>
+      </template>
+      <template x-if="config.provider === 'ollama'">
+        <template x-for="m in ['llama3.3', 'llama3.2', 'mistral', 'mixtral', 'phi3', 'qwen2.5']">
+          <option :value="m" x-text="m"></option>
+        </template>
+      </template>
+    </select>
+  </div>
+  <div>
+    <label for="system_prompt" class="block text-sm font-medium text-gray-700 dark:text-gray-200">System Prompt</label>
+    <textarea name="system_prompt" id="system_prompt" rows="3" x-model="config.system_prompt" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6 font-mono" placeholder="You are a helpful assistant..."></textarea>
+  </div>
+  <div>
+    <label for="prompt_template" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Prompt Template</label>
+    <textarea name="prompt_template" id="prompt_template" rows="3" x-model="config.prompt_template" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6 font-mono" placeholder="{% raw %}{{input}}{% endraw %}"></textarea>
+    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Use {% raw %}{{variable}}{% endraw %} for template variables</p>
+  </div>
+  <div class="grid grid-cols-2 gap-4">
+    <div>
+      <label for="temperature" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Temperature</label>
+      <input type="number" name="temperature" id="temperature" min="0" max="2" step="0.1" x-model.number="config.temperature" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="0.7">
+    </div>
+    <div>
+      <label for="max_tokens" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Max Tokens</label>
+      <input type="number" name="max_tokens" id="max_tokens" min="1" max="128000" x-model.number="config.max_tokens" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="4096">
+    </div>
+  </div>
+
+  {% else if node_type == "retriever" %}
+  <!-- Retriever Node Configuration -->
+  <div>
+    <label for="db_type" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Database Type</label>
+    <select name="db_type" id="db_type" x-model="config.db_type" @change="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6">
+      <option value="">Select database...</option>
+      <option value="qdrant">Qdrant</option>
+      <option value="pinecone">Pinecone</option>
+      <option value="weaviate">Weaviate</option>
+      <option value="chroma">Chroma</option>
+      <option value="milvus">Milvus</option>
+      <option value="pgvector">PostgreSQL (pgvector)</option>
+    </select>
+  </div>
+  <div>
+    <label for="collection" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Collection</label>
+    <input type="text" name="collection" id="collection" x-model="config.collection" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="my_collection">
+  </div>
+  <div>
+    <label for="query_template" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Query Template</label>
+    <input type="text" name="query_template" id="query_template" x-model="config.query_template" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6 font-mono" placeholder="{% raw %}{{input}}{% endraw %}">
+  </div>
+  <div class="grid grid-cols-2 gap-4">
+    <div>
+      <label for="top_k" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Top K Results</label>
+      <input type="number" name="top_k" id="top_k" min="1" max="100" x-model.number="config.top_k" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="5">
+    </div>
+    <div>
+      <label for="score_threshold" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Score Threshold</label>
+      <input type="number" name="score_threshold" id="score_threshold" min="0" max="1" step="0.01" x-model.number="config.score_threshold" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="0.7">
+    </div>
+  </div>
+
+  {% else if node_type == "code" %}
+  <!-- Code Node Configuration -->
+  <div>
+    <label for="runtime" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Runtime</label>
+    <select name="runtime" id="runtime" x-model="config.runtime" @change="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6">
+      <option value="python">Python</option>
+      <option value="javascript">JavaScript</option>
+      <option value="rhai">Rhai (Embedded)</option>
+    </select>
+  </div>
+  <div>
+    <label for="code" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Code</label>
+    <textarea name="code" id="code" rows="8" x-model="config.code" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6 font-mono text-xs" placeholder="def process(input):&#10;    return input"></textarea>
+  </div>
+  <div>
+    <label for="input_vars" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Input Variables</label>
+    <input type="text" name="input_vars" id="input_vars" x-model="config.input_vars" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6 font-mono" placeholder="input, context">
+    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Comma-separated list of input variables</p>
+  </div>
+  <div>
+    <label for="output_var" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Output Variable</label>
+    <input type="text" name="output_var" id="output_var" x-model="config.output_var" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6 font-mono" placeholder="result">
+  </div>
+
+  {% else if node_type == "conditional" %}
+  <!-- Conditional Node Configuration -->
+  <div>
+    <label for="expression" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Condition Expression</label>
+    <input type="text" name="expression" id="expression" x-model="config.expression" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6 font-mono" placeholder="input.score > 0.8">
+    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">JavaScript expression that evaluates to true/false</p>
+  </div>
+  <div>
+    <label for="true_output" class="block text-sm font-medium text-gray-700 dark:text-gray-200">True Output Port</label>
+    <input type="text" name="true_output" id="true_output" x-model="config.true_output" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="yes" value="yes">
+  </div>
+  <div>
+    <label for="false_output" class="block text-sm font-medium text-gray-700 dark:text-gray-200">False Output Port</label>
+    <input type="text" name="false_output" id="false_output" x-model="config.false_output" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="no" value="no">
+  </div>
+
+  {% else if node_type == "tool" %}
+  <!-- Tool Node Configuration -->
+  <div>
+    <label for="server_id" class="block text-sm font-medium text-gray-700 dark:text-gray-200">MCP Server ID</label>
+    <input type="text" name="server_id" id="server_id" x-model="config.server_id" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="mcp-server-1">
+  </div>
+  <div>
+    <label for="tool_name" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Tool Name</label>
+    <input type="text" name="tool_name" id="tool_name" x-model="config.tool_name" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="search_web">
+  </div>
+  <div>
+    <label for="parameters" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Parameters (JSON)</label>
+    <textarea name="parameters" id="parameters" rows="4" x-model="config.parameters" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6 font-mono text-xs" placeholder='{% raw %}{"query": "{{input}}"}{% endraw %}'></textarea>
+  </div>
+
+  {% else if node_type == "loop" %}
+  <!-- Loop Node Configuration -->
+  <div>
+    <label for="loop_type" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Loop Type</label>
+    <select name="loop_type" id="loop_type" x-model="config.loop_type" @change="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6">
+      <option value="for_each">For Each (iterate over collection)</option>
+      <option value="while">While (condition-based)</option>
+      <option value="count">Count (fixed iterations)</option>
+    </select>
+  </div>
+  <div x-show="config.loop_type === 'for_each' || config.loop_type === ''">
+    <label for="collection_path" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Collection Path</label>
+    <input type="text" name="collection_path" id="collection_path" x-model="config.collection_path" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6 font-mono" placeholder="input.items">
+  </div>
+  <div>
+    <label for="item_variable" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Item Variable</label>
+    <input type="text" name="item_variable" id="item_variable" x-model="config.item_variable" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="item">
+  </div>
+  <div>
+    <label for="max_iterations" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Max Iterations</label>
+    <input type="number" name="max_iterations" id="max_iterations" min="1" max="10000" x-model.number="config.max_iterations" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="100">
+  </div>
+
+  {% else if node_type == "parallel" %}
+  <!-- Parallel Node Configuration -->
+  <div>
+    <label for="strategy" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Strategy</label>
+    <select name="strategy" id="strategy" x-model="config.strategy" @change="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6">
+      <option value="all">Wait for All</option>
+      <option value="any">First to Complete</option>
+      <option value="race">Race (cancel others)</option>
+    </select>
+  </div>
+  <div>
+    <label for="max_concurrency" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Max Concurrency</label>
+    <input type="number" name="max_concurrency" id="max_concurrency" min="1" max="100" x-model.number="config.max_concurrency" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="10">
+  </div>
+
+  {% else if node_type == "switch" %}
+  <!-- Switch Node Configuration -->
+  <div>
+    <label for="switch_on" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Switch Expression</label>
+    <input type="text" name="switch_on" id="switch_on" x-model="config.switch_on" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6 font-mono" placeholder="input.type">
+  </div>
+  <div>
+    <label class="block text-sm font-medium text-gray-700 dark:text-gray-200">Cases</label>
+    <div class="mt-2 space-y-2">
+      <template x-for="(case_, index) in config.cases || []" :key="index">
+        <div class="flex items-center gap-2">
+          <input type="text" x-model="case_.value" @input="updateConfig()" class="flex-1 rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="case value">
+          <button type="button" @click="removeCase(index)" class="text-red-500 hover:text-red-700">
+            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 10.23 1.482l.149-.022.841 10.518A2.75 2.75 0 007.596 19h4.807a2.75 2.75 0 002.742-2.53l.841-10.519.149.023a.75.75 0 00.23-1.482A41.03 41.03 0 0014 4.193V3.75A2.75 2.75 0 0011.25 1h-2.5z" clip-rule="evenodd" /></svg>
+          </button>
+        </div>
+      </template>
+      <button type="button" @click="addCase()" class="text-sm text-primary-600 hover:text-primary-700">+ Add case</button>
+    </div>
+  </div>
+
+  {% else if node_type == "approval" %}
+  <!-- Approval Node Configuration -->
+  <div>
+    <label for="approval_message" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Approval Message</label>
+    <input type="text" name="approval_message" id="approval_message" x-model="config.message" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="Please review and approve">
+  </div>
+  <div>
+    <label for="approval_description" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Description</label>
+    <textarea name="approval_description" id="approval_description" rows="3" x-model="config.description" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="Detailed description of what needs to be approved..."></textarea>
+  </div>
+  <div>
+    <label for="timeout_seconds" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Timeout (seconds)</label>
+    <input type="number" name="timeout_seconds" id="timeout_seconds" min="0" x-model.number="config.timeout_seconds" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="0 for no timeout">
+  </div>
+
+  {% else if node_type == "form" %}
+  <!-- Form Node Configuration -->
+  <div>
+    <label for="form_title" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Form Title</label>
+    <input type="text" name="form_title" id="form_title" x-model="config.title" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="User Input Form">
+  </div>
+  <div>
+    <label for="form_description" class="block text-sm font-medium text-gray-700 dark:text-gray-200">Description</label>
+    <textarea name="form_description" id="form_description" rows="2" x-model="config.description" @input="updateConfig()" class="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="Instructions for the user..."></textarea>
+  </div>
+  <div>
+    <label class="block text-sm font-medium text-gray-700 dark:text-gray-200">Form Fields</label>
+    <div class="mt-2 space-y-2">
+      <template x-for="(field, index) in config.fields || []" :key="index">
+        <div class="flex items-center gap-2">
+          <input type="text" x-model="field.name" @input="updateConfig()" class="w-1/3 rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6" placeholder="field_name">
+          <select x-model="field.type" @change="updateConfig()" class="w-1/3 rounded-md border-0 py-1.5 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6">
+            <option value="text">Text</option>
+            <option value="textarea">Textarea</option>
+            <option value="number">Number</option>
+            <option value="checkbox">Checkbox</option>
+            <option value="select">Select</option>
+          </select>
+          <button type="button" @click="removeField(index)" class="text-red-500 hover:text-red-700">
+            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 10.23 1.482l.149-.022.841 10.518A2.75 2.75 0 007.596 19h4.807a2.75 2.75 0 002.742-2.53l.841-10.519.149.023a.75.75 0 00.23-1.482A41.03 41.03 0 0014 4.193V3.75A2.75 2.75 0 0011.25 1h-2.5z" clip-rule="evenodd" /></svg>
+          </button>
+        </div>
+      </template>
+      <button type="button" @click="addField()" class="text-sm text-primary-600 hover:text-primary-700">+ Add field</button>
+    </div>
+  </div>
+
+  {% else %}
+  <!-- Default/Start/End Node (minimal config) -->
+  <p class="text-sm text-gray-500 dark:text-gray-400">
+    {% if node_type == "start" %}
+    Start nodes mark the entry point of your workflow. Connect it to the first processing node.
+    {% else if node_type == "end" %}
+    End nodes mark exit points of your workflow. Connect processing nodes to reach completion.
+    {% else %}
+    No additional configuration required for this node type.
+    {% endif %}
+  </p>
+  {% endif %}
+
+  <!-- Validation result -->
+  <div id="node-validation-result" class="text-sm"></div>
+</div>
+
+<script>
+function nodeFormData() {
+  return {
+    nodeType: '{{ node_type }}',
+    config: {},
+
+    initForm() {
+      // Get the parent Alpine component's selectedNode
+      const parentScope = Alpine.closestDataStack(this.$el)[1];
+      if (parentScope && parentScope.selectedNode && parentScope.selectedNode.config) {
+        this.config = JSON.parse(JSON.stringify(parentScope.selectedNode.config));
+      }
+
+      // Initialize default values based on node type
+      this.initDefaults();
+    },
+
+    initDefaults() {
+      {% if node_type == "llm" %}
+      if (!this.config.temperature) this.config.temperature = 0.7;
+      if (!this.config.max_tokens) this.config.max_tokens = 4096;
+      {% else if node_type == "retriever" %}
+      if (!this.config.top_k) this.config.top_k = 5;
+      if (!this.config.score_threshold) this.config.score_threshold = 0.7;
+      {% else if node_type == "code" %}
+      if (!this.config.runtime) this.config.runtime = 'python';
+      {% else if node_type == "conditional" %}
+      if (!this.config.true_output) this.config.true_output = 'yes';
+      if (!this.config.false_output) this.config.false_output = 'no';
+      {% else if node_type == "loop" %}
+      if (!this.config.loop_type) this.config.loop_type = 'for_each';
+      if (!this.config.max_iterations) this.config.max_iterations = 100;
+      {% else if node_type == "parallel" %}
+      if (!this.config.strategy) this.config.strategy = 'all';
+      if (!this.config.max_concurrency) this.config.max_concurrency = 10;
+      {% else if node_type == "switch" %}
+      if (!this.config.cases) this.config.cases = [];
+      {% else if node_type == "form" %}
+      if (!this.config.fields) this.config.fields = [];
+      {% endif %}
+    },
+
+    updateConfig() {
+      // Update parent component's selectedNode.config
+      const parentScope = Alpine.closestDataStack(this.$el)[1];
+      if (parentScope && parentScope.selectedNode) {
+        parentScope.selectedNode.config = JSON.parse(JSON.stringify(this.config));
+        // Trigger onChange in the editor
+        if (parentScope.editor) {
+          parentScope.editor.onChange(parentScope.editor.getData());
+        }
+      }
+    },
+
+    // Switch node helpers
+    addCase() {
+      if (!this.config.cases) this.config.cases = [];
+      this.config.cases.push({ value: '' });
+      this.updateConfig();
+    },
+
+    removeCase(index) {
+      this.config.cases.splice(index, 1);
+      this.updateConfig();
+    },
+
+    // Form node helpers
+    addField() {
+      if (!this.config.fields) this.config.fields = [];
+      this.config.fields.push({ name: '', type: 'text' });
+      this.updateConfig();
+    },
+
+    removeField(index) {
+      this.config.fields.splice(index, 1);
+      this.updateConfig();
+    }
+  };
+}
+</script>

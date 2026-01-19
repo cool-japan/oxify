@@ -1,0 +1,88 @@
+[package]
+name = "oxify-authn"
+version = "0.1.0"
+edition = "2021"
+authors = ["OxiFY Contributors"]
+license = "MIT OR Apache-2.0"
+description = "Authentication module for OxiFY - JWT, OAuth2, SAML, LDAP support (ported from OxiRS)"
+repository = "https://github.com/cool-japan/oxify"
+categories = ["authentication", "web-programming", "cryptography"]
+keywords = ["jwt", "oauth2", "saml", "ldap", "authentication"]
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+
+# Authentication
+jsonwebtoken = { version = "10.2", features = ["rust_crypto"] }
+oauth2 = "5.0"
+reqwest = { workspace = true }
+
+# Password hashing
+argon2 = { version = "0.5", features = ["std"] }
+bcrypt = "0.18"
+
+# TOTP for MFA (optional)
+totp-rs = { version = "5.7", features = ["gen_secret", "otpauth"], optional = true }
+
+# Random number generation
+rand = { workspace = true }
+
+# Base64 encoding
+base64 = "0.22"
+
+# UUID generation
+uuid = { workspace = true }
+
+# URL encoding
+percent-encoding = "2.3"
+
+# SHA256 for PKCE
+sha2 = "0.10"
+
+# SAML 2.0 support (optional)
+quick-xml = { version = "0.38", features = ["serialize"], optional = true }
+flate2 = { version = "1.1", optional = true }
+url = { version = "2.5", optional = true }
+
+# LDAP support (optional)
+ldap3 = { version = "0.12", optional = true }
+
+# WebAuthn/FIDO2 support (optional)
+webauthn-rs = { version = "0.5", optional = true }
+webauthn-rs-proto = { version = "0.5", optional = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+criterion = { workspace = true }
+
+[[bench]]
+name = "auth_benchmarks"
+harness = false
+
+[features]
+default = ["jwt", "oauth", "password"]
+jwt = []
+oauth = []
+saml = ["quick-xml", "flate2", "url"]
+ldap = ["ldap3"]
+password = []
+mfa = ["totp-rs"]
+session = []
+revocation = []
+ratelimit = []
+webauthn = ["webauthn-rs", "webauthn-rs-proto", "url"]
+risk = []
+rotation = []
+apikey = []
+metrics = []
+cert = []
+idp = ["oauth"]
+ai = []

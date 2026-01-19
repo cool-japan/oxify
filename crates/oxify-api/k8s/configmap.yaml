@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oxify-api-config
+  namespace: oxify
+  labels:
+    app: oxify-api
+data:
+  # Server configuration
+  HOST: "0.0.0.0"
+  PORT: "8080"
+  RUST_LOG: "info"
+
+  # Database configuration
+  DATABASE_URL: "postgres://oxify:password@postgres-service:5432/oxify"
+  DATABASE_MAX_CONNECTIONS: "20"
+
+  # Redis configuration
+  REDIS_URL: "redis://:password@redis-service:6379"
+  REDIS_MAX_CONNECTIONS: "20"
+
+  # Qdrant configuration
+  QDRANT_URL: "http://qdrant-service:6334"
+
+  # OpenTelemetry configuration
+  OTEL_ENABLED: "true"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger-service:4317"
+  OTEL_SAMPLE_RATIO: "0.1"
+
+  # Rate limiting
+  RATE_LIMIT_REQUESTS_PER_MINUTE: "500"
+
+  # JWT configuration
+  JWT_EXPIRY_SECONDS: "3600"

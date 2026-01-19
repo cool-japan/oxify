@@ -1,0 +1,243 @@
+{% extends "layouts/base.html" %}
+
+{% block title %}{{ title }} - OxiFY{% endblock %}
+
+{% block head %}
+<script src="/static/js/dag-editor.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="space-y-6" hx-ext="sse" sse-connect="/sse/executions/{{ execution_id }}" x-data="executionDetail()">
+  <!-- Header -->
+  <div class="sm:flex sm:items-center sm:justify-between">
+    <div>
+      <nav class="flex" aria-label="Breadcrumb">
+        <ol role="list" class="flex items-center space-x-2">
+          <li><a href="/executions" class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">Executions</a></li>
+          <li><svg class="h-5 w-5 flex-shrink-0 text-gray-300 dark:text-gray-600" fill="currentColor" viewBox="0 0 20 20"><path d="M5.555 17.776l8-16 .894.448-8 16-.894-.448z" /></svg></li>
+          <li><span class="text-sm font-medium text-gray-900 dark:text-white">{{ execution_id }}</span></li>
+        </ol>
+      </nav>
+      <h1 class="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{{ workflow_name }}</h1>
+    </div>
+    <div class="mt-4 sm:mt-0 flex gap-3">
+      <!-- Export dropdown -->
+      <div class="relative" x-data="{ open: false }">
+        <button type="button" @click="open = !open" class="inline-flex items-center rounded-md bg-white dark:bg-gray-700 px-3 py-2 text-sm font-semibold text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600">
+          <svg class="-ml-0.5 mr-1.5 h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M10.75 2.75a.75.75 0 00-1.5 0v8.614L6.295 8.235a.75.75 0 10-1.09 1.03l4.25 4.5a.75.75 0 001.09 0l4.25-4.5a.75.75 0 00-1.09-1.03l-2.955 3.129V2.75z" />
+            <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
+          </svg>
+          Export
+          <svg class="ml-1.5 h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+          </svg>
+        </button>
+        <div x-show="open" @click.away="open = false" x-cloak class="absolute right-0 z-10 mt-2 w-48 origin-top-right rounded-md bg-white dark:bg-gray-700 shadow-lg ring-1 ring-black ring-opacity-5">
+          <div class="py-1">
+            <button @click="exportResults('json'); open = false" class="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600">
+              Export as JSON
+            </button>
+            <button @click="exportResults('csv'); open = false" class="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600">
+              Export as CSV
+            </button>
+            <button @click="exportLogs('txt'); open = false" class="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600">
+              Export logs as TXT
+            </button>
+          </div>
+        </div>
+      </div>
+      {% if status == "running" %}
+      <button type="button" class="inline-flex items-center rounded-md bg-yellow-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-yellow-500" hx-post="/api/v1/executions/{{ execution_id }}/pause" hx-swap="none">
+        <svg class="-ml-0.5 mr-1.5 h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M5.75 3a.75.75 0 00-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 00.75-.75V3.75A.75.75 0 007.25 3h-1.5zM12.75 3a.75.75 0 00-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 00.75-.75V3.75a.75.75 0 00-.75-.75h-1.5z" />
+        </svg>
+        Pause
+      </button>
+      <button type="button" class="inline-flex items-center rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500" hx-post="/api/v1/executions/{{ execution_id }}/cancel" hx-swap="none">
+        <svg class="-ml-0.5 mr-1.5 h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd" />
+        </svg>
+        Cancel
+      </button>
+      {% else if status == "paused" %}
+      <button type="button" class="inline-flex items-center rounded-md bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-500" hx-post="/api/v1/executions/{{ execution_id }}/resume" hx-swap="none">
+        <svg class="-ml-0.5 mr-1.5 h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
+        </svg>
+        Resume
+      </button>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Status panel (SSE updates) -->
+  <div id="execution-status" sse-swap="message" class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+    <div class="flex items-center gap-4">
+      <div class="flex-1">
+        <div class="flex justify-between text-sm mb-1">
+          <span class="font-medium text-gray-900 dark:text-white">Progress</span>
+          <span class="text-gray-500 dark:text-gray-400">{{ progress }}%</span>
+        </div>
+        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+          <div class="bg-blue-500 h-2 rounded-full transition-all duration-300" style="width: {{ progress }}%"></div>
+        </div>
+      </div>
+      <span class="px-2 py-1 text-xs font-medium rounded-full {% if status == "running" %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% else if status == "completed" %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200{% else if status == "failed" %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200{% else %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200{% endif %}">{{ status }}</span>
+    </div>
+    <div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+      Started: {{ started_at }}
+    </div>
+  </div>
+
+  <!-- Main content -->
+  <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+    <!-- DAG visualization with execution status -->
+    <div class="lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg shadow">
+      <div class="p-6">
+        <h2 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Execution Graph</h2>
+        <div class="aspect-video bg-gray-50 dark:bg-gray-900 rounded-lg" hx-get="/htmx/executions/{{ execution_id }}/graph" hx-trigger="load, every 2s" hx-swap="innerHTML">
+          <!-- DAG with execution status will be loaded here -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Logs -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
+      <div class="p-6">
+        <h2 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Logs</h2>
+        <div id="execution-logs" class="h-[400px] overflow-y-auto bg-gray-50 dark:bg-gray-900 rounded-lg p-3 font-mono text-xs" hx-get="/htmx/executions/{{ execution_id }}/logs" hx-trigger="load, every 2s" hx-swap="innerHTML">
+          <!-- Logs will be loaded here -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Node results -->
+  <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
+    <div class="p-6">
+      <h2 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Node Results</h2>
+      <div id="node-results" hx-get="/htmx/executions/{{ execution_id }}/results" hx-trigger="load, every 5s" hx-swap="innerHTML">
+        <!-- Node results will be loaded here -->
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function executionDetail() {
+  return {
+    exportResults(format) {
+      const executionId = '{{ execution_id }}';
+      const workflowName = '{{ workflow_name }}'.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+
+      // Mock execution data (in production, fetch from API)
+      const mockData = {
+        execution_id: executionId,
+        workflow_name: '{{ workflow_name }}',
+        status: '{{ status }}',
+        progress: {{ progress }},
+        started_at: '{{ started_at }}',
+        node_results: [
+          { node_id: 'start_1', node_name: 'Start', status: 'completed', output: 'Started workflow' },
+          { node_id: 'llm_1', node_name: 'Process Input', status: 'completed', output: 'Processed user input' },
+          { node_id: 'end_1', node_name: 'End', status: 'pending', output: null }
+        ],
+        variables: {
+          user_input: 'Hello',
+          context: 'Test execution'
+        }
+      };
+
+      if (format === 'json') {
+        this.exportAsJSON(mockData, workflowName);
+      } else if (format === 'csv') {
+        this.exportAsCSV(mockData, workflowName);
+      }
+    },
+
+    exportAsJSON(data, filename) {
+      const json = JSON.stringify(data, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${filename}_execution_${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      htmx.ajax('GET', '/htmx/toast?message=Exported execution results as JSON&type=success', {
+        target: '#toast-container',
+        swap: 'beforeend',
+      });
+    },
+
+    exportAsCSV(data, filename) {
+      // CSV headers
+      const headers = ['Node ID', 'Node Name', 'Status', 'Output'];
+      const rows = [headers.join(',')];
+
+      // Add node results
+      data.node_results.forEach(result => {
+        const row = [
+          result.node_id,
+          result.node_name,
+          result.status,
+          (result.output || '').replace(/,/g, ';').replace(/"/g, '""')
+        ];
+        rows.push(row.map(cell => `"${cell}"`).join(','));
+      });
+
+      const csv = rows.join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${filename}_execution_${Date.now()}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      htmx.ajax('GET', '/htmx/toast?message=Exported execution results as CSV&type=success', {
+        target: '#toast-container',
+        swap: 'beforeend',
+      });
+    },
+
+    exportLogs(format) {
+      const workflowName = '{{ workflow_name }}'.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+
+      // Mock log data (in production, fetch from API)
+      const mockLogs = [
+        '[2026-01-15 10:30:00] INFO: Workflow started',
+        '[2026-01-15 10:30:01] INFO: Node "start" completed',
+        '[2026-01-15 10:30:02] INFO: Node "llm_node_1" started',
+        '[2026-01-15 10:30:15] DEBUG: LLM response received (456 tokens)',
+        '[2026-01-15 10:30:15] INFO: Node "llm_node_1" completed'
+      ];
+
+      const logsText = mockLogs.join('\n');
+      const blob = new Blob([logsText], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${workflowName}_logs_${Date.now()}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      htmx.ajax('GET', '/htmx/toast?message=Exported logs as TXT&type=success', {
+        target: '#toast-container',
+        swap: 'beforeend',
+      });
+    }
+  };
+}
+</script>
+{% endblock %}

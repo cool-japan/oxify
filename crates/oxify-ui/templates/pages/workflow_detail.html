@@ -1,0 +1,83 @@
+{% extends "layouts/base.html" %}
+
+{% block title %}{{ title }} - OxiFY{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <!-- Header -->
+  <div class="sm:flex sm:items-center sm:justify-between">
+    <div>
+      <nav class="flex" aria-label="Breadcrumb">
+        <ol role="list" class="flex items-center space-x-2">
+          <li><a href="/workflows" class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">Workflows</a></li>
+          <li><svg class="h-5 w-5 flex-shrink-0 text-gray-300 dark:text-gray-600" fill="currentColor" viewBox="0 0 20 20"><path d="M5.555 17.776l8-16 .894.448-8 16-.894-.448z" /></svg></li>
+          <li><span class="text-sm font-medium text-gray-900 dark:text-white">{{ workflow_name }}</span></li>
+        </ol>
+      </nav>
+      <h1 class="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{{ workflow_name }}</h1>
+      {% if workflow_description.is_some() %}
+      <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ workflow_description.as_ref().unwrap() }}</p>
+      {% endif %}
+    </div>
+    <div class="mt-4 sm:mt-0 flex gap-3">
+      <a href="/workflows/{{ workflow_id }}/edit" class="inline-flex items-center rounded-md bg-white dark:bg-gray-700 px-3 py-2 text-sm font-semibold text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600">
+        <svg class="-ml-0.5 mr-1.5 h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M2.695 14.763l-1.262 3.154a.5.5 0 00.65.65l3.155-1.262a4 4 0 001.343-.885L17.5 5.5a2.121 2.121 0 00-3-3L3.58 13.42a4 4 0 00-.885 1.343z" />
+        </svg>
+        Edit
+      </a>
+      <button type="button" class="inline-flex items-center rounded-md bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500" hx-post="/api/v1/workflows/{{ workflow_id }}/execute" hx-swap="none">
+        <svg class="-ml-0.5 mr-1.5 h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
+        </svg>
+        Run
+      </button>
+    </div>
+  </div>
+
+  <!-- Stats & Preview -->
+  <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+    <!-- DAG Preview -->
+    <div class="lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg shadow">
+      <div class="p-6">
+        <h2 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Workflow Graph</h2>
+        <div class="aspect-video bg-gray-50 dark:bg-gray-900 rounded-lg" hx-get="/htmx/workflows/{{ workflow_id }}/preview" hx-trigger="load">
+          <!-- SVG preview will be loaded here -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Info -->
+    <div class="space-y-6">
+      <!-- Stats -->
+      <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <h2 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Details</h2>
+        <dl class="space-y-3">
+          <div class="flex justify-between">
+            <dt class="text-sm text-gray-500 dark:text-gray-400">Nodes</dt>
+            <dd class="text-sm font-medium text-gray-900 dark:text-white">{{ node_count }}</dd>
+          </div>
+          <div class="flex justify-between">
+            <dt class="text-sm text-gray-500 dark:text-gray-400">Edges</dt>
+            <dd class="text-sm font-medium text-gray-900 dark:text-white">{{ edge_count }}</dd>
+          </div>
+          <div class="flex justify-between">
+            <dt class="text-sm text-gray-500 dark:text-gray-400">Last Run</dt>
+            <dd class="text-sm font-medium text-gray-900 dark:text-white">{% match last_executed %}{% when Some with (val) %}{{ val }}{% when None %}Never{% endmatch %}</dd>
+          </div>
+        </dl>
+      </div>
+
+      <!-- Recent Executions -->
+      <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <h2 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Recent Executions</h2>
+        <div hx-get="/htmx/workflows/{{ workflow_id }}/executions" hx-trigger="load" class="space-y-2">
+          <div class="animate-pulse h-8 bg-gray-200 dark:bg-gray-700 rounded"></div>
+          <div class="animate-pulse h-8 bg-gray-200 dark:bg-gray-700 rounded"></div>
+          <div class="animate-pulse h-8 bg-gray-200 dark:bg-gray-700 rounded"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

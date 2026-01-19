@@ -1,0 +1,233 @@
+{% extends "layouts/base.html" %}
+
+{% block title %}Search Results - OxiFY{% endblock %}
+
+{% block content %}
+<div class="space-y-6" x-data="searchPage()">
+  <!-- Header -->
+  <div>
+    <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Search Results</h1>
+    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+      <span x-show="query">Found results for "<span x-text="query"></span>"</span>
+      <span x-show="!query">Enter a search query to find workflows and executions</span>
+    </p>
+  </div>
+
+  <!-- Search bar -->
+  <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+    <div class="relative">
+      <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+        <svg class="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd" />
+        </svg>
+      </div>
+      <input
+        type="search"
+        x-model="query"
+        @keyup.enter="search()"
+        class="block w-full rounded-md border-0 py-3 pl-10 pr-3 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 sm:text-sm sm:leading-6"
+        placeholder="Search workflows and executions..."
+      >
+    </div>
+
+    <!-- Filter tabs -->
+    <div class="mt-4 flex gap-2">
+      <button
+        @click="filter = 'all'; search()"
+        :class="filter === 'all' ? 'bg-primary-100 text-primary-700 dark:bg-primary-900 dark:text-primary-300' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'"
+        class="px-3 py-1.5 text-sm font-medium rounded-md hover:opacity-80">
+        All
+      </button>
+      <button
+        @click="filter = 'workflows'; search()"
+        :class="filter === 'workflows' ? 'bg-primary-100 text-primary-700 dark:bg-primary-900 dark:text-primary-300' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'"
+        class="px-3 py-1.5 text-sm font-medium rounded-md hover:opacity-80">
+        Workflows
+      </button>
+      <button
+        @click="filter = 'executions'; search()"
+        :class="filter === 'executions' ? 'bg-primary-100 text-primary-700 dark:bg-primary-900 dark:text-primary-300' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'"
+        class="px-3 py-1.5 text-sm font-medium rounded-md hover:opacity-80">
+        Executions
+      </button>
+    </div>
+  </div>
+
+  <!-- Loading state -->
+  <div x-show="loading" class="flex justify-center py-12">
+    <svg class="animate-spin h-8 w-8 text-primary-600" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    </svg>
+  </div>
+
+  <!-- Results -->
+  <div x-show="!loading && hasSearched">
+    <!-- Workflows -->
+    <div x-show="(filter === 'all' || filter === 'workflows') && workflows.length > 0" class="space-y-4">
+      <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Workflows</h2>
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <template x-for="workflow in workflows" :key="workflow.id">
+          <a :href="'/workflows/' + workflow.id" class="block bg-white dark:bg-gray-800 rounded-lg shadow p-6 hover:shadow-lg transition-shadow">
+            <h3 class="text-base font-semibold text-gray-900 dark:text-white" x-text="workflow.name"></h3>
+            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400 line-clamp-2" x-text="workflow.description || 'No description'"></p>
+            <div class="mt-4 flex items-center justify-between">
+              <span class="text-xs text-gray-500 dark:text-gray-400">
+                <span x-text="workflow.node_count"></span> nodes
+              </span>
+              <span :class="{
+                'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200': workflow.status === 'active',
+                'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200': workflow.status === 'draft'
+              }" class="px-2 py-1 text-xs font-medium rounded-full" x-text="workflow.status"></span>
+            </div>
+          </a>
+        </template>
+      </div>
+    </div>
+
+    <!-- Executions -->
+    <div x-show="(filter === 'all' || filter === 'executions') && executions.length > 0" class="space-y-4" :class="{ 'mt-8': workflows.length > 0 && filter === 'all' }">
+      <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Executions</h2>
+      <div class="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+        <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+          <thead class="bg-gray-50 dark:bg-gray-900">
+            <tr>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">ID</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Workflow</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Started</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Duration</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+            <template x-for="execution in executions" :key="execution.id">
+              <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                <td class="px-6 py-4 whitespace-nowrap">
+                  <a :href="'/executions/' + execution.id" class="text-primary-600 dark:text-primary-400 hover:underline font-mono text-sm" x-text="execution.id.substring(0, 8)"></a>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white" x-text="execution.workflow_name"></td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                  <span :class="{
+                    'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200': execution.status === 'running',
+                    'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200': execution.status === 'completed',
+                    'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200': execution.status === 'failed',
+                    'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200': execution.status === 'paused'
+                  }" class="px-2 py-1 text-xs font-medium rounded-full" x-text="execution.status"></span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400" x-text="execution.started_at"></td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400" x-text="execution.duration || '-'"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- No results -->
+    <div x-show="workflows.length === 0 && executions.length === 0" class="text-center py-12">
+      <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      <h3 class="mt-2 text-sm font-medium text-gray-900 dark:text-white">No results found</h3>
+      <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Try adjusting your search or filters</p>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function searchPage() {
+  return {
+    query: new URLSearchParams(window.location.search).get('q') || '',
+    filter: new URLSearchParams(window.location.search).get('filter') || 'all',
+    workflows: [],
+    executions: [],
+    loading: false,
+    hasSearched: false,
+
+    init() {
+      if (this.query) {
+        this.search();
+      }
+    },
+
+    async search() {
+      if (!this.query.trim()) {
+        this.workflows = [];
+        this.executions = [];
+        this.hasSearched = false;
+        return;
+      }
+
+      this.loading = true;
+      this.hasSearched = true;
+
+      // Update URL
+      const url = new URL(window.location);
+      url.searchParams.set('q', this.query);
+      url.searchParams.set('filter', this.filter);
+      window.history.pushState({}, '', url);
+
+      try {
+        // Search workflows
+        if (this.filter === 'all' || this.filter === 'workflows') {
+          const workflowsResponse = await fetch(`/htmx/workflows/search?q=${encodeURIComponent(this.query)}`);
+          const workflowsHtml = await workflowsResponse.text();
+
+          // Parse workflow cards from HTML (simplified - in production would use proper API)
+          // For now, use mock data
+          this.workflows = this.generateMockWorkflows(this.query);
+        } else {
+          this.workflows = [];
+        }
+
+        // Search executions
+        if (this.filter === 'all' || this.filter === 'executions') {
+          // Mock execution search
+          this.executions = this.generateMockExecutions(this.query);
+        } else {
+          this.executions = [];
+        }
+      } catch (error) {
+        console.error('Search error:', error);
+        htmx.ajax('GET', '/htmx/toast?message=Search failed&type=error', {
+          target: '#toast-container',
+          swap: 'beforeend',
+        });
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    generateMockWorkflows(query) {
+      // Mock workflow data for demonstration
+      const allWorkflows = [
+        { id: '123e4567-e89b-12d3-a456-426614174000', name: 'Customer Support Bot', description: 'Automated customer support workflow', node_count: 12, status: 'active', last_run: '2026-01-15' },
+        { id: '223e4567-e89b-12d3-a456-426614174001', name: 'Data Processing Pipeline', description: 'Process and analyze customer data', node_count: 8, status: 'active', last_run: '2026-01-14' },
+        { id: '323e4567-e89b-12d3-a456-426614174002', name: 'Report Generator', description: 'Generate weekly reports', node_count: 5, status: 'draft', last_run: null },
+      ];
+
+      return allWorkflows.filter(w =>
+        w.name.toLowerCase().includes(query.toLowerCase()) ||
+        (w.description && w.description.toLowerCase().includes(query.toLowerCase()))
+      );
+    },
+
+    generateMockExecutions(query) {
+      // Mock execution data for demonstration
+      const allExecutions = [
+        { id: '423e4567-e89b-12d3-a456-426614174003', workflow_name: 'Customer Support Bot', status: 'completed', started_at: '2026-01-15 10:30', duration: '2m 15s' },
+        { id: '523e4567-e89b-12d3-a456-426614174004', workflow_name: 'Data Processing Pipeline', status: 'running', started_at: '2026-01-15 11:45', duration: null },
+        { id: '623e4567-e89b-12d3-a456-426614174005', workflow_name: 'Customer Support Bot', status: 'failed', started_at: '2026-01-14 09:20', duration: '45s' },
+      ];
+
+      return allExecutions.filter(e =>
+        e.workflow_name.toLowerCase().includes(query.toLowerCase()) ||
+        e.id.toLowerCase().includes(query.toLowerCase())
+      );
+    }
+  };
+}
+</script>
+{% endblock %}

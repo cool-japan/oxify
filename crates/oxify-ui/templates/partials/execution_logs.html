@@ -1,0 +1,14 @@
+<div class="space-y-1">
+  {% for (timestamp, level, message) in logs %}
+  <div class="flex gap-2 {% if level == "error" %}text-red-600 dark:text-red-400{% else if level == "warn" %}text-yellow-600 dark:text-yellow-400{% else if level == "debug" %}text-gray-400 dark:text-gray-500{% else %}text-gray-600 dark:text-gray-300{% endif %}">
+    <span class="flex-shrink-0 text-gray-400 dark:text-gray-500">[{{ timestamp }}]</span>
+    <span class="flex-shrink-0 uppercase w-12">[{{ level }}]</span>
+    <span class="break-all">{{ message }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% if logs.is_empty() %}
+<div class="text-center text-gray-400 dark:text-gray-500 py-8">
+  No logs yet...
+</div>
+{% endif %}

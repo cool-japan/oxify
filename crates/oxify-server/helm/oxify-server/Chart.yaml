@@ -1,0 +1,33 @@
+apiVersion: v2
+name: oxify-server
+description: A Helm chart for Oxify Server - The Face (Interface Layer)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+keywords:
+  - oxify
+  - workflow
+  - server
+  - api
+
+maintainers:
+  - name: Oxify Team
+    email: team@oxify.example.com
+
+home: https://github.com/oxify/oxify
+sources:
+  - https://github.com/oxify/oxify
+
+icon: https://oxify.example.com/logo.png
+
+# Dependencies (if using external charts)
+# dependencies:
+#   - name: postgresql
+#     version: "12.x.x"
+#     repository: "https://charts.bitnami.com/bitnami"
+#     condition: postgresql.enabled
+#   - name: redis
+#     version: "17.x.x"
+#     repository: "https://charts.bitnami.com/bitnami"
+#     condition: redis.enabled

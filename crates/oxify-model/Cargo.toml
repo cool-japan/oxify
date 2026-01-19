@@ -1,0 +1,48 @@
+[package]
+name = "oxify-model"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Data models and types for OxiFY workflows, execution, and configuration"
+repository = "https://github.com/cool-japan/oxify"
+categories = ["data-structures", "encoding", "config"]
+keywords = ["models", "workflow", "serialization", "types"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+utoipa = { version = "5.4.0", features = ["uuid", "chrono"], optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+ts-rs = { version = "11.1", optional = true }
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+rand = { workspace = true }
+regex = "1.12"
+
+# Python bindings - only on Linux where extension-module can be properly tested
+# On macOS/Windows, pyo3 extension-module requires special build setup
+[target.'cfg(target_os = "linux")'.dependencies]
+pyo3 = { version = "0.27", features = ["extension-module", "abi3-py38"], optional = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+criterion = { workspace = true }
+tempfile = { workspace = true }
+
+[[bench]]
+name = "workflow_benchmarks"
+harness = false
+
+[features]
+default = []
+openapi = ["utoipa"]
+# python feature only has effect on Linux (pyo3 is target-gated)
+python = ["pyo3"]
+wasm = ["wasm-bindgen"]
+typescript = ["ts-rs"]

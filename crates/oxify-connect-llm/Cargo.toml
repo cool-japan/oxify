@@ -1,0 +1,36 @@
+[package]
+name = "oxify-connect-llm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LLM provider connectors for OxiFY - OpenAI, Anthropic, Cohere, Ollama support"
+repository = "https://github.com/cool-japan/oxify"
+categories = ["api-bindings", "web-programming", "asynchronous"]
+keywords = ["llm", "openai", "anthropic", "ai", "chatgpt"]
+
+[dependencies]
+oxify-model = { version = "0.1.0", path = "../oxify-model" }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }
+tokio-stream = { workspace = true }
+redis = { version = "1.0", features = ["tokio-comp", "connection-manager"], optional = true }
+md5 = { version = "0.8", optional = true }
+
+[features]
+default = []
+redis-cache = ["redis", "md5"]
+
+[dev-dependencies]
+wiremock = "0.6"
+criterion = { workspace = true, features = ["async_tokio"] }
+
+[[bench]]
+name = "provider_benchmarks"
+harness = false

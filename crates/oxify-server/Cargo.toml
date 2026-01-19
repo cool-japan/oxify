@@ -1,0 +1,71 @@
+[package]
+name = "oxify-server"
+version = "0.1.0"
+edition = "2021"
+authors = ["OxiFY Contributors"]
+license = "MIT OR Apache-2.0"
+description = "HTTP server implementation for OxiFY - Axum, graceful shutdown, middleware (ported from OxiRS)"
+repository = "https://github.com/cool-japan/oxify"
+categories = ["web-programming::http-server", "asynchronous", "network-programming"]
+keywords = ["http", "axum", "server", "middleware", "async"]
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+# HTTP Server (Axum)
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true, features = ["trace", "request-id", "cors", "compression-full", "limit"] }
+hyper = { workspace = true }
+hyper-util = { version = "0.1", features = ["tokio"] }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+
+# Security crates
+oxify-authn = { version = "0.1.0", path = "../oxify-authn" }
+oxify-authz = { version = "0.1.0", path = "../oxify-authz" }
+
+# Observability
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+prometheus = "0.14"
+regex = "1.12"
+
+# OpenTelemetry (Distributed Tracing)
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry-semantic-conventions = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+
+# OpenAPI/Swagger
+utoipa = { version = "5.4", features = ["axum_extras", "chrono", "uuid"] }
+utoipa-swagger-ui = { version = "9.0", features = ["axum"] }
+
+# GraphQL
+async-graphql = { workspace = true, features = ["uuid", "dataloader"] }
+async-graphql-axum = { workspace = true }
+
+# Async optimization
+num_cpus = { workspace = true }
+
+# Chaos engineering
+rand = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+reqwest = { workspace = true }
+
+[features]
+default = ["compression", "cors"]
+compression = []
+cors = []
+websocket = []

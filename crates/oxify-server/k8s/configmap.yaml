@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oxify-config
+  namespace: oxify
+  labels:
+    app: oxify-server
+data:
+  # Application configuration
+  qdrant-url: "http://qdrant:6333"
+  log-level: "info,oxify_server=debug"
+  environment: "production"
+
+  # Server configuration
+  host: "0.0.0.0"
+  port: "8080"
+
+  # Rate limiting
+  rate-limit-requests: "100"
+  rate-limit-window: "60"
+
+  # Request validation
+  max-request-size: "10485760"  # 10MB
+  request-timeout: "30"
+
+  # Cache configuration
+  cache-size: "1000"
+  cache-ttl: "3600"
+
+  # Connection pool
+  db-pool-max-connections: "50"
+  db-pool-min-connections: "10"
+
+  # Security
+  cors-allow-origins: "*"
+  cors-allow-methods: "GET,POST,PUT,DELETE,OPTIONS"
+  cors-allow-headers: "Content-Type,Authorization"

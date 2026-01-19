@@ -1,0 +1,819 @@
+{% extends "layouts/base.html" %}
+
+{% block title %}{{ title }} - OxiFY{% endblock %}
+
+{% block head %}
+<style>
+  #dag-canvas {
+    background-color: #fafafa;
+  }
+  .dark #dag-canvas {
+    background-color: #111827;
+  }
+  .dag-node {
+    cursor: move;
+  }
+  .dag-node.selected .node-bg {
+    filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.5));
+  }
+  .edge {
+    cursor: pointer;
+    transition: stroke 0.2s;
+  }
+  .edge:hover {
+    stroke: #3b82f6;
+  }
+  .node-palette-item {
+    cursor: grab;
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+  .node-palette-item:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  }
+  .node-palette-item:active {
+    cursor: grabbing;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="h-[calc(100vh-8rem)] flex flex-col" x-data="workflowEditor()" x-init="init()">
+  <!-- Toolbar -->
+  <div class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-2 flex items-center justify-between">
+    <div class="flex items-center gap-4">
+      <a href="/workflows/{{ workflow_id }}" class="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z" clip-rule="evenodd" />
+        </svg>
+      </a>
+      <input type="text" x-model="workflowName" class="text-lg font-medium text-gray-900 dark:text-white bg-transparent border-0 focus:ring-0 focus:outline-none" placeholder="Workflow Name">
+      <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">Editing</span>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <!-- Undo/Redo -->
+      <button type="button" class="p-2 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 disabled:opacity-50" @click="undo()" :disabled="!canUndo">
+        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M7.793 2.232a.75.75 0 01-.025 1.06L3.622 7.25h10.003a5.375 5.375 0 010 10.75H10.75a.75.75 0 010-1.5h2.875a3.875 3.875 0 000-7.75H3.622l4.146 3.957a.75.75 0 01-1.036 1.085l-5.5-5.25a.75.75 0 010-1.085l5.5-5.25a.75.75 0 011.06.025z" clip-rule="evenodd" />
+        </svg>
+      </button>
+      <button type="button" class="p-2 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 disabled:opacity-50" @click="redo()" :disabled="!canRedo">
+        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M12.207 2.232a.75.75 0 00.025 1.06l4.146 3.958H6.375a5.375 5.375 0 000 10.75H9.25a.75.75 0 000-1.5H6.375a3.875 3.875 0 010-7.75h10.003l-4.146 3.957a.75.75 0 001.036 1.085l5.5-5.25a.75.75 0 000-1.085l-5.5-5.25a.75.75 0 00-1.06.025z" clip-rule="evenodd" />
+        </svg>
+      </button>
+
+      <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-2"></div>
+
+      <!-- Zoom controls -->
+      <button type="button" class="p-2 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300" @click="zoomOut()">
+        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M6.75 8.25a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5h-4.5z" />
+          <path fill-rule="evenodd" d="M9 2a7 7 0 104.391 12.452l3.328 3.329a.75.75 0 101.06-1.06l-3.329-3.328A7 7 0 009 2zM3.5 9a5.5 5.5 0 1111 0 5.5 5.5 0 01-11 0z" clip-rule="evenodd" />
+        </svg>
+      </button>
+      <span class="text-sm text-gray-500 dark:text-gray-400 w-12 text-center" x-text="Math.round(zoom * 100) + '%'">100%</span>
+      <button type="button" class="p-2 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300" @click="zoomIn()">
+        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M9 6a.75.75 0 01.75.75v1.5h1.5a.75.75 0 010 1.5h-1.5v1.5a.75.75 0 01-1.5 0v-1.5h-1.5a.75.75 0 010-1.5h1.5v-1.5A.75.75 0 019 6z" />
+          <path fill-rule="evenodd" d="M9 2a7 7 0 104.391 12.452l3.328 3.329a.75.75 0 101.06-1.06l-3.329-3.328A7 7 0 009 2zM3.5 9a5.5 5.5 0 1111 0 5.5 5.5 0 01-11 0z" clip-rule="evenodd" />
+        </svg>
+      </button>
+      <button type="button" class="p-2 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300" @click="fitToContent()" title="Fit to content">
+        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M3.75 3A1.75 1.75 0 002 4.75v3.26a.75.75 0 001.5 0V5.56l4.72 4.72a.75.75 0 001.06-1.06L4.56 4.5h2.45a.75.75 0 000-1.5H3.75zM16.25 17A1.75 1.75 0 0018 15.25v-3.26a.75.75 0 00-1.5 0v2.45l-4.72-4.72a.75.75 0 00-1.06 1.06l4.72 4.72h-2.45a.75.75 0 000 1.5h3.26z" />
+        </svg>
+      </button>
+
+      <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-2"></div>
+
+      <!-- Delete selected -->
+      <button type="button" class="p-2 text-red-400 hover:text-red-500 dark:hover:text-red-300 disabled:opacity-50" @click="deleteSelected()" :disabled="!selectedNode" title="Delete selected (Del)">
+        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 10.23 1.482l.149-.022.841 10.518A2.75 2.75 0 007.596 19h4.807a2.75 2.75 0 002.742-2.53l.841-10.519.149.023a.75.75 0 00.23-1.482A41.03 41.03 0 0014 4.193V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4zM8.58 7.72a.75.75 0 00-1.5.06l.3 7.5a.75.75 0 101.5-.06l-.3-7.5zm4.34.06a.75.75 0 10-1.5-.06l-.3 7.5a.75.75 0 101.5.06l.3-7.5z" clip-rule="evenodd" />
+        </svg>
+      </button>
+
+      <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-2"></div>
+
+      <!-- Import workflow -->
+      <button type="button" class="p-2 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300" @click="importWorkflow()" title="Import workflow (JSON)">
+        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M10.75 2.75a.75.75 0 00-1.5 0v8.614L6.295 8.235a.75.75 0 10-1.09 1.03l4.25 4.5a.75.75 0 001.09 0l4.25-4.5a.75.75 0 00-1.09-1.03l-2.955 3.129V2.75z" />
+          <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
+        </svg>
+      </button>
+      <input type="file" id="import-file" accept=".json,.yaml,.yml" class="hidden" @change="handleImportFile($event)">
+
+      <!-- Export workflow -->
+      <button type="button" class="p-2 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300" @click="exportWorkflow()" title="Export workflow (JSON)">
+        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M9.25 13.25a.75.75 0 001.5 0V4.636l2.955 3.129a.75.75 0 001.09-1.03l-4.25-4.5a.75.75 0 00-1.09 0l-4.25 4.5a.75.75 0 101.09 1.03L9.25 4.636v8.614z" />
+          <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
+        </svg>
+      </button>
+
+      <!-- Keyboard shortcuts help -->
+      <button type="button" class="p-2 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300" @click="showKeyboardHelp = true" title="Keyboard shortcuts (?)">
+        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM8.94 6.94a.75.75 0 11-1.061-1.061 3 3 0 112.871 5.026v.345a.75.75 0 01-1.5 0v-.5c0-.72.57-1.172 1.081-1.287A1.5 1.5 0 108.94 6.94zM10 15a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+        </svg>
+      </button>
+
+      <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-2"></div>
+
+      <!-- Save button -->
+      <button type="button" class="inline-flex items-center rounded-md bg-primary-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-primary-500 disabled:opacity-50" @click="save()" :disabled="saving">
+        <svg class="-ml-0.5 mr-1.5 h-4 w-4" viewBox="0 0 20 20" fill="currentColor" x-show="!saving">
+          <path d="M9.25 13.25a.75.75 0 001.5 0V4.636l2.955 3.129a.75.75 0 001.09-1.03l-4.25-4.5a.75.75 0 00-1.09 0l-4.25 4.5a.75.75 0 101.09 1.03L9.25 4.636v8.614z" />
+          <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
+        </svg>
+        <svg class="-ml-0.5 mr-1.5 h-4 w-4 animate-spin" viewBox="0 0 24 24" x-show="saving" x-cloak>
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span x-text="saving ? 'Saving...' : 'Save'">Save</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Editor content -->
+  <div class="flex-1 flex overflow-hidden">
+    <!-- Node palette -->
+    <div class="w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 overflow-y-auto">
+      <div class="p-4">
+        <h3 class="text-sm font-medium text-gray-900 dark:text-white mb-3">Nodes</h3>
+        <div class="space-y-2">
+          <!-- Start Node -->
+          <div class="node-palette-item p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800" draggable="true" @dragstart="dragStart($event, 'start')">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded bg-emerald-500 flex items-center justify-center text-white text-xs font-bold">STA</div>
+              <div>
+                <div class="text-sm font-medium text-gray-900 dark:text-white">Start</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">Entry point</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- End Node -->
+          <div class="node-palette-item p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800" draggable="true" @dragstart="dragStart($event, 'end')">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded bg-red-500 flex items-center justify-center text-white text-xs font-bold">END</div>
+              <div>
+                <div class="text-sm font-medium text-gray-900 dark:text-white">End</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">Exit point</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="border-t border-gray-200 dark:border-gray-700 my-3"></div>
+
+          <!-- LLM Node -->
+          <div class="node-palette-item p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800" draggable="true" @dragstart="dragStart($event, 'llm')">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded bg-blue-500 flex items-center justify-center text-white text-xs font-bold">LLM</div>
+              <div>
+                <div class="text-sm font-medium text-gray-900 dark:text-white">LLM Node</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">Call AI model</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Retriever Node -->
+          <div class="node-palette-item p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800" draggable="true" @dragstart="dragStart($event, 'retriever')">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded bg-purple-500 flex items-center justify-center text-white text-xs font-bold">RET</div>
+              <div>
+                <div class="text-sm font-medium text-gray-900 dark:text-white">Retriever</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">Vector search</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Code Node -->
+          <div class="node-palette-item p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800" draggable="true" @dragstart="dragStart($event, 'code')">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded bg-green-500 flex items-center justify-center text-white text-xs font-bold">COD</div>
+              <div>
+                <div class="text-sm font-medium text-gray-900 dark:text-white">Code</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">Run script</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Conditional Node -->
+          <div class="node-palette-item p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800" draggable="true" @dragstart="dragStart($event, 'conditional')">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded bg-yellow-500 flex items-center justify-center text-black text-xs font-bold">IF</div>
+              <div>
+                <div class="text-sm font-medium text-gray-900 dark:text-white">Conditional</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">Branch logic</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tool Node -->
+          <div class="node-palette-item p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800" draggable="true" @dragstart="dragStart($event, 'tool')">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded bg-orange-500 flex items-center justify-center text-white text-xs font-bold">MCP</div>
+              <div>
+                <div class="text-sm font-medium text-gray-900 dark:text-white">Tool</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">MCP tool call</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Loop Node -->
+          <div class="node-palette-item p-3 bg-cyan-50 dark:bg-cyan-900/20 rounded-lg border border-cyan-200 dark:border-cyan-800" draggable="true" @dragstart="dragStart($event, 'loop')">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded bg-cyan-500 flex items-center justify-center text-white text-xs font-bold">LOO</div>
+              <div>
+                <div class="text-sm font-medium text-gray-900 dark:text-white">Loop</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">Iteration</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Parallel Node -->
+          <div class="node-palette-item p-3 bg-pink-50 dark:bg-pink-900/20 rounded-lg border border-pink-200 dark:border-pink-800" draggable="true" @dragstart="dragStart($event, 'parallel')">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded bg-pink-500 flex items-center justify-center text-white text-xs font-bold">PAR</div>
+              <div>
+                <div class="text-sm font-medium text-gray-900 dark:text-white">Parallel</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">Fan-out/in</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Switch Node -->
+          <div class="node-palette-item p-3 bg-lime-50 dark:bg-lime-900/20 rounded-lg border border-lime-200 dark:border-lime-800" draggable="true" @dragstart="dragStart($event, 'switch')">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded bg-lime-500 flex items-center justify-center text-black text-xs font-bold">SWI</div>
+              <div>
+                <div class="text-sm font-medium text-gray-900 dark:text-white">Switch</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">Multi-branch</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Approval Node -->
+          <div class="node-palette-item p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800" draggable="true" @dragstart="dragStart($event, 'approval')">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded bg-amber-500 flex items-center justify-center text-black text-xs font-bold">APR</div>
+              <div>
+                <div class="text-sm font-medium text-gray-900 dark:text-white">Approval</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">Human approval</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Form Node -->
+          <div class="node-palette-item p-3 bg-teal-50 dark:bg-teal-900/20 rounded-lg border border-teal-200 dark:border-teal-800" draggable="true" @dragstart="dragStart($event, 'form')">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded bg-teal-500 flex items-center justify-center text-white text-xs font-bold">FOR</div>
+              <div>
+                <div class="text-sm font-medium text-gray-900 dark:text-white">Form</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">User input</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Canvas -->
+    <div class="flex-1 relative overflow-hidden" id="dag-canvas" @drop="drop($event)" @dragover.prevent>
+      <!-- DAG editor will be rendered here by JavaScript -->
+    </div>
+
+    <!-- Node properties panel -->
+    <div class="w-80 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 overflow-y-auto" x-show="selectedNode" x-cloak>
+      <div class="p-4">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-sm font-medium text-gray-900 dark:text-white">Node Properties</h3>
+          <button type="button" @click="deselectNode()" class="text-gray-400 hover:text-gray-500">
+            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+            </svg>
+          </button>
+        </div>
+
+        <template x-if="selectedNode">
+          <div class="space-y-4">
+            <!-- Node name -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
+              <input type="text" x-model="selectedNode.name" @input="updateNodeName()" class="w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm">
+            </div>
+
+            <!-- Node type badge -->
+            <div class="flex items-center gap-2">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Type</label>
+              <span class="px-2 py-0.5 text-xs font-medium rounded-full capitalize"
+                    :class="getNodeTypeClass(selectedNode.type)"
+                    x-text="selectedNode.type"></span>
+            </div>
+
+            <!-- Node ID -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ID</label>
+              <div class="text-xs text-gray-500 dark:text-gray-400 font-mono truncate" x-text="selectedNode.id" :title="selectedNode.id"></div>
+            </div>
+
+            <div class="border-t border-gray-200 dark:border-gray-700 pt-4"></div>
+
+            <!-- Type-specific configuration -->
+            <div id="node-config-form"
+                 hx-get=""
+                 hx-trigger="loadNodeForm"
+                 hx-target="#node-config-form"
+                 hx-swap="innerHTML"
+                 hx-indicator="#node-form-loading">
+              <div id="node-form-loading" class="htmx-indicator flex items-center justify-center py-4">
+                <svg class="animate-spin h-5 w-5 text-primary-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Validation errors panel (slide-over) -->
+    <div x-show="showValidationErrors" x-cloak
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 translate-x-4"
+         x-transition:enter-end="opacity-100 translate-x-0"
+         x-transition:leave="transition ease-in duration-150"
+         x-transition:leave-start="opacity-100 translate-x-0"
+         x-transition:leave-end="opacity-0 translate-x-4"
+         class="absolute right-0 top-0 h-full w-80 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 shadow-xl overflow-y-auto z-10">
+      <div class="p-4">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-sm font-medium text-gray-900 dark:text-white">Validation Results</h3>
+          <button type="button" @click="showValidationErrors = false" class="text-gray-400 hover:text-gray-500">
+            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+            </svg>
+          </button>
+        </div>
+
+        <!-- Errors -->
+        <template x-if="validationResult && validationResult.errors.length > 0">
+          <div class="mb-4">
+            <h4 class="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide mb-2">Errors</h4>
+            <div class="space-y-2">
+              <template x-for="error in validationResult.errors" :key="error.message">
+                <div class="p-2 bg-red-50 dark:bg-red-900/20 rounded-md border border-red-200 dark:border-red-800">
+                  <p class="text-sm text-red-700 dark:text-red-300" x-text="error.message"></p>
+                  <button x-show="error.nodeId" @click="focusNode(error.nodeId)" class="text-xs text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 mt-1">
+                    Go to node →
+                  </button>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+
+        <!-- Warnings -->
+        <template x-if="validationResult && validationResult.warnings.length > 0">
+          <div>
+            <h4 class="text-xs font-semibold text-yellow-600 dark:text-yellow-400 uppercase tracking-wide mb-2">Warnings</h4>
+            <div class="space-y-2">
+              <template x-for="warning in validationResult.warnings" :key="warning.message">
+                <div class="p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded-md border border-yellow-200 dark:border-yellow-800">
+                  <p class="text-sm text-yellow-700 dark:text-yellow-300" x-text="warning.message"></p>
+                  <button x-show="warning.nodeId" @click="focusNode(warning.nodeId)" class="text-xs text-yellow-600 hover:text-yellow-800 dark:text-yellow-400 dark:hover:text-yellow-300 mt-1">
+                    Go to node →
+                  </button>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+
+        <!-- Success -->
+        <template x-if="validationResult && validationResult.isValid">
+          <div class="p-3 bg-green-50 dark:bg-green-900/20 rounded-md border border-green-200 dark:border-green-800">
+            <div class="flex items-center gap-2">
+              <svg class="h-5 w-5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clip-rule="evenodd" />
+              </svg>
+              <span class="text-sm font-medium text-green-700 dark:text-green-300">Workflow is valid!</span>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- Keyboard shortcuts modal -->
+  <div x-show="showKeyboardHelp" x-cloak
+       x-transition:enter="transition ease-out duration-200"
+       x-transition:enter-start="opacity-0"
+       x-transition:enter-end="opacity-100"
+       x-transition:leave="transition ease-in duration-150"
+       x-transition:leave-start="opacity-100"
+       x-transition:leave-end="opacity-0"
+       class="fixed inset-0 z-50 overflow-y-auto"
+       @keydown.escape.window="showKeyboardHelp = false">
+    <!-- Backdrop -->
+    <div class="fixed inset-0 bg-black/50" @click="showKeyboardHelp = false"></div>
+
+    <!-- Modal -->
+    <div class="relative min-h-screen flex items-center justify-center p-4">
+      <div class="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6"
+           x-transition:enter="transition ease-out duration-200"
+           x-transition:enter-start="opacity-0 scale-95"
+           x-transition:enter-end="opacity-100 scale-100"
+           x-transition:leave="transition ease-in duration-150"
+           x-transition:leave-start="opacity-100 scale-100"
+           x-transition:leave-end="opacity-0 scale-95">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-medium text-gray-900 dark:text-white">Keyboard Shortcuts</h3>
+          <button type="button" @click="showKeyboardHelp = false" class="text-gray-400 hover:text-gray-500">
+            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="space-y-3">
+          <template x-for="shortcut in keyboardShortcuts" :key="shortcut.key">
+            <div class="flex items-center justify-between py-1">
+              <span class="text-sm text-gray-600 dark:text-gray-300" x-text="shortcut.action"></span>
+              <kbd class="px-2 py-1 text-xs font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600" x-text="shortcut.key"></kbd>
+            </div>
+          </template>
+        </div>
+
+        <div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+          <p class="text-xs text-gray-500 dark:text-gray-400">
+            Tip: Click on the canvas and use these shortcuts for faster editing.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/dag-editor.js"></script>
+<script>
+function workflowEditor() {
+  return {
+    editor: null,
+    workflowId: '{{ workflow_id }}',
+    workflowName: '{{ workflow_name }}',
+    workflowJson: {{ workflow_json|safe }},
+    zoom: 1,
+    canUndo: false,
+    canRedo: false,
+    selectedNode: null,
+    saving: false,
+    showValidationErrors: false,
+    validationResult: null,
+    showKeyboardHelp: false,
+    keyboardShortcuts: [
+      { key: 'Ctrl+Z', action: 'Undo' },
+      { key: 'Ctrl+Y / Ctrl+Shift+Z', action: 'Redo' },
+      { key: 'Ctrl+C', action: 'Copy selected node' },
+      { key: 'Ctrl+V', action: 'Paste node' },
+      { key: 'Ctrl+D', action: 'Duplicate selected' },
+      { key: 'Delete / Backspace', action: 'Delete selected' },
+      { key: 'Arrow keys', action: 'Move selected node' },
+      { key: 'Shift+Arrow', action: 'Move node faster' },
+      { key: 'Ctrl+A', action: 'Select all nodes' },
+      { key: 'Escape', action: 'Deselect all' },
+      { key: '+/-', action: 'Zoom in/out' },
+      { key: '0', action: 'Reset zoom to 100%' },
+      { key: 'Ctrl+S', action: 'Save workflow' },
+      { key: '?', action: 'Show shortcuts help' },
+    ],
+
+    init() {
+      // Initialize DAG editor
+      this.editor = new DAGEditor('dag-canvas', {
+        onNodeSelect: (node) => this.onNodeSelect(node),
+        onNodeDeselect: () => this.onNodeDeselect(),
+        onChange: (data) => this.onEditorChange(data),
+        onValidation: (result) => this.onValidation(result),
+      });
+
+      // Load existing workflow data
+      if (this.workflowJson && Object.keys(this.workflowJson).length > 0) {
+        this.editor.setData(this.workflowJson);
+        this.editor.fitToContent();
+      } else {
+        // Add default start and end nodes for new workflows
+        this.editor.addNode('start', 100, 200);
+        this.editor.addNode('end', 500, 200);
+      }
+
+      this.updateUndoRedo();
+    },
+
+    onNodeSelect(node) {
+      this.selectedNode = node;
+      this.showValidationErrors = false;
+      // Load node configuration form via HTMX
+      this.loadNodeForm(node.type);
+    },
+
+    loadNodeForm(nodeType) {
+      const formContainer = document.getElementById('node-config-form');
+      if (formContainer) {
+        formContainer.setAttribute('hx-get', `/htmx/nodes/form/${nodeType}`);
+        htmx.process(formContainer);
+        htmx.trigger(formContainer, 'loadNodeForm');
+      }
+    },
+
+    onNodeDeselect() {
+      this.selectedNode = null;
+    },
+
+    onEditorChange(data) {
+      this.updateUndoRedo();
+    },
+
+    onValidation(result) {
+      this.validationResult = result;
+      if (!result.isValid) {
+        this.editor.highlightErrors([...result.errors, ...result.warnings]);
+      }
+    },
+
+    updateUndoRedo() {
+      this.canUndo = this.editor?.canUndo() || false;
+      this.canRedo = this.editor?.canRedo() || false;
+      this.zoom = this.editor?.zoom || 1;
+    },
+
+    updateNodeName() {
+      if (this.selectedNode && this.editor) {
+        // Trigger re-render of the node
+        this.editor.render();
+      }
+    },
+
+    deselectNode() {
+      if (this.editor) {
+        this.editor.deselectAll();
+      }
+      this.selectedNode = null;
+    },
+
+    deleteSelected() {
+      if (this.selectedNode && this.editor) {
+        this.editor.deleteNode(this.selectedNode.id);
+        this.selectedNode = null;
+      }
+    },
+
+    zoomIn() {
+      if (this.editor) {
+        this.editor.zoomIn();
+        this.zoom = this.editor.zoom;
+      }
+    },
+
+    zoomOut() {
+      if (this.editor) {
+        this.editor.zoomOut();
+        this.zoom = this.editor.zoom;
+      }
+    },
+
+    fitToContent() {
+      if (this.editor) {
+        this.editor.fitToContent();
+        this.zoom = this.editor.zoom;
+      }
+    },
+
+    undo() {
+      if (this.editor) {
+        this.editor.undo();
+        this.updateUndoRedo();
+      }
+    },
+
+    redo() {
+      if (this.editor) {
+        this.editor.redo();
+        this.updateUndoRedo();
+      }
+    },
+
+    dragStart(event, nodeType) {
+      event.dataTransfer.setData('nodeType', nodeType);
+      event.dataTransfer.effectAllowed = 'copy';
+    },
+
+    drop(event) {
+      event.preventDefault();
+      const nodeType = event.dataTransfer.getData('nodeType');
+      if (nodeType && this.editor) {
+        this.editor.handleDrop(nodeType, event.clientX, event.clientY);
+      }
+    },
+
+    // Get CSS class for node type badge
+    getNodeTypeClass(type) {
+      const classes = {
+        start: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200',
+        end: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+        llm: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+        retriever: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
+        code: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+        conditional: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+        tool: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
+        loop: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200',
+        parallel: 'bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-200',
+        switch: 'bg-lime-100 text-lime-800 dark:bg-lime-900 dark:text-lime-200',
+        approval: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
+        form: 'bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200',
+      };
+      return classes[type] || 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
+    },
+
+    // Focus on a specific node (used from validation panel)
+    focusNode(nodeId) {
+      if (!this.editor) return;
+      const node = this.editor.nodes.find(n => n.id === nodeId);
+      if (node) {
+        this.editor.selectNode(node);
+        // Center the view on the node
+        const rect = this.editor.svg.getBoundingClientRect();
+        this.editor.panX = rect.width / 2 - (node.x + this.editor.nodeWidth / 2) * this.editor.zoom;
+        this.editor.panY = rect.height / 2 - (node.y + this.editor.nodeHeight / 2) * this.editor.zoom;
+        this.editor.updateTransform();
+      }
+    },
+
+    // Validate workflow
+    validateWorkflow() {
+      if (!this.editor) return null;
+      this.validationResult = this.editor.validate();
+      this.showValidationErrors = true;
+      return this.validationResult;
+    },
+
+    // Import workflow from file
+    importWorkflow() {
+      document.getElementById('import-file').click();
+    },
+
+    // Handle imported file
+    handleImportFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          let data;
+          const content = e.target.result;
+
+          if (file.name.endsWith('.yaml') || file.name.endsWith('.yml')) {
+            // For YAML, we'd need a YAML parser library
+            // For now, show a message that YAML is not yet supported
+            htmx.ajax('GET', '/htmx/toast?message=YAML import coming soon. Please use JSON format.&type=warning', {
+              target: '#toast-container',
+              swap: 'beforeend',
+            });
+            return;
+          } else {
+            data = JSON.parse(content);
+          }
+
+          // Validate the imported data structure
+          if (!data.nodes || !Array.isArray(data.nodes)) {
+            throw new Error('Invalid workflow format: missing nodes array');
+          }
+
+          // Load the data into the editor
+          if (this.editor) {
+            this.editor.setData(data);
+            this.editor.fitToContent();
+            this.updateUndoRedo();
+
+            // Update workflow name if provided
+            if (data.name) {
+              this.workflowName = data.name;
+            }
+
+            htmx.ajax('GET', '/htmx/toast?message=Workflow imported successfully&type=success', {
+              target: '#toast-container',
+              swap: 'beforeend',
+            });
+          }
+        } catch (error) {
+          console.error('Import error:', error);
+          htmx.ajax('GET', '/htmx/toast?message=Failed to import workflow: ' + encodeURIComponent(error.message) + '&type=error', {
+            target: '#toast-container',
+            swap: 'beforeend',
+          });
+        }
+      };
+
+      reader.onerror = () => {
+        htmx.ajax('GET', '/htmx/toast?message=Failed to read file&type=error', {
+          target: '#toast-container',
+          swap: 'beforeend',
+        });
+      };
+
+      reader.readAsText(file);
+      // Reset file input so same file can be re-imported
+      event.target.value = '';
+    },
+
+    // Export workflow to JSON file
+    exportWorkflow() {
+      if (!this.editor) return;
+
+      const data = this.editor.getData();
+      const exportData = {
+        name: this.workflowName,
+        version: '1.0',
+        exportedAt: new Date().toISOString(),
+        nodes: data.nodes,
+        edges: data.edges,
+      };
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${this.workflowName.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'workflow'}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      htmx.ajax('GET', '/htmx/toast?message=Workflow exported successfully&type=success', {
+        target: '#toast-container',
+        swap: 'beforeend',
+      });
+    },
+
+    async save() {
+      if (this.saving) return;
+
+      // Validate before saving
+      const validation = this.validateWorkflow();
+      if (!validation.isValid) {
+        // Show validation errors
+        htmx.ajax('GET', '/htmx/toast?message=Please fix validation errors before saving&type=error', {
+          target: '#toast-container',
+          swap: 'beforeend',
+        });
+        return;
+      }
+
+      this.saving = true;
+      const data = this.editor.getData();
+
+      try {
+        const response = await fetch(`/api/v1/workflows/${this.workflowId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            name: this.workflowName,
+            nodes: data.nodes,
+            edges: data.edges,
+          }),
+        });
+
+        if (response.ok) {
+          // Show success toast
+          htmx.ajax('GET', '/htmx/toast?message=Workflow saved successfully&type=success', {
+            target: '#toast-container',
+            swap: 'beforeend',
+          });
+          this.showValidationErrors = false;
+        } else {
+          throw new Error('Failed to save workflow');
+        }
+      } catch (error) {
+        // Show error toast
+        htmx.ajax('GET', '/htmx/toast?message=Failed to save workflow&type=error', {
+          target: '#toast-container',
+          swap: 'beforeend',
+        });
+      } finally {
+        this.saving = false;
+      }
+    },
+  };
+}
+</script>
+{% endblock %}
