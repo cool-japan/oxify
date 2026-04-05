@@ -11,17 +11,17 @@ keywords = ["llm", "workflow", "orchestration", "dag", "ai"]
 categories = ["asynchronous", "development-tools", "web-programming"]
 
 [dependencies]
-oxify-model = { version = "0.1.0", path = "../oxify-model" }
-oxify-vector = { version = "0.1.0", path = "../oxify-vector" }
-oxify-authn = { version = "0.1.0", path = "../oxify-authn" }
-oxify-authz = { version = "0.1.0", path = "../oxify-authz" }
-oxify-server = { version = "0.1.0", path = "../oxify-server" }
-oxify-mcp = { version = "0.1.0", path = "../oxify-mcp" }
-oxify-connect-llm = { version = "0.1.0", path = "../oxify-connect-llm" }
-oxify-connect-vector = { version = "0.1.0", path = "../oxify-connect-vector" }
-oxify-connect-vision = { version = "0.1.0", path = "../oxify-connect-vision" }
-oxify-storage = { version = "0.1.0", path = "../oxify-storage" }
-oxify-engine = { version = "0.1.0", path = "../oxify-engine" }
+oxify-model = { version = "0.2.0", path = "../oxify-model" }
+oxify-vector = { version = "0.2.0", path = "../oxify-vector" }
+oxify-authn = { version = "0.2.0", path = "../oxify-authn" }
+oxify-authz = { version = "0.2.0", path = "../oxify-authz" }
+oxify-server = { version = "0.2.0", path = "../oxify-server" }
+oxify-mcp = { version = "0.2.0", path = "../oxify-mcp" }
+oxify-connect-llm = { version = "0.2.0", path = "../oxify-connect-llm" }
+oxify-connect-vector = { version = "0.2.0", path = "../oxify-connect-vector" }
+oxify-connect-vision = { version = "0.2.0", path = "../oxify-connect-vision" }
+oxify-storage = { version = "0.2.0", path = "../oxify-storage" }
+oxify-engine = { version = "0.2.0", path = "../oxify-engine" }
 
 [features]
 default = []

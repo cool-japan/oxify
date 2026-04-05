@@ -49,7 +49,7 @@ use crate::filter::{Filter, Metadata};
 use crate::simd;
 use crate::types::{DistanceMetric, SearchResult};
 use anyhow::{anyhow, Result};
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};

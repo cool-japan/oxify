@@ -10,9 +10,9 @@ categories = ["database", "api-bindings", "algorithms"]
 keywords = ["vector-database", "qdrant", "embeddings", "similarity-search"]
 
 [dependencies]
-oxify-model = { version = "0.1.0", path = "../oxify-model" }
-oxify-connect-llm = { version = "0.1.0", path = "../oxify-connect-llm", optional = true }
-oxify-vector = { version = "0.1.0", path = "../oxify-vector", optional = true }
+oxify-model = { version = "0.2.0", path = "../oxify-model" }
+oxify-connect-llm = { version = "0.2.0", path = "../oxify-connect-llm", optional = true }
+oxify-vector = { version = "0.2.0", path = "../oxify-vector", optional = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 qdrant-client = { workspace = true }

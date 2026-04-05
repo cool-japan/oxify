@@ -14,14 +14,14 @@ name = "oxify-api"
 path = "src/main.rs"
 
 [dependencies]
-oxify-model = { version = "0.1.0", path = "../oxify-model", features = ["openapi"] }
-oxify-engine = { version = "0.1.0", path = "../oxify-engine" }
-oxify-authn = { version = "0.1.0", path = "../oxify-authn" }
-oxify-authz = { version = "0.1.0", path = "../oxify-authz" }
-oxify-mcp = { version = "0.1.0", path = "../oxify-mcp" }
-oxify-server = { version = "0.1.0", path = "../oxify-server" }
-oxify-storage = { version = "0.1.0", path = "../oxify-storage" }
-oxify-connect-vector = { version = "0.1.0", path = "../oxify-connect-vector" }
+oxify-model = { version = "0.2.0", path = "../oxify-model", features = ["openapi"] }
+oxify-engine = { version = "0.2.0", path = "../oxify-engine" }
+oxify-authn = { version = "0.2.0", path = "../oxify-authn" }
+oxify-authz = { version = "0.2.0", path = "../oxify-authz" }
+oxify-mcp = { version = "0.2.0", path = "../oxify-mcp" }
+oxify-server = { version = "0.2.0", path = "../oxify-server" }
+oxify-storage = { version = "0.2.0", path = "../oxify-storage" }
+oxify-connect-vector = { version = "0.2.0", path = "../oxify-connect-vector" }
 axum = { workspace = true, features = ["macros"] }
 tower = { workspace = true }
 tower-http = { workspace = true, features = ["cors", "trace", "compression-br", "compression-gzip"] }

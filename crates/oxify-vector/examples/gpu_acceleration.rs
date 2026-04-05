@@ -174,7 +174,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn generate_vectors(count: usize, dims: usize) -> Vec<Vec<f32>> {
-    use rand::Rng;
+    use rand::{Rng, RngExt};
     let mut rng = rand::rng();
 
     (0..count)

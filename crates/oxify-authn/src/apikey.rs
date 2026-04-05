@@ -498,7 +498,7 @@ impl ApiKeyManager {
     fn generate_random_key(&self) -> String {
         use base64::engine::general_purpose::URL_SAFE_NO_PAD;
         use base64::Engine;
-        use rand::Rng;
+        use rand::RngExt;
         let mut rng = rand::rng();
         let bytes: Vec<u8> = (0..self.config.key_length).map(|_| rng.random()).collect();
         URL_SAFE_NO_PAD.encode(bytes)

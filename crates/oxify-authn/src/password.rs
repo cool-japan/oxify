@@ -402,7 +402,7 @@ impl PasswordManager {
     /// Generate a random password meeting policy requirements
     #[must_use]
     pub fn generate_password(&self) -> String {
-        use rand::Rng;
+        use rand::RngExt;
         let mut rng = rand::rng();
 
         let length = std::cmp::max(self.policy.min_length, 16);

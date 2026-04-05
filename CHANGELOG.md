@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-29
+
+### Added
+
+#### Authorization (`oxify-authz`)
+- ReBAC (Relationship-Based Access Control) engine - Google Zanzibar implementation
+- Hybrid PostgreSQL + in-memory relation tuple store
+- gRPC authorization service with Tonic
+- Bloom filter for quick negative lookups
+- Redis-based distributed L2 cache with Moka local cache
+- Comprehensive audit logging with MD5 integrity verification
+- Property-based testing with proptest
+
+#### Authentication (`oxify-authn`)
+- SAML 2.0 authentication support (optional)
+- LDAP directory integration (optional)
+- WebAuthn/FIDO2 passwordless authentication (optional)
+- TOTP-based multi-factor authentication (optional)
+- Session management and token revocation
+
+#### MCP Server (`oxify-mcp`)
+- Model Context Protocol server implementation
+- Tool/resource/prompt management
+- Streaming transport support
+
+#### CLI (`oxify-cli`)
+- Full interactive command-line interface
+- Workflow management and execution commands
+
+#### UI (`oxify-ui`)
+- Web-based management dashboard with HTMX
+- Askama templating engine integration
+- Workflow visualization and monitoring
+
+### Changed
+- Expanded workspace to 15 specialized crates (from 13)
+- Updated all dependencies to latest stable versions
+- Enhanced test coverage across all crates
+
+### Fixed
+- Various stability improvements across all crates
+
 ## [0.1.0] - 2026-01-19
 
 ### Added

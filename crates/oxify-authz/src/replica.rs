@@ -263,7 +263,7 @@ impl ReplicaPool {
         }
 
         // Use rng for random selection to avoid version conflicts
-        use rand::Rng;
+        use rand::{Rng, RngExt};
         let mut rng = rand::rng();
         let idx = rng.random_range(0..healthy_replicas.len());
         Some(self.replicas[healthy_replicas[idx]].clone())

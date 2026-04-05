@@ -34,6 +34,7 @@ OxiFY is organized as a workspace with multiple crates:
 - **oxify-connect-vision**: Vision/OCR providers (Tesseract, Surya, PaddleOCR)
 - **oxify-mcp**: Model Context Protocol implementation
 - **oxify-cli**: Local workflow runner and development tool
+- **oxify-ui**: HTMX-based web management dashboard
 
 ### Architecture Diagram
 
@@ -202,7 +203,7 @@ OxiFY natively supports MCP, allowing it to:
 
 ## Development Status
 
-**Version 0.1.0** - Production-ready with comprehensive features!
+**Version 0.2.0** - Production-ready with comprehensive features!
 
 ### Core Infrastructure ✅ COMPLETE
 - ✅ **Security**: ReBAC authorization (Zanzibar-style) with PostgreSQL + in-memory hybrid
@@ -239,10 +240,10 @@ OxiFY natively supports MCP, allowing it to:
 - ✅ **Operations**: Scheduling, webhooks, checkpoints, secrets, statistics
 - ✅ **Shell Integration**: Completion scripts for bash/zsh/fish/powershell
 
-### Web UI 🚧 NOT STARTED
-- ⏳ React Flow DAG visual editor
-- ⏳ Real-time execution monitoring dashboard
-- ⏳ Workflow management interface
+### Web UI ✅ COMPLETE
+- ✅ HTMX-based web dashboard with Askama templates
+- ✅ Workflow management interface
+- ✅ Real-time monitoring
 
 ## Roadmap
 
@@ -270,15 +271,15 @@ OxiFY natively supports MCP, allowing it to:
 - [x] Execution caching (LLM responses, execution plans)
 - [x] Checkpointing and pause/resume
 
-### Phase 3: The Face ⚡ API COMPLETE | 🚧 UI IN PROGRESS
+### Phase 3: The Face ✅ COMPLETE
 - [x] **REST API**: 30+ endpoints for workflow management ✅ COMPLETE
 - [x] **OpenAPI Documentation**: Swagger UI support ✅ COMPLETE
 - [x] **Authentication & Authorization**: JWT + ReBAC ✅ COMPLETE
 - [x] **Real-time Streaming**: SSE for execution updates ✅ COMPLETE
 - [x] **Rate Limiting**: Token bucket algorithm ✅ COMPLETE
 - [x] **Advanced Features**: Scheduling, webhooks, secrets ✅ COMPLETE
-- [ ] **Web UI**: React Flow DAG editor 🚧 NOT STARTED
-- [ ] **Monitoring Dashboard**: Real-time execution visualization 🚧 NOT STARTED
+- [x] **Web UI**: HTMX-based web dashboard with Askama templates ✅ COMPLETE
+- [x] **Monitoring Dashboard**: Workflow monitoring and management ✅ COMPLETE
 
 ### Phase 4: Production & Ecosystem (Future)
 - [ ] Docker images and Kubernetes manifests
@@ -291,15 +292,16 @@ OxiFY natively supports MCP, allowing it to:
 
 ## Statistics
 
-### Codebase Metrics (as of 2026-01-19)
-- **Lines of Code**: 18,000+ lines of production Rust code
-- **Workspace Crates**: 13 specialized crates
+### Codebase Metrics (as of 2026-03-29)
+- **Lines of Code**: 162,000+ lines of production Rust code
+- **Workspace Crates**: 15 specialized crates
   - Security: `oxify-authz`, `oxify-authn`
   - API: `oxify-server`, `oxify-api`
   - Engine: `oxify-engine`, `oxify-vector`
   - Connectors: `oxify-connect-llm`, `oxify-connect-vector`, `oxify-connect-vision`
+  - UI: `oxify-ui`
   - Supporting: `oxify-model`, `oxify-storage`, `oxify-mcp`, `oxify-cli`
-- **Tests**: 100+ passing tests with comprehensive coverage
+- **Tests**: 2520+ passing tests with comprehensive coverage
 - **Zero Warnings**: All code compiles cleanly (NO WARNINGS POLICY)
 
 ### Feature Metrics
@@ -351,6 +353,21 @@ OxiFY uses CeleRS as its distributed execution backend:
 │  Execution  │
 └─────────────┘
 ```
+
+## Sponsorship
+
+Oxify is developed and maintained by **COOLJAPAN OU (Team Kitasan)**.
+
+If you find Oxify useful, please consider sponsoring the project to support continued development of the Pure Rust ecosystem.
+
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-red?logo=github)](https://github.com/sponsors/cool-japan)
+
+**[https://github.com/sponsors/cool-japan](https://github.com/sponsors/cool-japan)**
+
+Your sponsorship helps us:
+- Maintain and improve the COOLJAPAN ecosystem
+- Keep the entire ecosystem (OxiBLAS, OxiFFT, SciRS2, etc.) 100% Pure Rust
+- Provide long-term support and security updates
 
 ## License
 

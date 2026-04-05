@@ -41,7 +41,7 @@
 //! ```
 
 use anyhow::{Context, Result};
-use rand::Rng;
+use rand::RngExt;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

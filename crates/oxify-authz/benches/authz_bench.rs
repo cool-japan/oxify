@@ -10,7 +10,7 @@
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use oxify_authz::*;
-use rand::Rng;
+use rand::{Rng, RngExt};
 use std::hint::black_box;
 
 /// Benchmark in-memory authorization checks

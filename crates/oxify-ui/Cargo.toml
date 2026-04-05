@@ -15,11 +15,11 @@ path = "src/main.rs"
 
 [dependencies]
 # Workspace dependencies
-oxify-model = { version = "0.1.0", path = "../oxify-model" }
-oxify-engine = { version = "0.1.0", path = "../oxify-engine" }
-oxify-storage = { version = "0.1.0", path = "../oxify-storage" }
-oxify-authn = { version = "0.1.0", path = "../oxify-authn" }
-oxify-authz = { version = "0.1.0", path = "../oxify-authz" }
+oxify-model = { version = "0.2.0", path = "../oxify-model" }
+oxify-engine = { version = "0.2.0", path = "../oxify-engine" }
+oxify-storage = { version = "0.2.0", path = "../oxify-storage" }
+oxify-authn = { version = "0.2.0", path = "../oxify-authn" }
+oxify-authz = { version = "0.2.0", path = "../oxify-authz" }
 
 # Web framework
 axum = { workspace = true, features = ["macros"] }
@@ -28,8 +28,7 @@ tower-http = { workspace = true, features = ["cors", "trace", "fs", "compression
 tokio = { workspace = true }
 
 # Templating
-askama = { version = "0.12", features = ["with-axum"] }
-askama_axum = "0.4"
+askama = "0.15"
 
 # Serialization
 serde = { workspace = true }

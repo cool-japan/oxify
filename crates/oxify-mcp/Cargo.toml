@@ -10,7 +10,7 @@ categories = ["network-programming", "web-programming", "development-tools"]
 keywords = ["mcp", "mcp-server", "context-protocol", "ai"]
 
 [dependencies]
-oxify-model = { version = "0.1.0", path = "../oxify-model" }
+oxify-model = { version = "0.2.0", path = "../oxify-model" }
 tokio = { workspace = true, features = ["process", "io-util"] }
 async-trait = { workspace = true }
 base64 = "0.22"

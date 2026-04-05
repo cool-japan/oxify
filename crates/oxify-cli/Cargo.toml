@@ -14,13 +14,13 @@ name = "oxify-cli"
 path = "src/main.rs"
 
 [dependencies]
-oxify-model = { version = "0.1.0", path = "../oxify-model" }
-oxify-engine = { version = "0.1.0", path = "../oxify-engine" }
-oxify-connect-llm = { version = "0.1.0", path = "../oxify-connect-llm" }
-oxify-connect-vector = { version = "0.1.0", path = "../oxify-connect-vector" }
-oxify-connect-vision = { version = "0.1.0", path = "../oxify-connect-vision" }
+oxify-model = { version = "0.2.0", path = "../oxify-model" }
+oxify-engine = { version = "0.2.0", path = "../oxify-engine" }
+oxify-connect-llm = { version = "0.2.0", path = "../oxify-connect-llm" }
+oxify-connect-vector = { version = "0.2.0", path = "../oxify-connect-vector" }
+oxify-connect-vision = { version = "0.2.0", path = "../oxify-connect-vision" }
 clap = { workspace = true }
-clap_complete = "4.5"
+clap_complete = "4.6"
 tokio = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
@@ -33,7 +33,7 @@ dirs = { workspace = true }
 reqwest = { workspace = true }
 flate2 = "1.1"
 tar = "0.4"
-zip = "6.0"
+oxiarc-archive = "0.2.6"
 uuid = { workspace = true }
 chrono = { workspace = true }
 rpassword = "7.4"

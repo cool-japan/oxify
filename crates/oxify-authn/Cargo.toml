@@ -1,9 +1,9 @@
 [package]
 name = "oxify-authn"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["OxiFY Contributors"]
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 description = "Authentication module for OxiFY - JWT, OAuth2, SAML, LDAP support (ported from OxiRS)"
 repository = "https://github.com/cool-japan/oxify"
 categories = ["authentication", "web-programming", "cryptography"]
@@ -21,13 +21,13 @@ chrono = { workspace = true }
 anyhow = { workspace = true }
 
 # Authentication
-jsonwebtoken = { version = "10.2", features = ["rust_crypto"] }
+jsonwebtoken = { version = "10.3", features = ["rust_crypto"] }
 oauth2 = "5.0"
 reqwest = { workspace = true }
 
 # Password hashing
 argon2 = { version = "0.5", features = ["std"] }
-bcrypt = "0.18"
+bcrypt = "0.19"
 
 # TOTP for MFA (optional)
 totp-rs = { version = "5.7", features = ["gen_secret", "otpauth"], optional = true }
@@ -48,7 +48,7 @@ percent-encoding = "2.3"
 sha2 = "0.10"
 
 # SAML 2.0 support (optional)
-quick-xml = { version = "0.38", features = ["serialize"], optional = true }
+quick-xml = { version = "0.39", features = ["serialize"], optional = true }
 flate2 = { version = "1.1", optional = true }
 url = { version = "2.5", optional = true }
 

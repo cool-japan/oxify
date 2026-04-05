@@ -10,9 +10,9 @@ categories = ["database", "caching", "asynchronous"]
 keywords = ["sqlite", "database", "storage", "metrics", "cache"]
 
 [dependencies]
-oxify-model = { version = "0.1.0", path = "../oxify-model" }
+oxify-model = { version = "0.2.0", path = "../oxify-model" }
 sqlx = { workspace = true, features = ["migrate", "json", "uuid", "chrono", "rust_decimal"] }
-rust_decimal = "1.40"
+rust_decimal = "1.41"
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -31,7 +31,7 @@ regex = "1.12"
 hmac = "0.12"
 hex = "0.4"
 reqwest = { workspace = true }
-redis = { version = "1.0", features = ["tokio-comp", "connection-manager"], optional = true }
+redis = { version = "1.1", features = ["tokio-comp", "connection-manager"], optional = true }
 
 [features]
 default = []

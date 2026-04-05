@@ -872,16 +872,16 @@ async fn package_workflow(file: &str, output: &str, include_deps: bool) -> Resul
                 .with_context(|| "Failed to finalize tar archive")?;
         }
         "zip" => {
-            use zip::write::SimpleFileOptions;
-            use zip::ZipWriter;
+            use oxiarc_archive::ZipWriter;
 
             let zip_file = fs::File::create(output)
                 .with_context(|| format!("Failed to create output file: {}", output))?;
             let mut zip = ZipWriter::new(zip_file);
 
             // Add manifest
-            zip.start_file("manifest.json", SimpleFileOptions::default())?;
-            std::io::copy(&mut fs::File::open(&manifest_path)?, &mut zip)?;
+            let manifest_data =
+                fs::read(&manifest_path).with_context(|| "Failed to read manifest file")?;
+            zip.add_file("manifest.json", &manifest_data)?;
 
             // Add workflows
             for entry in fs::read_dir(&workflows_dir)? {
@@ -889,8 +889,9 @@ async fn package_workflow(file: &str, output: &str, include_deps: bool) -> Resul
                 let path = entry.path();
                 if path.is_file() {
                     let name = format!("workflows/{}", path.file_name().unwrap().to_string_lossy());
-                    zip.start_file(&name, SimpleFileOptions::default())?;
-                    std::io::copy(&mut fs::File::open(&path)?, &mut zip)?;
+                    let data = fs::read(&path)
+                        .with_context(|| format!("Failed to read workflow file: {:?}", path))?;
+                    zip.add_file(&name, &data)?;
                 }
             }
 

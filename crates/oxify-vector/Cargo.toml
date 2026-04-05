@@ -1,9 +1,9 @@
 [package]
 name = "oxify-vector"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["OxiFY Contributors"]
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 description = "In-memory vector search and similarity operations for OxiFY (ported from OxiRS)"
 repository = "https://github.com/cool-japan/oxify"
 categories = ["algorithms", "data-structures", "science", "database-implementations"]
@@ -36,7 +36,7 @@ opentelemetry_sdk = { workspace = true, optional = true }
 # GPU acceleration with CUDA - Linux only (macOS/Windows don't support CUDA)
 # cudarc is only included on Linux targets
 [target.'cfg(target_os = "linux")'.dependencies]
-cudarc = { version = "0.18", features = ["driver", "cuda-version-from-build-system"], optional = true }
+cudarc = { version = "0.19", features = ["driver", "cuda-version-from-build-system"], optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

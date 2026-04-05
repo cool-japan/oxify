@@ -1,9 +1,9 @@
 [package]
 name = "oxify-server"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["OxiFY Contributors"]
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 description = "HTTP server implementation for OxiFY - Axum, graceful shutdown, middleware (ported from OxiRS)"
 repository = "https://github.com/cool-japan/oxify"
 categories = ["web-programming::http-server", "asynchronous", "network-programming"]
@@ -31,8 +31,8 @@ tokio-stream = { workspace = true }
 futures = { workspace = true }
 
 # Security crates
-oxify-authn = { version = "0.1.0", path = "../oxify-authn" }
-oxify-authz = { version = "0.1.0", path = "../oxify-authz" }
+oxify-authn = { version = "0.2.0", path = "../oxify-authn" }
+oxify-authz = { version = "0.2.0", path = "../oxify-authz" }
 
 # Observability
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

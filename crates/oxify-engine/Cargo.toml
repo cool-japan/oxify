@@ -10,11 +10,11 @@ categories = ["algorithms", "asynchronous", "concurrency"]
 keywords = ["workflow", "dag", "orchestration", "scheduler", "execution-engine"]
 
 [dependencies]
-oxify-model = { version = "0.1.0", path = "../oxify-model" }
-oxify-connect-llm = { version = "0.1.0", path = "../oxify-connect-llm" }
-oxify-connect-vector = { version = "0.1.0", path = "../oxify-connect-vector" }
-oxify-connect-vision = { version = "0.1.0", path = "../oxify-connect-vision" }
-oxify-mcp = { version = "0.1.0", path = "../oxify-mcp" }
+oxify-model = { version = "0.2.0", path = "../oxify-model" }
+oxify-connect-llm = { version = "0.2.0", path = "../oxify-connect-llm" }
+oxify-connect-vector = { version = "0.2.0", path = "../oxify-connect-vector" }
+oxify-connect-vision = { version = "0.2.0", path = "../oxify-connect-vision" }
+oxify-mcp = { version = "0.2.0", path = "../oxify-mcp" }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
@@ -40,7 +40,7 @@ rand = { workspace = true }
 toml = { workspace = true }
 opentelemetry = { workspace = true, optional = true }
 opentelemetry_sdk = { workspace = true, optional = true }
-tokio-tungstenite = { version = "0.28", optional = true }
+tokio-tungstenite = { version = "0.29", optional = true }
 url = "2.5"
 
 [dev-dependencies]

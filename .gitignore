@@ -27,3 +27,6 @@ Cargo.lock
 *.pdb
 
 # SQL
+
+# Rustc ICE dumps
+rustc-ice-*.txt

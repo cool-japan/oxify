@@ -307,7 +307,7 @@ impl OAuth2Service {
 /// Generate code verifier for PKCE
 fn generate_code_verifier() -> String {
     const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
-    use rand::Rng;
+    use rand::RngExt;
     let mut rng = rand::rng();
 
     (0..128)

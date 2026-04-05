@@ -8,7 +8,7 @@
 
 use crate::{Engine, ExecutionConfig, Result};
 use oxify_model::{ExecutionContext, Workflow};
-use rand::Rng;
+use rand::RngExt;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 

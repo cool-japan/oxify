@@ -37,7 +37,7 @@
 
 use crate::Result;
 use chrono::{Duration, Utc};
-use rand::{Rng, SeedableRng};
+use rand::{Rng, RngExt, SeedableRng};
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -465,7 +465,7 @@ trait RngTrait {
     fn random_range(&mut self, range: std::ops::Range<i64>) -> i64;
 }
 
-impl<R: Rng> RngTrait for R {
+impl<R: Rng + RngExt> RngTrait for R {
     fn random_range(&mut self, range: std::ops::Range<i64>) -> i64 {
         self.random_range(range)
     }

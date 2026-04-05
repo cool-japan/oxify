@@ -286,7 +286,7 @@ pub struct WebhookRegistrationResponse {
 
 /// Helper to generate webhook secret
 pub fn generate_webhook_secret() -> String {
-    use rand::Rng;
+    use rand::RngExt;
     const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     const SECRET_LEN: usize = 32;
 

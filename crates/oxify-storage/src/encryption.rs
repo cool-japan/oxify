@@ -5,7 +5,7 @@
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use oxify_model::EncryptionMetadata;
-use rand::Rng;
+use rand::RngExt;
 
 /// Encryption service for secrets
 pub struct EncryptionService {

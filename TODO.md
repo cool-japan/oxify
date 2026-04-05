@@ -612,9 +612,9 @@ Defined DAGs (code-based) can be executed in parallel with vector search support
 
 ---
 
-## Summary of Current Status (As of 2026-01-19)
+## Summary of Current Status (As of 2026-03-29)
 
-**OxiFY v0.1.0** is a production-ready LLM workflow orchestration platform with comprehensive features:
+**OxiFY v0.2.0** is a production-ready LLM workflow orchestration platform with comprehensive features:
 
 ### ✅ Core Infrastructure (COMPLETE)
 - **Security & Auth**: ReBAC (oxify-authz), JWT/OAuth2 (oxify-authn), password management

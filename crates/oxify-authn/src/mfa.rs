@@ -173,7 +173,7 @@ impl TotpManager {
 
     /// Generate backup codes for recovery
     fn generate_backup_codes(count: usize) -> Vec<String> {
-        use rand::Rng;
+        use rand::RngExt;
         let mut rng = rand::rng();
 
         (0..count)
