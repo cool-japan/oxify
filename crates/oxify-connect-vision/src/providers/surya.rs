@@ -10,16 +10,13 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[cfg(feature = "surya")]
-use ort::{
-    session::{Session, SessionOutputs},
-    value::Value,
-};
+use oxionnx::{inputs, Session, SessionOutputs, Tensor};
 
 #[cfg(all(feature = "surya", feature = "cuda"))]
-use ort::execution_providers::CUDAExecutionProvider;
+use oxionnx::CUDAExecutionProvider;
 
 #[cfg(all(feature = "surya", feature = "coreml", not(feature = "cuda")))]
-use ort::execution_providers::CoreMLExecutionProvider;
+use oxionnx::CoreMLExecutionProvider;
 
 use crate::errors::{Result, VisionError};
 use crate::types::{BlockRole, OcrMetadata, OcrResult, TextBlock};
@@ -79,9 +76,7 @@ impl SuryaClient {
         let model_path = model_file.clone();
 
         tokio::task::spawn_blocking(move || {
-            let builder = Session::builder().map_err(|e| {
-                VisionError::onnx_runtime(format!("Failed to create builder: {}", e))
-            })?;
+            let builder = Session::builder();
 
             // Configure execution providers
             #[allow(unused_mut)]
@@ -90,17 +85,11 @@ impl SuryaClient {
                 {
                     builder
                         .with_execution_providers([CUDAExecutionProvider::default().build()])
-                        .map_err(|e| {
-                            VisionError::onnx_runtime(format!("CUDA setup failed: {}", e))
-                        })?
                 }
                 #[cfg(all(feature = "coreml", not(feature = "cuda")))]
                 {
                     builder
                         .with_execution_providers([CoreMLExecutionProvider::default().build()])
-                        .map_err(|e| {
-                            VisionError::onnx_runtime(format!("CoreML setup failed: {}", e))
-                        })?
                 }
                 #[cfg(not(any(feature = "cuda", feature = "coreml")))]
                 {
@@ -162,14 +151,14 @@ impl SuryaClient {
 
         let input = self.preprocess_for_detection(img)?;
 
-        // Convert ndarray to ort::Value
-        let input_value = Value::from_array(input).map_err(|e| {
-            VisionError::onnx_runtime(format!("Failed to create input value: {}", e))
-        })?;
+        // Convert ndarray to Tensor
+        let input_value = Tensor::from_ndarray(input);
 
         // Run inference
+        let inp = inputs!["input" => input_value]
+            .map_err(|e| VisionError::onnx_runtime(format!("Failed to build inputs: {}", e)))?;
         let outputs = session
-            .run(ort::inputs!["input" => input_value])
+            .run(&inp)
             .map_err(|e| VisionError::onnx_runtime(format!("Detection inference failed: {}", e)))?;
 
         // Parse detection output (this is simplified - actual Surya output parsing is more complex)
@@ -182,7 +171,7 @@ impl SuryaClient {
     }
 
     /// Parse detection model output to bounding boxes.
-    fn parse_detection_output(&self, _tensor: &Value) -> Result<Vec<[f32; 4]>> {
+    fn parse_detection_output(&self, _tensor: &Tensor) -> Result<Vec<[f32; 4]>> {
         // Simplified implementation - actual parsing depends on model output format
         // Surya detection output typically includes:
         // - boxes: [N, 4] normalized coordinates
@@ -242,13 +231,14 @@ impl SuryaClient {
                 }
             }
 
-            // Convert to ort::Value
-            let input_value = Value::from_array(input)
-                .map_err(|e| VisionError::onnx_runtime(format!("Failed to create input: {}", e)))?;
+            // Convert to Tensor
+            let input_value = Tensor::from_ndarray(input);
 
             // Run recognition
+            let inp = inputs!["input" => input_value]
+                .map_err(|e| VisionError::onnx_runtime(format!("Failed to build inputs: {}", e)))?;
             let outputs = session
-                .run(ort::inputs!["input" => input_value])
+                .run(&inp)
                 .map_err(|e| VisionError::onnx_runtime(format!("Recognition failed: {}", e)))?;
 
             // Parse output (simplified)
@@ -260,7 +250,7 @@ impl SuryaClient {
     }
 
     /// Decode recognition model output to text.
-    fn decode_recognition_output(&self, _outputs: &SessionOutputs) -> Result<String> {
+    fn decode_recognition_output(&self, _outputs: &SessionOutputs<'_>) -> Result<String> {
         // Simplified - actual implementation would use CTC decoding
         // with a character vocabulary
         Ok(String::new())

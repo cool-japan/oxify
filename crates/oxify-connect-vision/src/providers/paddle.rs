@@ -10,16 +10,13 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[cfg(feature = "paddle")]
-use ort::{
-    session::{Session, SessionOutputs},
-    value::Value,
-};
+use oxionnx::{inputs, Session, SessionOutputs, Tensor};
 
 #[cfg(all(feature = "paddle", feature = "cuda"))]
-use ort::execution_providers::CUDAExecutionProvider;
+use oxionnx::CUDAExecutionProvider;
 
 #[cfg(all(feature = "paddle", feature = "coreml", not(feature = "cuda")))]
-use ort::execution_providers::CoreMLExecutionProvider;
+use oxionnx::CoreMLExecutionProvider;
 
 use crate::errors::{Result, VisionError};
 use crate::types::{BlockRole, OcrMetadata, OcrResult, TextBlock};
@@ -91,9 +88,7 @@ impl PaddleOcrClient {
         let model_path = model_file.clone();
 
         tokio::task::spawn_blocking(move || {
-            let builder = Session::builder().map_err(|e| {
-                VisionError::onnx_runtime(format!("Failed to create builder: {}", e))
-            })?;
+            let builder = Session::builder();
 
             // Configure execution providers
             #[allow(unused_mut)]
@@ -102,17 +97,11 @@ impl PaddleOcrClient {
                 {
                     builder
                         .with_execution_providers([CUDAExecutionProvider::default().build()])
-                        .map_err(|e| {
-                            VisionError::onnx_runtime(format!("CUDA setup failed: {}", e))
-                        })?
                 }
                 #[cfg(all(feature = "coreml", not(feature = "cuda")))]
                 {
                     builder
                         .with_execution_providers([CoreMLExecutionProvider::default().build()])
-                        .map_err(|e| {
-                            VisionError::onnx_runtime(format!("CoreML setup failed: {}", e))
-                        })?
                 }
                 #[cfg(not(any(feature = "cuda", feature = "coreml")))]
                 {
@@ -192,13 +181,14 @@ impl PaddleOcrClient {
 
         let (input, scale_x, scale_y) = self.preprocess_for_detection(img)?;
 
-        // Convert to ort::Value
-        let input_value = Value::from_array(input)
-            .map_err(|e| VisionError::onnx_runtime(format!("Failed to create input: {}", e)))?;
+        // Convert to Tensor
+        let input_value = Tensor::from_ndarray(input);
 
         // Run inference
+        let inp = inputs!["x" => input_value]
+            .map_err(|e| VisionError::onnx_runtime(format!("Failed to build inputs: {}", e)))?;
         let outputs = session
-            .run(ort::inputs!["x" => input_value])
+            .run(&inp)
             .map_err(|e| VisionError::onnx_runtime(format!("Detection failed: {}", e)))?;
 
         // Parse DBNet output (probability map)
@@ -281,13 +271,14 @@ impl PaddleOcrClient {
                 }
             }
 
-            // Convert to ort::Value
-            let input_value = Value::from_array(input)
-                .map_err(|e| VisionError::onnx_runtime(format!("Failed to create input: {}", e)))?;
+            // Convert to Tensor
+            let input_value = Tensor::from_ndarray(input);
 
             // Run recognition
+            let inp = inputs!["x" => input_value]
+                .map_err(|e| VisionError::onnx_runtime(format!("Failed to build inputs: {}", e)))?;
             let outputs = session
-                .run(ort::inputs!["x" => input_value])
+                .run(&inp)
                 .map_err(|e| VisionError::onnx_runtime(format!("Recognition failed: {}", e)))?;
 
             // Decode output using CTC
@@ -301,7 +292,7 @@ impl PaddleOcrClient {
     }
 
     /// CTC decode recognition output.
-    fn ctc_decode(&self, _outputs: &SessionOutputs, _char_dict: &[char]) -> Result<String> {
+    fn ctc_decode(&self, _outputs: &SessionOutputs<'_>, _char_dict: &[char]) -> Result<String> {
         // Simplified CTC decoding
         // Actual implementation:
         // 1. Get argmax indices from output logits

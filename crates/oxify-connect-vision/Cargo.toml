@@ -24,8 +24,8 @@ image = "0.25"
 imageproc = "0.26"
 ndarray = "0.17"
 
-# ONNX Runtime for Surya/PaddleOCR
-ort = { version = "2.0.0-rc.12", optional = true }
+# ONNX Runtime for Surya/PaddleOCR (Pure Rust — no C/C++ dependencies)
+oxionnx = { path = "../../../oxionnx", features = ["ndarray"], optional = true }
 
 # Tesseract OCR (using leptess which provides Tesseract bindings)
 leptess = { version = "0.14", optional = true }
@@ -58,7 +58,7 @@ chrono = { workspace = true }
 default = ["mock"]
 mock = []
 tesseract = ["leptess"]
-onnx = ["ort"]
+onnx = ["dep:oxionnx"]
 surya = ["onnx"]
 paddle = ["onnx"]
 google-vision = []
