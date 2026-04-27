@@ -1,0 +1,29 @@
+[package]
+name = "oxify-connect-comm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Communication connectors for OxiFY - Slack, SMTP, and more"
+repository = "https://github.com/cool-japan/oxify"
+
+[dependencies]
+async-trait.workspace = true
+thiserror.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+reqwest = { workspace = true }
+tokio = { workspace = true }
+tracing.workspace = true
+chrono.workspace = true
+lettre = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+wiremock.workspace = true
+
+[features]
+default = ["slack"]
+slack = []
+smtp = ["lettre"]
+all-providers = ["slack", "smtp"]

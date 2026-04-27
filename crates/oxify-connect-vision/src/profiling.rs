@@ -525,7 +525,7 @@ impl ProfilingReport {
             })
             .collect();
 
-        bottlenecks.sort_by(|a, b| b.duration.cmp(&a.duration));
+        bottlenecks.sort_by_key(|x| std::cmp::Reverse(x.duration));
         bottlenecks
     }
 

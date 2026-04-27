@@ -153,6 +153,10 @@ pub use visualization::{
     export_to_ascii, export_to_dot, export_to_mermaid, VisualizationFormat, WorkflowVisualizer,
 };
 pub use webhook::{WebhookConfig, WebhookId, WebhookRegistry, WebhookTrigger};
+#[cfg(feature = "nats")]
+pub mod nats_bridge;
+#[cfg(feature = "nats")]
+pub use nats_bridge::{NatsBridge, NatsBridgeConfig, NatsBridgeError, NatsCreds};
 #[cfg(feature = "websocket")]
 pub use websocket_connector::{
     ConnectionState, WebSocketConfig, WebSocketConnector, WebSocketError, WebSocketMessage,

@@ -83,13 +83,11 @@ impl SuryaClient {
             let mut builder = if use_gpu {
                 #[cfg(feature = "cuda")]
                 {
-                    builder
-                        .with_execution_providers([CUDAExecutionProvider::default().build()])
+                    builder.with_execution_providers([CUDAExecutionProvider.build()])
                 }
                 #[cfg(all(feature = "coreml", not(feature = "cuda")))]
                 {
-                    builder
-                        .with_execution_providers([CoreMLExecutionProvider::default().build()])
+                    builder.with_execution_providers([CoreMLExecutionProvider::default().build()])
                 }
                 #[cfg(not(any(feature = "cuda", feature = "coreml")))]
                 {

@@ -37,3 +37,5 @@ oxiarc-archive = "0.2.6"
 uuid = { workspace = true }
 chrono = { workspace = true }
 rpassword = "7.4"
+ratatui = { workspace = true }
+crossterm = { workspace = true }

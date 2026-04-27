@@ -237,7 +237,7 @@ impl CheckpointStorage for InMemoryCheckpointStorage {
             .collect();
 
         // Sort by creation time (newest first)
-        list.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        list.sort_by_key(|x| std::cmp::Reverse(x.created_at));
 
         Ok(list)
     }

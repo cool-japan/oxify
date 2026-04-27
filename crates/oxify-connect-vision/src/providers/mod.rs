@@ -14,6 +14,9 @@ mod paddle;
 #[cfg(feature = "google-vision")]
 mod google_vision;
 
+#[cfg(feature = "azure-vision")]
+mod azure_vision;
+
 // Re-exports
 pub use mock::MockVisionProvider;
 
@@ -28,6 +31,9 @@ pub use paddle::PaddleOcrClient;
 
 #[cfg(feature = "google-vision")]
 pub use google_vision::{CostStats, GoogleVisionConfig, GoogleVisionProvider};
+
+#[cfg(feature = "azure-vision")]
+pub use azure_vision::{AzureVisionConfig, AzureVisionProvider, CostStats as AzureVisionCostStats};
 
 use crate::errors::{Result, VisionError};
 use crate::types::OcrResult;
@@ -102,6 +108,14 @@ impl VisionProviderConfig {
     pub fn google_vision() -> Self {
         Self {
             provider: "google_vision".to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// Create a new configuration for Azure Computer Vision.
+    pub fn azure_vision() -> Self {
+        Self {
+            provider: "azure_vision".to_string(),
             ..Default::default()
         }
     }
@@ -185,6 +199,12 @@ pub fn create_provider(config: &VisionProviderConfig) -> Result<Box<dyn VisionPr
             Ok(Box::new(google_vision::GoogleVisionProvider::new(
                 gcp_config,
             )))
+        }
+
+        #[cfg(feature = "azure-vision")]
+        "azure_vision" => {
+            let az_config = azure_vision::AzureVisionConfig::default();
+            Ok(Box::new(azure_vision::AzureVisionProvider::new(az_config)))
         }
 
         provider => Err(VisionError::unsupported_provider(provider)),

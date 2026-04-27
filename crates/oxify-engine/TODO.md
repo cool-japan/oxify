@@ -673,6 +673,14 @@
 
 ## Integration
 
+### NATS Integration ✅ COMPLETE (v0.2.1)
+- [x] **NATS Broker Bridge** (`nats_bridge.rs`, feature `nats`)
+  - [x] Bidirectional sync: in-process EventBus ↔ external NATS subjects
+  - [x] Sliding-window publish filter (event type allow-list)
+  - [x] UserPass + JwtNkey credential support
+  - [x] Graceful shutdown (task abort + client flush)
+  - [x] 5 unit tests
+
 ### CeleRS Integration (Future)
 - [ ] **Distributed Execution:**
   - [ ] Integrate with CeleRS task queue

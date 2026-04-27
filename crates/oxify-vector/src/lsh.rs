@@ -48,7 +48,7 @@
 
 use anyhow::{anyhow, Result};
 use rand::rngs::StdRng;
-use rand::{Rng, RngExt, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{debug, info};
@@ -125,7 +125,7 @@ struct HashTable {
 }
 
 impl HashTable {
-    fn new(num_bits: usize, dimensions: usize, rng: &mut (impl Rng + RngExt)) -> Self {
+    fn new(num_bits: usize, dimensions: usize, rng: &mut impl RngExt) -> Self {
         // Generate random projection vectors
         let projections: Vec<Vec<f32>> = (0..num_bits)
             .map(|_| {

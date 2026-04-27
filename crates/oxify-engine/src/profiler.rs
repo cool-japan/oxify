@@ -143,7 +143,7 @@ impl WorkflowProfile {
     /// Get slowest nodes (top N)
     pub fn get_slowest_nodes(&self, n: usize) -> Vec<&NodeProfile> {
         let mut sorted = self.node_profiles.iter().collect::<Vec<_>>();
-        sorted.sort_by(|a, b| b.duration.cmp(&a.duration));
+        sorted.sort_by_key(|x| std::cmp::Reverse(x.duration));
         sorted.into_iter().take(n).collect()
     }
 

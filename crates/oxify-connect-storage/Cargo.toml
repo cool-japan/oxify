@@ -1,0 +1,30 @@
+[package]
+name = "oxify-connect-storage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Object storage connectors for OxiFY - S3, MinIO, GCS, Azure Blob"
+repository = "https://github.com/cool-japan/oxify"
+
+[dependencies]
+async-trait.workspace = true
+thiserror.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+tokio = { workspace = true }
+tracing.workspace = true
+chrono.workspace = true
+bytes.workspace = true
+futures.workspace = true
+object_store = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+tempfile.workspace = true
+
+[features]
+default = ["memory"]
+memory = []
+aws = ["object_store"]
+all-providers = ["memory", "aws"]

@@ -110,7 +110,7 @@ impl WorkflowOptimizer {
         optimizations.extend(self.check_complexity(workflow));
 
         // Sort by priority
-        optimizations.sort_by(|a, b| b.priority.cmp(&a.priority));
+        optimizations.sort_by_key(|x| std::cmp::Reverse(x.priority));
 
         optimizations
     }

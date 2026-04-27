@@ -29,7 +29,7 @@ use pyo3::prelude::*;
 use std::collections::HashMap;
 
 /// Python wrapper for Workflow
-#[pyclass(name = "PyWorkflow")]
+#[pyclass(name = "PyWorkflow", from_py_object)]
 #[derive(Clone)]
 pub struct PyWorkflow {
     inner: Workflow,

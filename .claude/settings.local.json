@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo doc:*)",
+      "Bash(ls:*)",
+      "Bash(cargo nextest run:*)",
+      "Bash(cargo tree:*)",
+      "Bash(apt-get install:*)",
+      "Bash(ORT_STRATEGY=system cargo nextest run:*)",
+      "Bash(grep:*)",
+      "Bash(dpkg:*)",
+      "Bash(export PKG_CONFIG_PATH:*)",
+      "Bash(ldd:*)",
+      "Bash(RUSTFLAGS=\"-C link-arg=-fuse-ld=gold\" cargo nextest run:*)",
+      "Bash(gcc:*)",
+      "Bash(RUSTFLAGS=\"-C link-arg=-L/tmp -C link-arg=-lglibc_compat\" cargo nextest run:*)",
+      "Bash(find:*)",
+      "Bash(RUSTFLAGS=\"-C link-arg=-L/tmp -C link-arg=-lglibc_compat -C link-arg=-L/usr/lib/x86_64-linux-gnu -C link-arg=-lpython3.11\" cargo nextest run:*)",
+      "Bash(export LD_LIBRARY_PATH=/tmp:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH:*)",
+      "Bash(RUSTFLAGS=\"-C link-arg=-L/tmp -C link-arg=-lglibc_compat -C link-arg=-L/usr/lib/x86_64-linux-gnu -C link-arg=-lpython3.11\" cargo check:*)",
+      "Bash(export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH:*)"
+    ]
+  }
+}

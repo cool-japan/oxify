@@ -105,7 +105,7 @@ impl Default for AppState {
     }
 }
 
-/// Health check handler
+/// Health check handler (backward-compatible alias for `/livez`)
 #[utoipa::path(
     get,
     path = "/health",
@@ -118,6 +118,50 @@ pub async fn health() -> Json<HealthResponse> {
         status: "healthy".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     })
+}
+
+/// Liveness probe response
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct LivezResponse {
+    pub status: &'static str,
+}
+
+/// Liveness probe — always returns 200 as long as the process is alive.
+///
+/// A liveness probe failure triggers a container restart. This endpoint
+/// performs no I/O and will never return a non-2xx status voluntarily.
+#[utoipa::path(
+    get,
+    path = "/livez",
+    responses(
+        (status = 200, description = "Process is alive", body = LivezResponse)
+    )
+)]
+pub async fn livez() -> Json<LivezResponse> {
+    Json(LivezResponse { status: "alive" })
+}
+
+/// Readiness probe response
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct ReadyzResponse {
+    pub status: &'static str,
+}
+
+/// Readiness probe — returns 200 when the service is ready to accept traffic.
+///
+/// A readiness probe failure removes the pod from the load-balancer rotation
+/// without restarting it.  This stub unconditionally returns `ready`; a full
+/// implementation would delegate to a [`oxify_server::ReadinessRegistry`].
+#[utoipa::path(
+    get,
+    path = "/readyz",
+    responses(
+        (status = 200, description = "Service is ready", body = ReadyzResponse),
+        (status = 503, description = "Service is not ready")
+    )
+)]
+pub async fn readyz() -> Json<ReadyzResponse> {
+    Json(ReadyzResponse { status: "ready" })
 }
 
 /// Create a new workflow

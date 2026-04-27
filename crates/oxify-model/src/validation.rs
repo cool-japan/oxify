@@ -309,11 +309,10 @@ impl WorkflowValidator {
                 }
 
                 // Validate Approval nodes
-                NodeKind::Approval(config) => {
-                    if config.message.trim().is_empty() {
-                        errors.push(ValidationError::ApprovalEmptyMessage(node.id));
-                    }
+                NodeKind::Approval(config) if config.message.trim().is_empty() => {
+                    errors.push(ValidationError::ApprovalEmptyMessage(node.id));
                 }
+                NodeKind::Approval(_) => {}
 
                 // Validate Form nodes
                 NodeKind::Form(config) => {
@@ -368,18 +367,16 @@ impl WorkflowValidator {
                 },
 
                 // Validate TryCatch nodes
-                NodeKind::TryCatch(config) => {
-                    if config.try_expression.trim().is_empty() {
-                        errors.push(ValidationError::TryCatchEmptyTryExpression(node.id));
-                    }
+                NodeKind::TryCatch(config) if config.try_expression.trim().is_empty() => {
+                    errors.push(ValidationError::TryCatchEmptyTryExpression(node.id));
                 }
+                NodeKind::TryCatch(_) => {}
 
                 // Validate SubWorkflow nodes
-                NodeKind::SubWorkflow(config) => {
-                    if config.workflow_path.trim().is_empty() {
-                        errors.push(ValidationError::SubWorkflowEmptyPath(node.id));
-                    }
+                NodeKind::SubWorkflow(config) if config.workflow_path.trim().is_empty() => {
+                    errors.push(ValidationError::SubWorkflowEmptyPath(node.id));
                 }
+                NodeKind::SubWorkflow(_) => {}
 
                 // Other node types don't need advanced validation here
                 _ => {}

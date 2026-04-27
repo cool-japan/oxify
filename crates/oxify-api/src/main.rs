@@ -228,6 +228,9 @@ async fn main() -> anyhow::Result<()> {
     // Public routes (no authentication required)
     let public_router = Router::new()
         .route("/health", get(health))
+        // Kubernetes-style liveness / readiness probes
+        .route("/livez", get(livez))
+        .route("/readyz", get(readyz))
         .route("/metrics", get(get_metrics))
         .route("/api/v1/auth/login", post(auth_handlers::login))
         .route("/api/v1/auth/register", post(auth_handlers::register))

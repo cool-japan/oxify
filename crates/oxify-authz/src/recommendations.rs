@@ -216,7 +216,7 @@ impl RecommendationEngine {
         recommendations.extend(self.detect_conflicts());
 
         // Sort by priority (highest first)
-        recommendations.sort_by(|a, b| b.priority.cmp(&a.priority));
+        recommendations.sort_by_key(|x| std::cmp::Reverse(x.priority));
 
         recommendations
     }

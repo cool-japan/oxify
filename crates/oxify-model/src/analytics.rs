@@ -437,7 +437,7 @@ impl AnalyticsBuilder {
         }
 
         // Sort by total duration descending
-        analytics.sort_by(|a, b| b.total_duration_ms.cmp(&a.total_duration_ms));
+        analytics.sort_by_key(|x| std::cmp::Reverse(x.total_duration_ms));
 
         analytics
     }
@@ -501,7 +501,7 @@ impl AnalyticsBuilder {
             .collect();
 
         // Sort by occurrence count descending
-        patterns.sort_by(|a, b| b.occurrence_count.cmp(&a.occurrence_count));
+        patterns.sort_by_key(|x| std::cmp::Reverse(x.occurrence_count));
 
         patterns
     }

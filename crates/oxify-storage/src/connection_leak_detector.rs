@@ -280,7 +280,7 @@ impl LeakDetector {
         state.last_check = now;
 
         // Sort by duration (longest first)
-        suspected_leaks.sort_by(|a, b| b.duration_secs.cmp(&a.duration_secs));
+        suspected_leaks.sort_by_key(|x| std::cmp::Reverse(x.duration_secs));
 
         LeakReport {
             suspected_leaks,

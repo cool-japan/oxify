@@ -62,6 +62,7 @@ pub mod query_builder;
 // pub mod redis_cache;   // Disabled - depends on quota_store
 pub mod retry;
 // mod schedule_store;    // Disabled - complex
+pub mod session_store;
 // pub mod schema_validator; // Disabled - complex
 // mod secret_store;      // Disabled - needs Vec<String> conversion
 // pub mod seeding;       // Disabled - uses PgPool
@@ -119,6 +120,11 @@ pub use pagination::{
 pub use pool::{DatabasePool, PoolHealth, PoolMetrics, PoolStats};
 // #[cfg(feature = "redis-cache")]
 // pub use redis_cache::{RedisCache, RedisCacheConfig, TwoLevelCache};
+#[cfg(feature = "redis-cache")]
+pub use session_store::RedisSessionStore;
+pub use session_store::{
+    InMemorySessionStore, SessionData, SessionError, SessionResult, SessionStore,
+};
 pub use soft_delete::{
     SoftDeleteBuilder, SoftDeleteFilter, SoftDeleteMetadata, SoftDeleteRestorer,
 };

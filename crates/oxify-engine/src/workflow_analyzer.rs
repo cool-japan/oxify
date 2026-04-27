@@ -157,7 +157,7 @@ impl WorkflowAnalyzer {
         recommendations.retain(|r| r.expected_improvement >= self.min_improvement_threshold);
 
         // Sort by priority
-        recommendations.sort_by(|a, b| b.priority.cmp(&a.priority));
+        recommendations.sort_by_key(|x| std::cmp::Reverse(x.priority));
 
         recommendations
     }

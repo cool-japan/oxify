@@ -413,7 +413,7 @@ impl TimeEstimate {
     /// Get slowest nodes
     pub fn slowest_nodes(&self, limit: usize) -> Vec<&NodeTime> {
         let mut times: Vec<&NodeTime> = self.node_times.values().collect();
-        times.sort_by(|a, b| b.avg_ms.cmp(&a.avg_ms));
+        times.sort_by_key(|b| std::cmp::Reverse(b.avg_ms));
         times.into_iter().take(limit).collect()
     }
 }

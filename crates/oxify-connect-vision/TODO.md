@@ -142,11 +142,11 @@
   - Language hints configuration
   - Comprehensive tests (10 tests passing)
 
-- [ ] **Azure Computer Vision**
-  - Azure SDK integration
-  - Managed identity support
-  - Batch operations
-  - **Estimate:** 3-4 days
+- [x] **Azure Computer Vision** ✅ NEW (v0.2.1)
+  - API-key auth (`Ocp-Apim-Subscription-Key`), feature `azure-vision`
+  - Read API v2024-02-01 with sliding-window rate limiter (20 RPS)
+  - Cost tracking ($0.001/call), multi-language support (10 languages)
+  - 21 unit tests passing
 
 - [ ] **AWS Textract**
   - AWS SDK integration

@@ -926,14 +926,14 @@ impl DetailedResourceUsage {
     /// Get top N nodes by memory usage
     pub async fn top_memory_consumers(&self, n: usize) -> Vec<NodeResourceUsage> {
         let mut nodes = self.get_all_node_usage().await;
-        nodes.sort_by(|a, b| b.memory_bytes.cmp(&a.memory_bytes));
+        nodes.sort_by_key(|x| std::cmp::Reverse(x.memory_bytes));
         nodes.into_iter().take(n).collect()
     }
 
     /// Get top N nodes by token usage
     pub async fn top_token_consumers(&self, n: usize) -> Vec<NodeResourceUsage> {
         let mut nodes = self.get_all_node_usage().await;
-        nodes.sort_by(|a, b| b.tokens.cmp(&a.tokens));
+        nodes.sort_by_key(|x| std::cmp::Reverse(x.tokens));
         nodes.into_iter().take(n).collect()
     }
 }

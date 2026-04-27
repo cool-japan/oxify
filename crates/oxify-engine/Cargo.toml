@@ -41,6 +41,8 @@ toml = { workspace = true }
 opentelemetry = { workspace = true, optional = true }
 opentelemetry_sdk = { workspace = true, optional = true }
 tokio-tungstenite = { version = "0.29", optional = true }
+async-nats = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
 url = "2.5"
 
 [dev-dependencies]
@@ -53,6 +55,7 @@ default = []
 wasm = ["wasmer"]
 otel = ["opentelemetry", "opentelemetry_sdk"]
 websocket = ["tokio-tungstenite"]
+nats = ["async-nats", "bytes"]
 
 [[bench]]
 name = "engine_bench"

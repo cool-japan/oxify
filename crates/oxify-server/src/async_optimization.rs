@@ -57,11 +57,7 @@ impl AsyncStatsTracker {
         let completed = self.tasks_completed.load(Ordering::Relaxed);
         let total_time = self.total_execution_time_us.load(Ordering::Relaxed);
 
-        let avg_time = if completed > 0 {
-            total_time / completed
-        } else {
-            0
-        };
+        let avg_time = total_time.checked_div(completed).unwrap_or(0);
 
         AsyncStats {
             tasks_spawned: spawned,

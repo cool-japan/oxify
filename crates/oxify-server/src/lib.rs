@@ -42,6 +42,7 @@ pub mod middleware;
 pub mod openapi;
 pub mod otel;
 pub mod rate_limit;
+pub mod readiness;
 pub mod security;
 pub mod server;
 pub mod shutdown;
@@ -71,6 +72,9 @@ pub use graphql::{
 pub use metrics::MetricsRegistry;
 pub use otel::{init_tracer, span, OtelConfig, OtelError, OtelGuard};
 pub use rate_limit::{RateLimitConfig, RateLimiter};
+pub use readiness::{
+    AggregateReadiness, CheckerResult, ReadinessChecker, ReadinessRegistry, ReadinessStatus,
+};
 pub use security::{HstsConfig, SecurityHeadersConfig};
 pub use server::ServerRuntime;
 pub use sse::{SseConnectionManager, SseEventBroadcaster, SseEventType};

@@ -112,11 +112,9 @@ impl OperationMetrics {
 
     /// Get average latency
     pub fn avg_latency_ns(&self) -> u64 {
-        if self.call_count == 0 {
-            0
-        } else {
-            self.total_duration_ns / self.call_count
-        }
+        self.total_duration_ns
+            .checked_div(self.call_count)
+            .unwrap_or(0)
     }
 
     /// Get average latency as Duration
@@ -267,11 +265,11 @@ pub struct ProfilingStats {
 impl ProfilingStats {
     /// Get average latency across all operations
     pub fn avg_latency(&self) -> Duration {
-        if self.total_operations == 0 {
-            Duration::from_nanos(0)
-        } else {
-            Duration::from_nanos(self.total_duration_ns / self.total_operations)
-        }
+        Duration::from_nanos(
+            self.total_duration_ns
+                .checked_div(self.total_operations)
+                .unwrap_or(0),
+        )
     }
 
     /// Find slowest operation
@@ -316,11 +314,10 @@ impl PerfCounter {
     /// Get average latency in nanoseconds
     pub fn avg_ns(&self) -> u64 {
         let count = self.count();
-        if count == 0 {
-            0
-        } else {
-            self.total_ns.load(Ordering::Relaxed) / count
-        }
+        self.total_ns
+            .load(Ordering::Relaxed)
+            .checked_div(count)
+            .unwrap_or(0)
     }
 
     /// Get average latency as Duration

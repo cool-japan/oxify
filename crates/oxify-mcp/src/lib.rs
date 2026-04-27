@@ -18,6 +18,8 @@ pub use servers::{
     QueryResult, ShellServer, StatementResult, TransactionResult, WebServer, WorkflowExecutor,
     WorkflowServer, WorkflowServerConfig,
 };
+#[cfg(feature = "github")]
+pub use servers::{GitHubConfig, GitHubServer};
 pub use transport::{HttpTransport, McpTransport, StdioTransport};
 
 use async_trait::async_trait;

@@ -167,11 +167,7 @@ impl PerformanceMetrics {
             failed_checks: self.inner.failed_checks.load(Ordering::Relaxed),
             cache_hits,
             cache_misses,
-            avg_latency_us: if total_checks > 0 {
-                total_latency / total_checks
-            } else {
-                0
-            },
+            avg_latency_us: total_latency.checked_div(total_checks).unwrap_or(0),
             min_latency_us: self.inner.min_latency_us.load(Ordering::Relaxed),
             max_latency_us: self.inner.max_latency_us.load(Ordering::Relaxed),
             delegation_checks: self.inner.delegation_checks.load(Ordering::Relaxed),

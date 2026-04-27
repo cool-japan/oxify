@@ -4,6 +4,7 @@ use clap_complete::{generate, Shell};
 
 mod commands;
 mod config;
+mod tui;
 
 #[derive(Parser)]
 #[command(name = "oxify")]
@@ -124,6 +125,10 @@ enum Commands {
         #[command(subcommand)]
         command: commands::vision::VisionCommands,
     },
+    /// Interactive terminal UI (TUI) for monitoring workflows and executions
+    Tui(commands::tui::TuiArgs),
+    /// Generate a workflow from a natural language description
+    Generate(commands::generate::GenerateArgs),
     /// Generate shell completion scripts
     Completion {
         /// Shell type (bash, zsh, fish, powershell, elvish)
@@ -247,6 +252,8 @@ async fn main() -> Result<()> {
             commands::deploy::execute(commands::deploy::DeployArgs { command }).await
         }
         Commands::Vision { command } => commands::vision::handle_vision_command(command).await,
+        Commands::Tui(args) => commands::tui::run(args).await,
+        Commands::Generate(args) => commands::generate::run(args).await,
         Commands::Completion { shell } => {
             generate_completion(shell);
             Ok(())

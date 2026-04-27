@@ -488,24 +488,22 @@ impl WorkflowOptimizer {
                         });
                     }
                 }
-                NodeKind::Code(config) => {
+                NodeKind::Code(config) if config.runtime == "rust" || config.runtime == "wasm" => {
                     // Pure functions in code nodes can be memoized
-                    if config.runtime == "rust" || config.runtime == "wasm" {
-                        suggestions.push(OptimizationSuggestion {
-                            category: SuggestionCategory::Performance,
-                            severity: Severity::Low,
-                            description: format!(
-                                "Code node '{}' could use function memoization if it's a pure function.",
-                                node.name
-                            ),
-                            affected_nodes: vec![node.id.to_string()],
-                            benefit: Benefit {
-                                cost_savings_usd: None,
-                                time_savings_ms: Some(50), // Code execution time saved
-                                quality_improvement: None,
-                            },
-                        });
-                    }
+                    suggestions.push(OptimizationSuggestion {
+                        category: SuggestionCategory::Performance,
+                        severity: Severity::Low,
+                        description: format!(
+                            "Code node '{}' could use function memoization if it's a pure function.",
+                            node.name
+                        ),
+                        affected_nodes: vec![node.id.to_string()],
+                        benefit: Benefit {
+                            cost_savings_usd: None,
+                            time_savings_ms: Some(50), // Code execution time saved
+                            quality_improvement: None,
+                        },
+                    });
                 }
                 _ => {}
             }

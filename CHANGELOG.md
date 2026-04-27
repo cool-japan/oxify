@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - v0.2.1
+
+### Added
+
+#### Event-Driven Architecture (`oxify-engine`)
+- NATS broker bridge (`nats_bridge.rs`) — bidirectional sync between in-process `EventBus` and external NATS subjects; feature-gated (`nats`); sliding-window publish filter, `UserPass`/`JwtNkey` credentials, graceful shutdown
+
+#### Horizontal Scaling (`oxify-server`, `oxify-storage`, `oxify-api`)
+- `ReadinessChecker` trait + `ReadinessRegistry` with concurrent checks and per-checker timeout (`oxify-server/src/readiness.rs`)
+- `/livez` (liveness) and `/readyz` (readiness) endpoints — k8s probe-friendly; `/health` kept as backward-compat alias
+- `SessionStore` async trait + `InMemorySessionStore` (dev/test) + `RedisSessionStore` (feature `redis-cache`) for stateless multi-instance deployments
+
+#### GitHub MCP Server (`oxify-mcp`)
+- Full GitHub API server (`github.rs`) exposing 8 tools via MCP: `list_repos`, `get_repo`, `list_issues`, `create_issue`, `list_prs`, `create_pr`, `get_file`, `search_code`; feature-gated (`github`); backed by `octocrab`
+
+#### Communications Connector (`oxify-connect-comm`) — NEW CRATE
+- `MessageProvider` async trait with `send_message` / `list_channels`
+- `SlackProvider` — Bot Token auth, `chat.postMessage` + `conversations.list`
+- `SmtpProvider` — `lettre` SMTP with plain/HTML multipart (`smtp` feature)
+- `MockMessageProvider` — thread-safe recording for tests
+
+#### Object Storage Connector (`oxify-connect-storage`) — NEW CRATE
+- `ObjectStoreProvider` async trait: `put_object`, `get_object`, `delete_object`, `list_objects`, `presigned_url`
+- `MemoryStoreProvider` — full in-memory implementation for dev/testing
+- `S3StoreProvider` — backed by `object_store` crate, supports AWS S3 + MinIO (`aws` feature)
+
+#### Azure Computer Vision (`oxify-connect-vision`)
+- `AzureVisionProvider` — Computer Vision Read API v2024-02-01, API-key auth, sliding-window rate limiter (20 RPS), cost tracking ($0.001/call); feature-gated (`azure-vision`)
+
+#### TUI Mode (`oxify-cli`)
+- New `oxify tui` subcommand — ratatui + crossterm terminal UI with Dashboard / Workflow List / Logs views
+- Vim-style keybindings (j/k/g/G navigation, Tab to cycle views, r to refresh)
+- Live API polling from `oxify-api` with graceful degradation on network failure
+
+#### AI Workflow Generator (`oxify-cli`)
+- New `oxify generate --description "..."` command — calls LLM (OpenAI/Anthropic/Ollama), extracts JSON, validates with `WorkflowValidator`, retries with error feedback (up to `--max-retries` attempts)
+- Outputs to stdout or file in JSON or YAML format
+
+### Fixed
+- Pre-existing clippy lints across `oxify-model`, `oxify-authz`, `oxify-vector`, `oxify-engine`, `oxify-server`, `oxify-storage`, `oxify-connect-vision` (collapsible_match, sort_by_key, manual_checked_div, redundant bounds, deprecated pyo3 derive)
+
+### Statistics
+- Tests: **2,584 passing** (up from ~800)
+- New crates: 2 (`oxify-connect-comm`, `oxify-connect-storage`)
+- Zero warnings across entire workspace
+
+---
+
 ## [0.2.0] - 2026-03-29
 
 ### Added

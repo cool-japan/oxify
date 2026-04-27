@@ -25,9 +25,16 @@ chrono = { workspace = true }
 # Database support (optional)
 sqlx = { workspace = true, optional = true }
 
+# GitHub API support (optional)
+octocrab = { workspace = true, optional = true }
+
 [features]
 default = []
 database = ["sqlx"]
+github = ["octocrab"]
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
+# Required for tests that construct GitHubServer — octocrab's TLS stack needs a
+# process-level rustls CryptoProvider to be installed before use.
+rustls = { version = "0.23", features = ["ring"] }
