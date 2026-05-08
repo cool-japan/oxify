@@ -407,7 +407,7 @@ impl RotationManager {
 
         let token_id = metadata.token_id().to_string();
 
-        let mut store = self.store.lock().unwrap();
+        let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
         store.insert(token_id.clone(), metadata);
 
         Ok(token_id)
@@ -415,7 +415,7 @@ impl RotationManager {
 
     /// Use a refresh token (may rotate it)
     pub async fn use_token(&self, token_id: &str) -> Result<Option<String>, AuthError> {
-        let mut store = self.store.lock().unwrap();
+        let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
 
         // First, check if token exists and get necessary info
         let (should_revoke_family, family_id) = {
@@ -477,7 +477,7 @@ impl RotationManager {
 
     /// Validate a token without using it
     pub async fn validate_token(&self, token_id: &str) -> Result<RefreshTokenMetadata, AuthError> {
-        let store = self.store.lock().unwrap();
+        let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
 
         let metadata = store
             .get(token_id)
@@ -497,7 +497,7 @@ impl RotationManager {
 
     /// Revoke a specific token
     pub async fn revoke_token(&self, token_id: &str, reason: &str) -> Result<(), AuthError> {
-        let mut store = self.store.lock().unwrap();
+        let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
 
         let metadata = store
             .get_mut(token_id)
@@ -509,7 +509,7 @@ impl RotationManager {
 
     /// Revoke an entire token family (e.g., after detecting reuse)
     pub async fn revoke_family(&self, family_id: &str, reason: &str) -> Result<usize, AuthError> {
-        let mut store = self.store.lock().unwrap();
+        let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
         Ok(Self::revoke_family_internal(&mut store, family_id, reason))
     }
 
@@ -537,7 +537,7 @@ impl RotationManager {
         user_id: &str,
         reason: &str,
     ) -> Result<usize, AuthError> {
-        let mut store = self.store.lock().unwrap();
+        let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
         let mut revoked_count = 0;
 
         for metadata in store.values_mut() {
@@ -552,7 +552,7 @@ impl RotationManager {
 
     /// Get all tokens for a user (for debugging/admin purposes)
     pub async fn get_user_tokens(&self, user_id: &str) -> Vec<RefreshTokenMetadata> {
-        let store = self.store.lock().unwrap();
+        let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
 
         store
             .values()
@@ -563,7 +563,7 @@ impl RotationManager {
 
     /// Cleanup expired tokens
     pub async fn cleanup_expired(&self) -> usize {
-        let mut store = self.store.lock().unwrap();
+        let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
         let initial_count = store.len();
 
         store.retain(|_, metadata| !metadata.is_expired());
@@ -573,7 +573,7 @@ impl RotationManager {
 
     /// Get token statistics
     pub async fn get_stats(&self) -> RotationStats {
-        let store = self.store.lock().unwrap();
+        let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
 
         let total = store.len();
         let active = store.values().filter(|m| m.can_use()).count();
@@ -778,7 +778,7 @@ mod tests {
 
         // Manually insert expired token (issue_token would reset expiration)
         {
-            let mut store = manager.store.lock().unwrap();
+            let mut store = manager.store.lock().unwrap_or_else(|e| e.into_inner());
             store.insert("token123".to_string(), metadata);
         }
 
@@ -802,7 +802,7 @@ mod tests {
 
         // Manually insert expired token (issue_token would reset expiration)
         {
-            let mut store = manager.store.lock().unwrap();
+            let mut store = manager.store.lock().unwrap_or_else(|e| e.into_inner());
             store.insert("token2".to_string(), metadata2);
         }
 

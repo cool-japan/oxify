@@ -39,17 +39,17 @@ impl MockVectorProvider {
 
     /// Set an error that will be returned for all operations
     pub fn set_error(&self, error: VectorError) {
-        *self.fail_with.lock().unwrap() = Some(error);
+        *self.fail_with.lock().unwrap_or_else(|e| e.into_inner()) = Some(error);
     }
 
     /// Clear the error state
     pub fn clear_error(&self) {
-        *self.fail_with.lock().unwrap() = None;
+        *self.fail_with.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     /// Get the number of vectors in a collection
     pub fn count(&self, collection: &str) -> usize {
-        let collections = self.collections.lock().unwrap();
+        let collections = self.collections.lock().unwrap_or_else(|e| e.into_inner());
         collections
             .get(collection)
             .map(|c| c.vectors.len())
@@ -78,11 +78,11 @@ impl MockVectorProvider {
 impl VectorProvider for MockVectorProvider {
     async fn search(&self, request: SearchRequest) -> crate::Result<Vec<SearchResult>> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap().as_ref() {
+        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 
-        let collections = self.collections.lock().unwrap();
+        let collections = self.collections.lock().unwrap_or_else(|e| e.into_inner());
         let collection = collections.get(&request.collection).ok_or_else(|| {
             VectorError::QueryError(format!("Collection {} not found", request.collection))
         })?;
@@ -118,11 +118,11 @@ impl VectorProvider for MockVectorProvider {
 
     async fn insert(&self, request: InsertRequest) -> crate::Result<()> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap().as_ref() {
+        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 
-        let mut collections = self.collections.lock().unwrap();
+        let mut collections = self.collections.lock().unwrap_or_else(|e| e.into_inner());
         let collection = collections.get_mut(&request.collection).ok_or_else(|| {
             VectorError::QueryError(format!("Collection {} not found", request.collection))
         })?;
@@ -145,11 +145,11 @@ impl VectorProvider for MockVectorProvider {
 
     async fn delete(&self, request: DeleteRequest) -> crate::Result<usize> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap().as_ref() {
+        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 
-        let mut collections = self.collections.lock().unwrap();
+        let mut collections = self.collections.lock().unwrap_or_else(|e| e.into_inner());
         let collection = collections.get_mut(&request.collection).ok_or_else(|| {
             VectorError::QueryError(format!("Collection {} not found", request.collection))
         })?;
@@ -166,11 +166,11 @@ impl VectorProvider for MockVectorProvider {
 
     async fn create_collection(&self, name: &str, dimension: usize) -> crate::Result<()> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap().as_ref() {
+        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 
-        let mut collections = self.collections.lock().unwrap();
+        let mut collections = self.collections.lock().unwrap_or_else(|e| e.into_inner());
 
         if collections.contains_key(name) {
             return Err(VectorError::ConfigError(format!(
@@ -192,21 +192,21 @@ impl VectorProvider for MockVectorProvider {
 
     async fn collection_exists(&self, name: &str) -> crate::Result<bool> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap().as_ref() {
+        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 
-        let collections = self.collections.lock().unwrap();
+        let collections = self.collections.lock().unwrap_or_else(|e| e.into_inner());
         Ok(collections.contains_key(name))
     }
 
     async fn batch_insert(&self, request: BatchInsertRequest) -> crate::Result<usize> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap().as_ref() {
+        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 
-        let mut collections = self.collections.lock().unwrap();
+        let mut collections = self.collections.lock().unwrap_or_else(|e| e.into_inner());
         let collection = collections.get_mut(&request.collection).ok_or_else(|| {
             VectorError::QueryError(format!("Collection {} not found", request.collection))
         })?;
@@ -231,11 +231,11 @@ impl VectorProvider for MockVectorProvider {
 
     async fn update(&self, request: UpdateRequest) -> crate::Result<()> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap().as_ref() {
+        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 
-        let mut collections = self.collections.lock().unwrap();
+        let mut collections = self.collections.lock().unwrap_or_else(|e| e.into_inner());
         let collection = collections.get_mut(&request.collection).ok_or_else(|| {
             VectorError::QueryError(format!("Collection {} not found", request.collection))
         })?;
@@ -265,11 +265,11 @@ impl VectorProvider for MockVectorProvider {
 
     async fn collection_info(&self, name: &str) -> crate::Result<CollectionInfo> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap().as_ref() {
+        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 
-        let collections = self.collections.lock().unwrap();
+        let collections = self.collections.lock().unwrap_or_else(|e| e.into_inner());
         let collection = collections
             .get(name)
             .ok_or_else(|| VectorError::QueryError(format!("Collection {} not found", name)))?;
@@ -283,7 +283,7 @@ impl VectorProvider for MockVectorProvider {
 
     async fn batch_update(&self, requests: Vec<UpdateRequest>) -> crate::Result<usize> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap().as_ref() {
+        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 

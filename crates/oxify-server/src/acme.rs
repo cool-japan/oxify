@@ -246,7 +246,7 @@ impl AcmeManager {
         // 5. Download and save certificate
 
         // For now, just record the attempt
-        let mut last_renewal = self.last_renewal.write().unwrap();
+        let mut last_renewal = self.last_renewal.write().unwrap_or_else(|e| e.into_inner());
         *last_renewal = Some(SystemTime::now());
 
         Ok(())
@@ -254,7 +254,7 @@ impl AcmeManager {
 
     /// Get last renewal attempt time
     pub fn last_renewal(&self) -> Option<SystemTime> {
-        *self.last_renewal.read().unwrap()
+        *self.last_renewal.read().unwrap_or_else(|e| e.into_inner())
     }
 }
 

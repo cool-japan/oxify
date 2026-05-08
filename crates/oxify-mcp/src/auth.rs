@@ -280,7 +280,7 @@ impl OAuth2Auth {
         if let Some(expires_at) = self.expires_at {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs() as i64;
             // Consider token expired 60 seconds before actual expiry (buffer)
             now >= expires_at - 60
@@ -374,7 +374,7 @@ impl OAuth2Auth {
         if let Some(expires_in) = token_response.get("expires_in").and_then(|v| v.as_i64()) {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs() as i64;
             self.expires_at = Some(now + expires_in);
         }

@@ -106,23 +106,23 @@ impl AuthzBloomFilter {
     /// Add a tuple to the Bloom filter
     pub fn add_tuple(&self, tuple: &RelationTuple) {
         let key = BloomKey::from_tuple(tuple);
-        let mut filter = self.filter.write().unwrap();
+        let mut filter = self.filter.write().unwrap_or_else(|e| e.into_inner());
         filter.set(&key);
-        let mut count = self.items_count.write().unwrap();
+        let mut count = self.items_count.write().unwrap_or_else(|e| e.into_inner());
         *count += 1;
     }
 
     /// Check if a tuple might exist (true = might exist, false = definitely doesn't)
     pub fn might_contain(&self, request: &CheckRequest) -> bool {
         let key = BloomKey::from_check_request(request);
-        let filter = self.filter.read().unwrap();
+        let filter = self.filter.read().unwrap_or_else(|e| e.into_inner());
         filter.check(&key)
     }
 
     /// Batch check multiple requests
     /// Returns a vector of booleans indicating which requests might have tuples
     pub fn might_contain_batch(&self, requests: &[CheckRequest]) -> Vec<bool> {
-        let filter = self.filter.read().unwrap();
+        let filter = self.filter.read().unwrap_or_else(|e| e.into_inner());
         requests
             .iter()
             .map(|req| {
@@ -134,7 +134,7 @@ impl AuthzBloomFilter {
 
     /// Get the current item count
     pub fn item_count(&self) -> usize {
-        *self.items_count.read().unwrap()
+        *self.items_count.read().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Clear the Bloom filter (requires rebuilding)
@@ -142,13 +142,13 @@ impl AuthzBloomFilter {
         let new_filter =
             Bloom::new_for_fp_rate(self.config.expected_items, self.config.false_positive_rate)
                 .expect("Failed to create bloom filter with given parameters");
-        *self.filter.write().unwrap() = new_filter;
-        *self.items_count.write().unwrap() = 0;
+        *self.filter.write().unwrap_or_else(|e| e.into_inner()) = new_filter;
+        *self.items_count.write().unwrap_or_else(|e| e.into_inner()) = 0;
     }
 
     /// Get estimated false positive rate based on current fill
     pub fn estimated_fp_rate(&self) -> f64 {
-        let count = *self.items_count.read().unwrap();
+        let count = *self.items_count.read().unwrap_or_else(|e| e.into_inner());
         if count == 0 {
             return 0.0;
         }

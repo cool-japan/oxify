@@ -509,7 +509,7 @@ impl RiskAnalyzer {
 
     /// Record a successful login
     pub fn record_success(&self, context: &LoginContext) {
-        let mut history_map = self.history.lock().unwrap();
+        let mut history_map = self.history.lock().unwrap_or_else(|e| e.into_inner());
         let history = history_map.entry(context.user_id.clone()).or_default();
 
         // Add to history with size limit
@@ -551,7 +551,7 @@ impl RiskAnalyzer {
 
     /// Record a failed login attempt
     pub fn record_failure(&self, user_id: &str) {
-        let mut history_map = self.history.lock().unwrap();
+        let mut history_map = self.history.lock().unwrap_or_else(|e| e.into_inner());
         let history = history_map.entry(user_id.to_string()).or_default();
 
         history.failed_attempts.push(Utc::now());
@@ -563,7 +563,7 @@ impl RiskAnalyzer {
 
     /// Record a password change
     pub fn record_password_change(&self, user_id: &str) {
-        let mut history_map = self.history.lock().unwrap();
+        let mut history_map = self.history.lock().unwrap_or_else(|e| e.into_inner());
         let history = history_map.entry(user_id.to_string()).or_default();
 
         history.last_password_change = Some(Utc::now());
@@ -571,13 +571,13 @@ impl RiskAnalyzer {
 
     /// Get user login history
     fn get_user_history(&self, user_id: &str) -> UserLoginHistory {
-        let history_map = self.history.lock().unwrap();
+        let history_map = self.history.lock().unwrap_or_else(|e| e.into_inner());
         history_map.get(user_id).cloned().unwrap_or_default()
     }
 
     /// Clear history for a user (e.g., after account deletion)
     pub fn clear_history(&self, user_id: &str) {
-        let mut history_map = self.history.lock().unwrap();
+        let mut history_map = self.history.lock().unwrap_or_else(|e| e.into_inner());
         history_map.remove(user_id);
     }
 }

@@ -350,7 +350,7 @@ impl AuditLogger {
 
     /// Log an audit event
     pub fn log(&self, event: AuditEvent) {
-        let mut events = self.events.write().unwrap();
+        let mut events = self.events.write().unwrap_or_else(|e| e.into_inner());
 
         // Apply retention policy
         self.apply_retention_policy(&mut events);
@@ -382,14 +382,14 @@ impl AuditLogger {
 
     /// Get all events
     pub fn get_events(&self) -> Vec<AuditEvent> {
-        self.events.read().unwrap().iter().cloned().collect()
+        self.events.read().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect()
     }
 
     /// Get events by type
     pub fn get_events_by_type(&self, event_type: AuditEventType) -> Vec<AuditEvent> {
         self.events
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .iter()
             .filter(|e| e.event_type == event_type)
             .cloned()
@@ -400,7 +400,7 @@ impl AuditLogger {
     pub fn get_events_by_user(&self, user_id: &str) -> Vec<AuditEvent> {
         self.events
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .iter()
             .filter(|e| e.user_id.as_deref() == Some(user_id))
             .cloned()
@@ -411,7 +411,7 @@ impl AuditLogger {
     pub fn get_events_by_severity(&self, min_severity: AuditSeverity) -> Vec<AuditEvent> {
         self.events
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .iter()
             .filter(|e| e.severity >= min_severity)
             .cloned()
@@ -422,7 +422,7 @@ impl AuditLogger {
     pub fn get_events_in_range(&self, start_ms: u64, end_ms: u64) -> Vec<AuditEvent> {
         self.events
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .iter()
             .filter(|e| e.timestamp >= start_ms && e.timestamp <= end_ms)
             .cloned()
@@ -449,17 +449,17 @@ impl AuditLogger {
 
     /// Get event count
     pub fn count(&self) -> usize {
-        self.events.read().unwrap().len()
+        self.events.read().unwrap_or_else(|e| e.into_inner()).len()
     }
 
     /// Clear all events
     pub fn clear(&self) {
-        self.events.write().unwrap().clear();
+        self.events.write().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
     /// Get statistics
     pub fn stats(&self) -> AuditStats {
-        let events = self.events.read().unwrap();
+        let events = self.events.read().unwrap_or_else(|e| e.into_inner());
 
         let mut stats = AuditStats {
             total_events: events.len(),

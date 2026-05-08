@@ -166,7 +166,7 @@ impl AuthzProfiler {
     pub fn record_measurement(&self, operation_name: &str, duration: Duration) {
         let duration_ns = duration.as_nanos() as u64;
 
-        let mut metrics = self.metrics.lock().unwrap();
+        let mut metrics = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
         let entry = metrics
             .entry(operation_name.to_string())
             .or_insert_with(|| OperationMetrics::new(operation_name.to_string()));
@@ -176,12 +176,12 @@ impl AuthzProfiler {
 
     /// Get metrics for a specific operation
     pub fn get_operation_metrics(&self, operation_name: &str) -> Option<OperationMetrics> {
-        self.metrics.lock().unwrap().get(operation_name).cloned()
+        self.metrics.lock().unwrap_or_else(|e| e.into_inner()).get(operation_name).cloned()
     }
 
     /// Get all profiling statistics
     pub fn get_stats(&self) -> ProfilingStats {
-        let metrics = self.metrics.lock().unwrap();
+        let metrics = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
 
         let total_operations: u64 = metrics.values().map(|m| m.call_count).sum();
         let total_duration_ns: u64 = metrics.values().map(|m| m.total_duration_ns).sum();
@@ -197,7 +197,7 @@ impl AuthzProfiler {
 
     /// Reset all profiling data
     pub fn reset(&self) {
-        self.metrics.lock().unwrap().clear();
+        self.metrics.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
     /// Generate a performance report

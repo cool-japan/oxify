@@ -236,20 +236,39 @@ pub async fn ws_handler(
     ws.on_upgrade(move |socket| handle_websocket(socket, user_id, manager))
 }
 
-/// Validate JWT token and extract user ID.
+/// Minimal claims struct for WebSocket JWT validation.
 ///
-/// This is a placeholder implementation. In production, this should:
-/// - Parse the JWT token
-/// - Validate the signature
-/// - Check expiration
-/// - Extract the user_id claim
+/// We only require `sub` (subject / user-id). All other standard fields are
+/// validated by the `jsonwebtoken` library through `Validation`.
+#[derive(serde::Deserialize)]
+struct WsClaims {
+    sub: String,
+}
+
+/// Validate a JWT token and extract the user ID (`sub` claim).
+///
+/// The HMAC-SHA256 secret is read from the `OXIFY_JWT_SECRET` environment
+/// variable at call time. If the variable is absent, all tokens are treated as
+/// invalid and `None` is returned, so the caller falls back to `"anonymous"`.
+///
+/// Invalid or expired tokens also return `None`.
 fn validate_token(token: &str) -> Option<String> {
-    // Placeholder: In production, use jsonwebtoken crate
+    use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
+
     if token.is_empty() {
-        None
-    } else {
-        Some(format!("user_{}", token))
+        return None;
     }
+
+    let secret = std::env::var("OXIFY_JWT_SECRET").ok()?;
+    let key = DecodingKey::from_secret(secret.as_bytes());
+
+    let mut validation = Validation::new(Algorithm::HS256);
+    // Disable audience check — callers may embed an audience or not.
+    validation.validate_aud = false;
+
+    decode::<WsClaims>(token, &key, &validation)
+        .ok()
+        .map(|token_data| token_data.claims.sub)
 }
 
 /// Handle WebSocket connection lifecycle.
@@ -533,13 +552,42 @@ mod tests {
 
     #[test]
     fn test_validate_token() {
-        // Empty token should return None
+        use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+
+        // Empty token → None regardless of environment.
         assert_eq!(validate_token(""), None);
 
-        // Non-empty token should return Some
-        let result = validate_token("test_token");
-        assert!(result.is_some());
-        assert_eq!(result.unwrap(), "user_test_token");
+        // Garbage (non-JWT) string → None.
+        assert_eq!(validate_token("not_a_jwt"), None);
+
+        // Valid HS256 JWT with known secret and `sub` claim → Some(sub).
+        let secret = "test_secret_for_unit_test";
+        let claims = serde_json::json!({
+            "sub": "user_alice",
+            "exp": 9_999_999_999u64,
+        });
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .expect("token encoding must succeed in test");
+
+        // Without the env var the secret is unknown → None.
+        std::env::remove_var("OXIFY_JWT_SECRET");
+        assert_eq!(validate_token(&token), None);
+
+        // With the correct secret set, the sub claim must be extracted.
+        std::env::set_var("OXIFY_JWT_SECRET", secret);
+        let result = validate_token(&token);
+        assert_eq!(result, Some("user_alice".to_string()));
+
+        // Wrong secret → None.
+        std::env::set_var("OXIFY_JWT_SECRET", "wrong_secret");
+        assert_eq!(validate_token(&token), None);
+
+        // Clean up env var to avoid leaking state between tests.
+        std::env::remove_var("OXIFY_JWT_SECRET");
     }
 
     #[tokio::test]

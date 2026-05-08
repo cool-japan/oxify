@@ -334,14 +334,14 @@ impl<P: VisionProvider> StreamProcessor<P> {
     pub async fn process_frame(&self, frame_data: &[u8]) -> Result<Option<OcrResult>> {
         // Update frame counter
         let frame_number = {
-            let mut counter = self.frame_counter.lock().unwrap();
+            let mut counter = self.frame_counter.lock().unwrap_or_else(|e| e.into_inner());
             *counter += 1;
             *counter
         };
 
         // Update stats
         {
-            let mut stats = self.stats.lock().unwrap();
+            let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
             stats.frames_received += 1;
         }
 
@@ -350,7 +350,7 @@ impl<P: VisionProvider> StreamProcessor<P> {
 
         // Check if we should process this frame
         if !self.should_process_frame(&frame)? {
-            let mut stats = self.stats.lock().unwrap();
+            let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
             stats.frames_skipped += 1;
             return Ok(None);
         }
@@ -367,12 +367,12 @@ impl<P: VisionProvider> StreamProcessor<P> {
 
                 // Update stats
                 {
-                    let mut stats = self.stats.lock().unwrap();
+                    let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
                     stats.frames_processed += 1;
                     stats.update_avg_processing_time(processing_time);
 
                     // Calculate current FPS
-                    if let Some(last_time) = *self.last_process_time.lock().unwrap() {
+                    if let Some(last_time) = *self.last_process_time.lock().unwrap_or_else(|e| e.into_inner()) {
                         let elapsed = start_time.duration_since(last_time);
                         if elapsed.as_secs_f64() > 0.0 {
                             stats.current_fps = 1.0 / elapsed.as_secs_f64();
@@ -381,10 +381,10 @@ impl<P: VisionProvider> StreamProcessor<P> {
                 }
 
                 // Update last process time
-                *self.last_process_time.lock().unwrap() = Some(start_time);
+                *self.last_process_time.lock().unwrap_or_else(|e| e.into_inner()) = Some(start_time);
 
                 // Update last processed frame
-                *self.last_processed.lock().unwrap() = Some(frame);
+                *self.last_processed.lock().unwrap_or_else(|e| e.into_inner()) = Some(frame);
 
                 // Apply smoothing if enabled
                 if self.config.enable_smoothing {
@@ -394,7 +394,7 @@ impl<P: VisionProvider> StreamProcessor<P> {
                 Ok(Some(result))
             }
             Err(e) => {
-                let mut stats = self.stats.lock().unwrap();
+                let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
                 stats.processing_errors += 1;
                 Err(e)
             }
@@ -411,7 +411,7 @@ impl<P: VisionProvider> StreamProcessor<P> {
             }
 
             SamplingStrategy::TimeInterval(interval_ms) => {
-                if let Some(last_time) = *self.last_process_time.lock().unwrap() {
+                if let Some(last_time) = *self.last_process_time.lock().unwrap_or_else(|e| e.into_inner()) {
                     let elapsed = last_time.elapsed();
                     Ok(elapsed.as_millis() >= interval_ms as u128)
                 } else {
@@ -420,7 +420,7 @@ impl<P: VisionProvider> StreamProcessor<P> {
             }
 
             SamplingStrategy::ChangeDetection => {
-                if let Some(last_frame) = self.last_processed.lock().unwrap().as_ref() {
+                if let Some(last_frame) = self.last_processed.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
                     Ok(frame.is_different_from(last_frame, self.config.change_threshold))
                 } else {
                     Ok(true) // Process first frame
@@ -429,7 +429,7 @@ impl<P: VisionProvider> StreamProcessor<P> {
 
             SamplingStrategy::Adaptive => {
                 // Adapt based on current processing speed
-                let stats = self.stats.lock().unwrap();
+                let stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
 
                 if stats.avg_processing_time.as_secs_f64() > 0.0 {
                     let target_interval = 1.0 / self.config.max_fps;
@@ -444,13 +444,13 @@ impl<P: VisionProvider> StreamProcessor<P> {
 
     /// Add frame to buffer
     fn add_to_buffer(&self, frame: BufferedFrame) -> Result<()> {
-        let mut buffer = self.buffer.lock().unwrap();
+        let mut buffer = self.buffer.lock().unwrap_or_else(|e| e.into_inner());
 
         if buffer.len() >= self.config.buffer_size {
             // Buffer is full, remove oldest frame
             buffer.pop_front();
 
-            let mut stats = self.stats.lock().unwrap();
+            let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
             stats.buffer_overflows += 1;
         }
 
@@ -460,7 +460,7 @@ impl<P: VisionProvider> StreamProcessor<P> {
 
     /// Apply temporal smoothing to results
     fn apply_smoothing(&self, result: OcrResult) -> Result<OcrResult> {
-        let mut smoothing_buffer = self.smoothing_buffer.lock().unwrap();
+        let mut smoothing_buffer = self.smoothing_buffer.lock().unwrap_or_else(|e| e.into_inner());
 
         smoothing_buffer.push_back(result.clone());
 
@@ -478,23 +478,23 @@ impl<P: VisionProvider> StreamProcessor<P> {
 
     /// Get current statistics
     pub fn get_stats(&self) -> StreamStats {
-        self.stats.lock().unwrap().clone()
+        self.stats.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Reset statistics
     pub fn reset_stats(&self) {
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
         *stats = StreamStats::default();
     }
 
     /// Get buffer size
     pub fn buffer_size(&self) -> usize {
-        self.buffer.lock().unwrap().len()
+        self.buffer.lock().unwrap_or_else(|e| e.into_inner()).len()
     }
 
     /// Clear buffer
     pub fn clear_buffer(&self) {
-        self.buffer.lock().unwrap().clear();
+        self.buffer.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
     /// Get configuration

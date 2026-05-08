@@ -193,7 +193,7 @@ impl EmbeddingCache {
 
     /// Get embedding from cache if available and not expired
     pub fn get(&self, text: &str) -> Option<Vec<f32>> {
-        let cache = self.cache.lock().unwrap();
+        let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = cache.get(text) {
             let elapsed = SystemTime::now()
                 .duration_since(entry.created_at)
@@ -208,7 +208,7 @@ impl EmbeddingCache {
 
     /// Store embedding in cache
     pub fn put(&self, text: String, embedding: Vec<f32>) {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
 
         // Evict oldest entries if cache is full
         if cache.len() >= self.max_entries {
@@ -226,13 +226,13 @@ impl EmbeddingCache {
 
     /// Clear all entries from cache
     pub fn clear(&self) {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.clear();
     }
 
     /// Get cache size
     pub fn size(&self) -> usize {
-        let cache = self.cache.lock().unwrap();
+        let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.len()
     }
 

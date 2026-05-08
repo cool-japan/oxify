@@ -155,7 +155,7 @@ impl ExecutionMetrics {
 
         self.active_executions
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(execution_id, info);
     }
 
@@ -166,11 +166,11 @@ impl ExecutionMetrics {
         if let Some(info) = self
             .active_executions
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .remove(&execution_id)
         {
             let duration_ms = info.started_at.elapsed().as_millis() as u64;
-            self.workflow_durations.write().unwrap().push(duration_ms);
+            self.workflow_durations.write().unwrap_or_else(|e| e.into_inner()).push(duration_ms);
         }
     }
 
@@ -181,11 +181,11 @@ impl ExecutionMetrics {
         if let Some(info) = self
             .active_executions
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .remove(&execution_id)
         {
             let duration_ms = info.started_at.elapsed().as_millis() as u64;
-            self.workflow_durations.write().unwrap().push(duration_ms);
+            self.workflow_durations.write().unwrap_or_else(|e| e.into_inner()).push(duration_ms);
         }
     }
 
@@ -196,7 +196,7 @@ impl ExecutionMetrics {
         if let Some(info) = self
             .active_executions
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .get_mut(&execution_id)
         {
             info.completed_nodes += 1;
@@ -208,7 +208,7 @@ impl ExecutionMetrics {
         self.successful_nodes.fetch_add(1, Ordering::Relaxed);
         self.node_durations
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .push(duration.as_millis() as u64);
     }
 
@@ -242,7 +242,7 @@ impl ExecutionMetrics {
         if let Some(info) = self
             .active_executions
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .get_mut(&execution_id)
         {
             info.current_level = level;
@@ -261,11 +261,11 @@ impl ExecutionMetrics {
             0.0
         };
 
-        let workflow_durations = self.workflow_durations.read().unwrap();
+        let workflow_durations = self.workflow_durations.read().unwrap_or_else(|e| e.into_inner());
         let (avg_workflow, p50_workflow, p95_workflow, p99_workflow) =
             calculate_percentiles(&workflow_durations);
 
-        let node_durations = self.node_durations.read().unwrap();
+        let node_durations = self.node_durations.read().unwrap_or_else(|e| e.into_inner());
         let (avg_node, _, _, _) = calculate_percentiles(&node_durations);
 
         ExecutionStats {
@@ -285,7 +285,7 @@ impl ExecutionMetrics {
             p95_workflow_duration_ms: p95_workflow,
             p99_workflow_duration_ms: p99_workflow,
             avg_node_duration_ms: avg_node,
-            active_executions: self.active_executions.read().unwrap().len(),
+            active_executions: self.active_executions.read().unwrap_or_else(|e| e.into_inner()).len(),
         }
     }
 
@@ -293,7 +293,7 @@ impl ExecutionMetrics {
     pub fn get_active_executions(&self) -> Vec<ExecutionInfo> {
         self.active_executions
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .values()
             .cloned()
             .collect()
@@ -311,9 +311,9 @@ impl ExecutionMetrics {
         self.timed_out_nodes.store(0, Ordering::Relaxed);
         self.checkpoints_created.store(0, Ordering::Relaxed);
         self.executions_resumed.store(0, Ordering::Relaxed);
-        self.workflow_durations.write().unwrap().clear();
-        self.node_durations.write().unwrap().clear();
-        self.active_executions.write().unwrap().clear();
+        self.workflow_durations.write().unwrap_or_else(|e| e.into_inner()).clear();
+        self.node_durations.write().unwrap_or_else(|e| e.into_inner()).clear();
+        self.active_executions.write().unwrap_or_else(|e| e.into_inner()).clear();
     }
 }
 

@@ -100,7 +100,7 @@ impl VisionCache {
 
     /// Get a cached result.
     pub fn get(&self, key: &CacheKey) -> Option<OcrResult> {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
 
         if let Some(entry) = cache.get(key) {
             if entry.is_expired() {
@@ -120,7 +120,7 @@ impl VisionCache {
 
     /// Store a result with custom TTL.
     pub fn set_with_ttl(&self, key: CacheKey, result: OcrResult, ttl: Duration) {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
 
         // Evict expired entries if at capacity
         if cache.len() >= self.max_size {
@@ -155,13 +155,13 @@ impl VisionCache {
 
     /// Clear all cached entries.
     pub fn clear(&self) {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.clear();
     }
 
     /// Get the number of cached entries.
     pub fn len(&self) -> usize {
-        let cache = self.cache.lock().unwrap();
+        let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.len()
     }
 
@@ -172,7 +172,7 @@ impl VisionCache {
 
     /// Get cache statistics.
     pub fn stats(&self) -> CacheStats {
-        let cache = self.cache.lock().unwrap();
+        let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         let total = cache.len();
         let expired = cache.values().filter(|e| e.is_expired()).count();
 

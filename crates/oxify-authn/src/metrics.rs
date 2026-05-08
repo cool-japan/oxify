@@ -327,9 +327,9 @@ impl MetricsCollector {
 
     /// Record a generic event
     pub async fn record_event(&self, event: AuthEventRecord) {
-        let mut events = self.events.lock().unwrap();
-        let mut users = self.unique_users.lock().unwrap();
-        let mut ips = self.unique_ips.lock().unwrap();
+        let mut events = self.events.lock().unwrap_or_else(|e| e.into_inner());
+        let mut users = self.unique_users.lock().unwrap_or_else(|e| e.into_inner());
+        let mut ips = self.unique_ips.lock().unwrap_or_else(|e| e.into_inner());
 
         users.insert(event.user_id.clone());
         ips.insert(event.ip_address.clone());
@@ -345,9 +345,9 @@ impl MetricsCollector {
 
     /// Get current metrics
     pub async fn get_metrics(&self) -> AuthMetrics {
-        let events = self.events.lock().unwrap();
-        let users = self.unique_users.lock().unwrap();
-        let ips = self.unique_ips.lock().unwrap();
+        let events = self.events.lock().unwrap_or_else(|e| e.into_inner());
+        let users = self.unique_users.lock().unwrap_or_else(|e| e.into_inner());
+        let ips = self.unique_ips.lock().unwrap_or_else(|e| e.into_inner());
 
         let total_attempts = events
             .iter()
@@ -426,7 +426,7 @@ impl MetricsCollector {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     ) -> AuthMetrics {
-        let events = self.events.lock().unwrap();
+        let events = self.events.lock().unwrap_or_else(|e| e.into_inner());
         let filtered_events: Vec<_> = events
             .iter()
             .filter(|e| e.timestamp >= start && e.timestamp <= end)
@@ -516,7 +516,7 @@ impl MetricsCollector {
 
     /// Get time series data for success rate
     pub async fn get_success_rate_timeseries(&self, interval: Duration) -> Vec<TimeSeriesPoint> {
-        let events = self.events.lock().unwrap();
+        let events = self.events.lock().unwrap_or_else(|e| e.into_inner());
         let now = Utc::now();
         let mut series = Vec::new();
 
@@ -561,9 +561,9 @@ impl MetricsCollector {
 
     /// Clear all metrics
     pub async fn clear(&self) {
-        let mut events = self.events.lock().unwrap();
-        let mut users = self.unique_users.lock().unwrap();
-        let mut ips = self.unique_ips.lock().unwrap();
+        let mut events = self.events.lock().unwrap_or_else(|e| e.into_inner());
+        let mut users = self.unique_users.lock().unwrap_or_else(|e| e.into_inner());
+        let mut ips = self.unique_ips.lock().unwrap_or_else(|e| e.into_inner());
 
         events.clear();
         users.clear();

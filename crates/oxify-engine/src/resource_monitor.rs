@@ -182,7 +182,7 @@ impl ResourceMonitor {
 
     /// Check if it's time to update resource measurements
     fn should_check(&self) -> bool {
-        let last = self.last_check.read().unwrap();
+        let last = self.last_check.read().unwrap_or_else(|e| e.into_inner());
         last.elapsed() >= Duration::from_millis(self.config.check_interval_ms)
     }
 
@@ -196,13 +196,13 @@ impl ResourceMonitor {
 
         // Update stored usage
         {
-            let mut current = self.current_usage.write().unwrap();
+            let mut current = self.current_usage.write().unwrap_or_else(|e| e.into_inner());
             *current = usage;
         }
 
         // Update last check time
         {
-            let mut last = self.last_check.write().unwrap();
+            let mut last = self.last_check.write().unwrap_or_else(|e| e.into_inner());
             *last = Instant::now();
         }
 
@@ -298,7 +298,7 @@ impl ResourceMonitor {
     /// Get current resource usage
     pub fn current_usage(&self) -> ResourceUsage {
         self.update(); // Update if needed
-        *self.current_usage.read().unwrap()
+        *self.current_usage.read().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Get statistics about resource monitoring

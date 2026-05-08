@@ -888,7 +888,13 @@ async fn package_workflow(file: &str, output: &str, include_deps: bool) -> Resul
                 let entry = entry?;
                 let path = entry.path();
                 if path.is_file() {
-                    let name = format!("workflows/{}", path.file_name().unwrap().to_string_lossy());
+                    let file_name = path.file_name().ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Workflow entry has no file name component: {:?}",
+                            path
+                        )
+                    })?;
+                    let name = format!("workflows/{}", file_name.to_string_lossy());
                     let data = fs::read(&path)
                         .with_context(|| format!("Failed to read workflow file: {:?}", path))?;
                     zip.add_file(&name, &data)?;

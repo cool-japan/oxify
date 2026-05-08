@@ -39,7 +39,7 @@ impl PlanCache {
 
     /// Get a cached execution plan
     pub fn get(&self, workflow_id: &WorkflowId, workflow_hash: u64) -> Option<ExecutionPlan> {
-        let cache = self.cache.lock().unwrap();
+        let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.get(workflow_id).and_then(|plan| {
             // Verify hash matches (workflow structure hasn't changed)
             if plan.workflow_hash == workflow_hash {
@@ -52,7 +52,7 @@ impl PlanCache {
 
     /// Store an execution plan
     pub fn put(&self, workflow_id: WorkflowId, plan: ExecutionPlan) {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
 
         // Evict random entry if at capacity (simple LRU-like behavior)
         if cache.len() >= self.max_size && !cache.contains_key(&workflow_id) {
@@ -67,14 +67,14 @@ impl PlanCache {
     /// Clear the cache
     #[allow(dead_code)]
     pub fn clear(&self) {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.clear();
     }
 
     /// Get cache statistics
     #[allow(dead_code)]
     pub fn stats(&self) -> CacheStats {
-        let cache = self.cache.lock().unwrap();
+        let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         CacheStats {
             size: cache.len(),
             capacity: self.max_size,

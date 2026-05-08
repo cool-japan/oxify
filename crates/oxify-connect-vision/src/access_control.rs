@@ -343,8 +343,8 @@ impl AccessController {
     /// Create a new API key
     pub fn create_key(&self, name: impl Into<String>) -> ApiKey {
         let key = ApiKey::new(name);
-        let mut keys = self.keys.write().unwrap();
-        let mut usage = self.usage.write().unwrap();
+        let mut keys = self.keys.write().unwrap_or_else(|e| e.into_inner());
+        let mut usage = self.usage.write().unwrap_or_else(|e| e.into_inner());
 
         keys.insert(key.key.clone(), key.clone());
         usage.insert(key.key.clone(), UsageStats::new());
@@ -355,8 +355,8 @@ impl AccessController {
     /// Create a custom API key
     pub fn create_custom_key(&self, key: ApiKey) -> String {
         let key_str = key.key.clone();
-        let mut keys = self.keys.write().unwrap();
-        let mut usage = self.usage.write().unwrap();
+        let mut keys = self.keys.write().unwrap_or_else(|e| e.into_inner());
+        let mut usage = self.usage.write().unwrap_or_else(|e| e.into_inner());
 
         keys.insert(key_str.clone(), key);
         usage.insert(key_str.clone(), UsageStats::new());
@@ -366,12 +366,12 @@ impl AccessController {
 
     /// Get an API key
     pub fn get_key(&self, key: &str) -> Option<ApiKey> {
-        self.keys.read().unwrap().get(key).cloned()
+        self.keys.read().unwrap_or_else(|e| e.into_inner()).get(key).cloned()
     }
 
     /// Revoke an API key
     pub fn revoke_key(&self, key: &str) -> bool {
-        if let Some(api_key) = self.keys.write().unwrap().get_mut(key) {
+        if let Some(api_key) = self.keys.write().unwrap_or_else(|e| e.into_inner()).get_mut(key) {
             api_key.active = false;
             true
         } else {
@@ -381,8 +381,8 @@ impl AccessController {
 
     /// Delete an API key
     pub fn delete_key(&self, key: &str) -> bool {
-        let mut keys = self.keys.write().unwrap();
-        let mut usage = self.usage.write().unwrap();
+        let mut keys = self.keys.write().unwrap_or_else(|e| e.into_inner());
+        let mut usage = self.usage.write().unwrap_or_else(|e| e.into_inner());
 
         keys.remove(key).is_some() || usage.remove(key).is_some()
     }
@@ -415,7 +415,7 @@ impl AccessController {
         }
 
         // Get usage stats
-        let usage = self.usage.read().unwrap();
+        let usage = self.usage.read().unwrap_or_else(|e| e.into_inner());
         let stats = usage.get(key).ok_or(AccessError::InvalidKey)?;
 
         // Reset windows if needed
@@ -482,19 +482,19 @@ impl AccessController {
 
     /// Get usage statistics for a key
     pub fn get_usage(&self, key: &str) -> Option<UsageSnapshot> {
-        self.usage.read().unwrap().get(key).map(|stats| stats.get())
+        self.usage.read().unwrap_or_else(|e| e.into_inner()).get(key).map(|stats| stats.get())
     }
 
     /// List all API keys
     pub fn list_keys(&self) -> Vec<ApiKey> {
-        self.keys.read().unwrap().values().cloned().collect()
+        self.keys.read().unwrap_or_else(|e| e.into_inner()).values().cloned().collect()
     }
 
     /// Get statistics for all keys
     pub fn get_all_usage(&self) -> HashMap<String, UsageSnapshot> {
         self.usage
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .iter()
             .map(|(key, stats)| (key.clone(), stats.get()))
             .collect()

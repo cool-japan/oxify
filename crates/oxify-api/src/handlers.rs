@@ -2079,7 +2079,7 @@ pub async fn export_workflow(
                 )
             })?;
 
-            Ok(axum::response::Response::builder()
+            axum::response::Response::builder()
                 .status(StatusCode::OK)
                 .header("Content-Type", "application/json")
                 .header(
@@ -2087,7 +2087,16 @@ pub async fn export_workflow(
                     format!("attachment; filename=\"workflow_{}.json\"", id),
                 )
                 .body(json_str.into())
-                .unwrap())
+                .map_err(|e| {
+                    error!("Failed to build response: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ErrorResponse {
+                            error: "ResponseBuildError".to_string(),
+                            message: format!("Failed to build response: {}", e),
+                        }),
+                    )
+                })
         }
         "yaml" => {
             let yaml_str = oxify_model::workflow_to_yaml(&workflow).map_err(|e| {
@@ -2101,7 +2110,7 @@ pub async fn export_workflow(
                 )
             })?;
 
-            Ok(axum::response::Response::builder()
+            axum::response::Response::builder()
                 .status(StatusCode::OK)
                 .header("Content-Type", "application/x-yaml")
                 .header(
@@ -2109,7 +2118,16 @@ pub async fn export_workflow(
                     format!("attachment; filename=\"workflow_{}.yaml\"", id),
                 )
                 .body(yaml_str.into())
-                .unwrap())
+                .map_err(|e| {
+                    error!("Failed to build response: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ErrorResponse {
+                            error: "ResponseBuildError".to_string(),
+                            message: format!("Failed to build response: {}", e),
+                        }),
+                    )
+                })
         }
         _ => Err((
             StatusCode::BAD_REQUEST,

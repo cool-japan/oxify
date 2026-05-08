@@ -99,7 +99,7 @@ impl LlmCache {
     /// Get a cached response if it exists and hasn't expired
     pub fn get(&self, request: &LlmRequest, model: &str) -> Option<LlmResponse> {
         let key = CacheKey::from_request(request, model);
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
 
         if let Some(cached) = cache.get(&key) {
             if !cached.is_expired() {
@@ -118,7 +118,7 @@ impl LlmCache {
     /// Store a response in the cache
     pub fn put(&self, request: &LlmRequest, model: &str, response: LlmResponse) {
         let key = CacheKey::from_request(request, model);
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
 
         // Evict oldest entry if cache is full (simple FIFO)
         if cache.len() >= self.max_size {
@@ -139,19 +139,19 @@ impl LlmCache {
 
     /// Clear all cached entries
     pub fn clear(&self) {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.clear();
     }
 
     /// Remove expired entries
     pub fn cleanup(&self) {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.retain(|_, v| !v.is_expired());
     }
 
     /// Get cache statistics
     pub fn stats(&self) -> CacheStats {
-        let cache = self.cache.lock().unwrap();
+        let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         let total = cache.len();
         let expired = cache.values().filter(|v| v.is_expired()).count();
         let hits = self.hits.load(Ordering::Relaxed);

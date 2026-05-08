@@ -384,12 +384,12 @@ impl<P> MetricsProvider<P> {
 
     /// Get current metrics snapshot
     pub fn get_metrics(&self) -> Metrics {
-        self.metrics.lock().unwrap().clone()
+        self.metrics.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Reset metrics
     pub fn reset_metrics(&self) {
-        let mut metrics = self.metrics.lock().unwrap();
+        let mut metrics = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
         *metrics = Metrics::new();
     }
 }
@@ -401,7 +401,7 @@ impl<P: LlmProvider> LlmProvider for MetricsProvider<P> {
         let result = self.inner.complete(request).await;
         let duration = start.elapsed();
 
-        let mut metrics = self.metrics.lock().unwrap();
+        let mut metrics = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
         metrics.total_requests += 1;
         metrics.total_latency_ms += duration.as_millis() as u64;
 
@@ -428,7 +428,7 @@ impl<P: EmbeddingProvider> EmbeddingProvider for MetricsProvider<P> {
         let result = self.inner.embed(request).await;
         let duration = start.elapsed();
 
-        let mut metrics = self.metrics.lock().unwrap();
+        let mut metrics = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
         metrics.total_requests += 1;
         metrics.total_latency_ms += duration.as_millis() as u64;
 

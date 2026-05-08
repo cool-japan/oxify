@@ -189,11 +189,11 @@ impl CheckpointStorage for InMemoryCheckpointStorage {
 
         self.checkpoints
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(checkpoint_id, (execution_id, checkpoint.clone()));
         self.metadata
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(checkpoint_id, metadata);
 
         Ok(checkpoint_id)
@@ -203,7 +203,7 @@ impl CheckpointStorage for InMemoryCheckpointStorage {
         &self,
         execution_id: ExecutionId,
     ) -> Result<Option<ExecutionCheckpoint>, CheckpointError> {
-        let checkpoints = self.checkpoints.read().unwrap();
+        let checkpoints = self.checkpoints.read().unwrap_or_else(|e| e.into_inner());
 
         // Find latest checkpoint for this execution
         let latest = checkpoints
@@ -219,7 +219,7 @@ impl CheckpointStorage for InMemoryCheckpointStorage {
         &self,
         checkpoint_id: CheckpointId,
     ) -> Result<Option<ExecutionCheckpoint>, CheckpointError> {
-        let checkpoints = self.checkpoints.read().unwrap();
+        let checkpoints = self.checkpoints.read().unwrap_or_else(|e| e.into_inner());
         Ok(checkpoints
             .get(&checkpoint_id)
             .map(|(_, checkpoint)| checkpoint.clone()))
@@ -229,7 +229,7 @@ impl CheckpointStorage for InMemoryCheckpointStorage {
         &self,
         execution_id: ExecutionId,
     ) -> Result<Vec<CheckpointMetadata>, CheckpointError> {
-        let metadata = self.metadata.read().unwrap();
+        let metadata = self.metadata.read().unwrap_or_else(|e| e.into_inner());
         let mut list: Vec<_> = metadata
             .values()
             .filter(|m| m.execution_id == execution_id)
@@ -254,8 +254,8 @@ impl CheckpointStorage for InMemoryCheckpointStorage {
         }
 
         let to_delete = &list[keep_count..];
-        let mut checkpoints = self.checkpoints.write().unwrap();
-        let mut metadata = self.metadata.write().unwrap();
+        let mut checkpoints = self.checkpoints.write().unwrap_or_else(|e| e.into_inner());
+        let mut metadata = self.metadata.write().unwrap_or_else(|e| e.into_inner());
 
         for meta in to_delete {
             checkpoints.remove(&meta.id);
@@ -267,8 +267,8 @@ impl CheckpointStorage for InMemoryCheckpointStorage {
 
     fn delete_checkpoints(&self, execution_id: ExecutionId) -> Result<usize, CheckpointError> {
         let list = self.list_checkpoints(execution_id)?;
-        let mut checkpoints = self.checkpoints.write().unwrap();
-        let mut metadata = self.metadata.write().unwrap();
+        let mut checkpoints = self.checkpoints.write().unwrap_or_else(|e| e.into_inner());
+        let mut metadata = self.metadata.write().unwrap_or_else(|e| e.into_inner());
 
         for meta in &list {
             checkpoints.remove(&meta.id);

@@ -121,7 +121,7 @@ impl RateLimiter {
         let now = Instant::now();
         let one_minute_ago = now - Duration::from_secs(60);
 
-        let mut timestamps = self.timestamps.write().unwrap();
+        let mut timestamps = self.timestamps.write().unwrap_or_else(|e| e.into_inner());
 
         // Remove old timestamps
         timestamps.retain(|&t| t > one_minute_ago);
@@ -147,7 +147,7 @@ impl RateLimiter {
         let now = Instant::now();
         let one_minute_ago = now - Duration::from_secs(60);
 
-        let timestamps = self.timestamps.read().unwrap();
+        let timestamps = self.timestamps.read().unwrap_or_else(|e| e.into_inner());
         timestamps.iter().filter(|&&t| t > one_minute_ago).count() as u64
     }
 }
@@ -382,7 +382,7 @@ impl GoogleVisionProvider {
     async fn get_auth_token(&self) -> Result<String> {
         // Check cache first
         {
-            let cache = self.auth_cache.read().unwrap();
+            let cache = self.auth_cache.read().unwrap_or_else(|e| e.into_inner());
             if let Some(token) = cache.as_ref() {
                 if token.is_valid() {
                     return Ok(token.token.clone());
@@ -395,7 +395,7 @@ impl GoogleVisionProvider {
 
         // Cache it
         {
-            let mut cache = self.auth_cache.write().unwrap();
+            let mut cache = self.auth_cache.write().unwrap_or_else(|e| e.into_inner());
             *cache = Some(AuthToken {
                 token: token.clone(),
                 expires_at: Instant::now() + Duration::from_secs(3600), // 1 hour

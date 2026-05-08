@@ -316,7 +316,7 @@ impl OcrMetrics {
     /// Record a failed request
     pub fn record_failure(&self, error_type: &str) {
         self.requests_failed.inc();
-        let mut errors = self.error_counts.write().unwrap();
+        let mut errors = self.error_counts.write().unwrap_or_else(|e| e.into_inner());
         *errors.entry(error_type.to_string()).or_insert(0) += 1;
     }
 
@@ -337,7 +337,7 @@ impl OcrMetrics {
 
     /// Record provider usage
     pub fn record_provider_usage(&self, provider: &str) {
-        let mut usage = self.provider_usage.write().unwrap();
+        let mut usage = self.provider_usage.write().unwrap_or_else(|e| e.into_inner());
         *usage.entry(provider.to_string()).or_insert(0) += 1;
     }
 
@@ -390,12 +390,12 @@ impl OcrMetrics {
 
     /// Get provider usage statistics
     pub fn provider_stats(&self) -> HashMap<String, u64> {
-        self.provider_usage.read().unwrap().clone()
+        self.provider_usage.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Get error statistics
     pub fn error_stats(&self) -> HashMap<String, u64> {
-        self.error_counts.read().unwrap().clone()
+        self.error_counts.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Get a summary of all metrics
@@ -507,8 +507,8 @@ impl OcrMetrics {
         self.cache_misses.reset();
         self.bytes_processed.reset();
         self.images_processed.reset();
-        self.provider_usage.write().unwrap().clear();
-        self.error_counts.write().unwrap().clear();
+        self.provider_usage.write().unwrap_or_else(|e| e.into_inner()).clear();
+        self.error_counts.write().unwrap_or_else(|e| e.into_inner()).clear();
     }
 }
 

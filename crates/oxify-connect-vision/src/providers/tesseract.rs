@@ -84,7 +84,13 @@ impl VisionProvider for TesseractProvider {
                 .map_err(|e| VisionError::tesseract(format!("Failed to init Tesseract: {}", e)))?;
 
             // Set the image
-            api.set_image(temp_path.to_str().unwrap())
+            let temp_path_str = temp_path.to_str().ok_or_else(|| {
+                VisionError::tesseract(format!(
+                    "Temp image path is not valid UTF-8: {:?}",
+                    temp_path
+                ))
+            })?;
+            api.set_image(temp_path_str)
                 .map_err(|e| VisionError::tesseract(format!("Failed to set image: {}", e)))?;
 
             // Get text

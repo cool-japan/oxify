@@ -34,8 +34,12 @@
 //! }
 //! ```
 
-use crate::{memory::InMemoryRebacManager, CheckRequest, RelationTuple, Result, Subject};
+use crate::{
+    memory::InMemoryRebacManager, AuthzError, CheckRequest, RelationTuple, Result, Subject,
+};
 use serde::{Deserialize, Serialize};
+use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
+use sqlx::Row;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -240,12 +244,29 @@ pub struct EdgeEngine {
     stats: Arc<RwLock<EdgeStats>>,
     /// Sync task handle
     sync_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
+    /// Optional SQLite connection pool for central DB sync.
+    /// `None` when no `central_db_url` could be connected (non-fatal).
+    pool: Option<SqlitePool>,
 }
 
 impl EdgeEngine {
-    /// Create a new edge engine
+    /// Create a new edge engine.
+    ///
+    /// Attempts to open a SQLite connection pool using `config.central_db_url`.
+    /// If the connection fails (e.g., the URL is a Postgres URL or the file does
+    /// not exist yet), the engine starts without a pool and
+    /// [`sync_from_central`](Self::sync_from_central) will return an error
+    /// instead of panicking.
     pub async fn new(config: EdgeConfig) -> Result<Self> {
         let node_id = uuid::Uuid::new_v4().to_string();
+
+        // Attempt to open the pool; treat connection failure as non-fatal so
+        // that the engine can be used in-memory even without a DB.
+        let pool = SqlitePoolOptions::new()
+            .max_connections(5)
+            .connect(&config.central_db_url)
+            .await
+            .ok();
 
         Ok(Self {
             manager: InMemoryRebacManager::new(),
@@ -254,6 +275,7 @@ impl EdgeEngine {
             node_id,
             stats: Arc::new(RwLock::new(EdgeStats::default())),
             sync_handle: Arc::new(RwLock::new(None)),
+            pool,
         })
     }
 
@@ -309,16 +331,105 @@ impl EdgeEngine {
         self.manager.remove_tuple(&tuple).await
     }
 
-    /// Sync tuples from central database
+    /// Sync tuples from the central SQLite database into the in-memory manager.
+    ///
+    /// Fetches all rows from `authz_relation_tuples`, filtered according to
+    /// `sync_config`, and upserts each one via [`write_tuple`](Self::write_tuple)
+    /// (which also sets CRDT metadata and updates the in-memory graph).
+    ///
+    /// On success, `stats.tuples_synced` is incremented and
+    /// `stats.last_sync_timestamp` is refreshed.  On any error,
+    /// `stats.sync_failures` is incremented before the error is propagated.
     pub async fn sync_from_central(&self) -> Result<()> {
-        // In a real implementation, this would connect to the central database
-        // and fetch tuples based on sync_config
-        // For now, we'll simulate this
+        let pool = match &self.pool {
+            Some(p) => p,
+            None => {
+                let mut stats = self.stats.write().await;
+                stats.sync_failures += 1;
+                return Err(AuthzError::DatabaseError(
+                    "No database pool available for central sync".to_string(),
+                ));
+            }
+        };
 
-        // TODO: Implement actual database sync using sqlx
-        // This is a placeholder that shows the structure
+        // Build a namespace filter based on the sync configuration.
+        let namespace_filter: Option<Vec<String>> = match &self.config.sync_config {
+            SyncConfig::All => None,
+            SyncConfig::Namespaces(ns) => Some(ns.clone()),
+            SyncConfig::Tenants(_) => None, // tenant filtering happens via subject, not namespace
+            SyncConfig::NamespacesAndTenants { namespaces, .. } => Some(namespaces.clone()),
+        };
+
+        // Fetch rows. We use the function form of sqlx::query (not the macro)
+        // so there is no compile-time DATABASE_URL requirement.
+        let rows = sqlx::query(
+            "SELECT namespace, object_id, relation, subject_type, subject_id, subject_relation \
+             FROM authz_relation_tuples",
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| AuthzError::DatabaseError(format!("Failed to fetch tuples: {e}")))?;
+
+        let mut synced: u64 = 0;
+
+        for row in rows {
+            let namespace: String = row
+                .try_get("namespace")
+                .map_err(|e| AuthzError::DatabaseError(format!("Row error: {e}")))?;
+
+            // Apply namespace filter when configured.
+            if let Some(ref filter) = namespace_filter {
+                if !filter.contains(&namespace) {
+                    continue;
+                }
+            }
+
+            let object_id: String = row
+                .try_get("object_id")
+                .map_err(|e| AuthzError::DatabaseError(format!("Row error: {e}")))?;
+            let relation: String = row
+                .try_get("relation")
+                .map_err(|e| AuthzError::DatabaseError(format!("Row error: {e}")))?;
+            let subject_type: String = row
+                .try_get("subject_type")
+                .map_err(|e| AuthzError::DatabaseError(format!("Row error: {e}")))?;
+            let subject_id: String = row
+                .try_get("subject_id")
+                .map_err(|e| AuthzError::DatabaseError(format!("Row error: {e}")))?;
+            let subject_relation: Option<String> = row
+                .try_get("subject_relation")
+                .map_err(|e| AuthzError::DatabaseError(format!("Row error: {e}")))?;
+
+            let subject = match subject_type.as_str() {
+                "userset" => {
+                    // subject_id is stored as "namespace:object_id"
+                    let parts: Vec<&str> = subject_id.splitn(2, ':').collect();
+                    if parts.len() == 2 {
+                        Subject::UserSet {
+                            namespace: parts[0].to_string(),
+                            object_id: parts[1].to_string(),
+                            relation: subject_relation.unwrap_or_default(),
+                        }
+                    } else {
+                        Subject::User(subject_id)
+                    }
+                }
+                _ => Subject::User(subject_id),
+            };
+
+            let tuple = RelationTuple::new(namespace, relation, object_id, subject);
+
+            // write_tuple merges through CRDT and then into the in-memory manager,
+            // which is idempotent for duplicate tuples.
+            self.write_tuple(tuple).await.map_err(|e| {
+                AuthzError::DatabaseError(format!("Failed to upsert tuple: {e}"))
+            })?;
+
+            synced += 1;
+        }
 
         let mut stats = self.stats.write().await;
+        stats.tuples_synced += synced;
         stats.last_sync_timestamp = Some(CrdtTuple::current_timestamp());
 
         Ok(())

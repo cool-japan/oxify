@@ -533,13 +533,13 @@ impl Engine {
 
     /// Pause an execution
     pub fn pause_execution(&self, execution_id: uuid::Uuid) {
-        self.pause_flag.write().unwrap().insert(execution_id, true);
+        self.pause_flag.write().unwrap_or_else(|e| e.into_inner()).insert(execution_id, true);
         tracing::info!("Paused execution {}", execution_id);
     }
 
     /// Resume an execution
     pub fn resume_execution(&self, execution_id: uuid::Uuid) {
-        self.pause_flag.write().unwrap().insert(execution_id, false);
+        self.pause_flag.write().unwrap_or_else(|e| e.into_inner()).insert(execution_id, false);
         tracing::info!("Resumed execution {}", execution_id);
     }
 
@@ -547,7 +547,7 @@ impl Engine {
     pub fn is_paused(&self, execution_id: uuid::Uuid) -> bool {
         self.pause_flag
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .get(&execution_id)
             .copied()
             .unwrap_or(false)
@@ -555,7 +555,7 @@ impl Engine {
 
     /// Cancel an execution
     pub fn cancel_execution(&self, execution_id: uuid::Uuid) {
-        self.cancel_flag.write().unwrap().insert(execution_id, true);
+        self.cancel_flag.write().unwrap_or_else(|e| e.into_inner()).insert(execution_id, true);
         tracing::warn!("Cancelled execution {}", execution_id);
     }
 
@@ -563,7 +563,7 @@ impl Engine {
     pub fn is_cancelled(&self, execution_id: uuid::Uuid) -> bool {
         self.cancel_flag
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .get(&execution_id)
             .copied()
             .unwrap_or(false)
@@ -571,7 +571,7 @@ impl Engine {
 
     /// Clear cancellation flag for an execution
     pub fn clear_cancellation(&self, execution_id: uuid::Uuid) {
-        self.cancel_flag.write().unwrap().remove(&execution_id);
+        self.cancel_flag.write().unwrap_or_else(|e| e.into_inner()).remove(&execution_id);
     }
 
     /// Create a checkpoint

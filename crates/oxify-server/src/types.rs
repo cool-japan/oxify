@@ -85,7 +85,11 @@ impl ServerConfig {
 
     /// Development configuration
     pub fn development() -> Self {
-        let mut config = Self::new("127.0.0.1:3000".parse().unwrap());
+        let mut config = Self::new(
+            "127.0.0.1:3000"
+                .parse()
+                .expect("static localhost:3000 addr must parse"),
+        );
         // Use relaxed security for development
         config.security_headers = Some(crate::security::relaxed_security_config());
         config.validation = Some(ValidationConfig::default());

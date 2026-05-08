@@ -47,17 +47,39 @@ impl RelationshipGraph {
         }
     }
 
-    /// Check if there's a path from subject to object via the given relation
+    /// Check if there's a path from subject to object via the given relation.
+    ///
+    /// Performs BFS over the edge map to find transitive reachability.
+    /// Cycles are handled via a `visited` set; the traversal is bounded by O(V+E).
+    ///
+    /// Example: given edges `user:alice --member--> group:eng` and
+    /// `group:eng --member--> namespace:docs`, `has_path("user:alice", "member", "namespace:docs")`
+    /// returns `true` even though there is no direct edge.
     fn has_path(&self, subject: &str, relation: &str, object: &str) -> bool {
-        // Direct check
-        if let Some(objects) = self.edges.get(&(subject.to_string(), relation.to_string())) {
-            if objects.contains(&object.to_string()) {
-                return true;
+        use std::collections::{HashSet, VecDeque};
+
+        let target = object.to_string();
+        let rel = relation.to_string();
+
+        let mut queue: VecDeque<String> = VecDeque::new();
+        let mut visited: HashSet<String> = HashSet::new();
+
+        queue.push_back(subject.to_string());
+        visited.insert(subject.to_string());
+
+        while let Some(current) = queue.pop_front() {
+            if let Some(neighbors) = self.edges.get(&(current.clone(), rel.clone())) {
+                for neighbor in neighbors {
+                    if *neighbor == target {
+                        return true;
+                    }
+                    if visited.insert(neighbor.clone()) {
+                        queue.push_back(neighbor.clone());
+                    }
+                }
             }
         }
 
-        // TODO: Implement transitive relationship traversal
-        // For now, only direct relationships are checked
         false
     }
 }

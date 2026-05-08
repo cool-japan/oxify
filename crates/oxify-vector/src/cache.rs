@@ -377,12 +377,12 @@ impl QueryCache {
 
     /// Get cache statistics.
     pub fn stats(&self) -> CacheStats {
-        self.stats.read().unwrap().clone()
+        self.stats.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Get current cache size.
     pub fn len(&self) -> usize {
-        self.cache.read().unwrap().len()
+        self.cache.read().unwrap_or_else(|e| e.into_inner()).len()
     }
 
     /// Check if cache is empty.

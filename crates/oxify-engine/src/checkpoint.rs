@@ -145,7 +145,7 @@ impl FileCheckpointStore {
                     if let Ok(checkpoint) = serde_json::from_str::<ExecutionCheckpoint>(&content) {
                         self.checkpoints
                             .write()
-                            .unwrap()
+                            .unwrap_or_else(|e| e.into_inner())
                             .insert(checkpoint.id, checkpoint);
                     }
                 }
@@ -172,7 +172,7 @@ impl CheckpointStore for FileCheckpointStore {
 
         self.checkpoints
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(checkpoint.id, checkpoint.clone());
 
         tracing::info!(
@@ -187,7 +187,7 @@ impl CheckpointStore for FileCheckpointStore {
     fn load(&self, id: CheckpointId) -> Result<ExecutionCheckpoint, String> {
         self.checkpoints
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .get(&id)
             .cloned()
             .ok_or_else(|| format!("Checkpoint {} not found", id))
@@ -205,7 +205,7 @@ impl CheckpointStore for FileCheckpointStore {
     fn list_by_workflow(&self, workflow_id: WorkflowId) -> Vec<ExecutionCheckpoint> {
         self.checkpoints
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .values()
             .filter(|c| c.workflow_id == workflow_id)
             .cloned()
@@ -215,7 +215,7 @@ impl CheckpointStore for FileCheckpointStore {
     fn list_by_execution(&self, execution_id: Uuid) -> Vec<ExecutionCheckpoint> {
         self.checkpoints
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .values()
             .filter(|c| c.execution_id == execution_id)
             .cloned()
@@ -230,7 +230,7 @@ impl CheckpointStore for FileCheckpointStore {
                 .map_err(|e| format!("Failed to delete checkpoint file: {}", e))?;
         }
 
-        self.checkpoints.write().unwrap().remove(&id);
+        self.checkpoints.write().unwrap_or_else(|e| e.into_inner()).remove(&id);
 
         tracing::info!("Deleted checkpoint {}", id);
 
@@ -272,7 +272,7 @@ impl CheckpointStore for InMemoryCheckpointStore {
     fn save(&self, checkpoint: &ExecutionCheckpoint) -> Result<CheckpointId, String> {
         self.checkpoints
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(checkpoint.id, checkpoint.clone());
 
         Ok(checkpoint.id)
@@ -281,7 +281,7 @@ impl CheckpointStore for InMemoryCheckpointStore {
     fn load(&self, id: CheckpointId) -> Result<ExecutionCheckpoint, String> {
         self.checkpoints
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .get(&id)
             .cloned()
             .ok_or_else(|| format!("Checkpoint {} not found", id))
@@ -299,7 +299,7 @@ impl CheckpointStore for InMemoryCheckpointStore {
     fn list_by_workflow(&self, workflow_id: WorkflowId) -> Vec<ExecutionCheckpoint> {
         self.checkpoints
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .values()
             .filter(|c| c.workflow_id == workflow_id)
             .cloned()
@@ -309,7 +309,7 @@ impl CheckpointStore for InMemoryCheckpointStore {
     fn list_by_execution(&self, execution_id: Uuid) -> Vec<ExecutionCheckpoint> {
         self.checkpoints
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .values()
             .filter(|c| c.execution_id == execution_id)
             .cloned()
@@ -317,7 +317,7 @@ impl CheckpointStore for InMemoryCheckpointStore {
     }
 
     fn delete(&self, id: CheckpointId) -> Result<(), String> {
-        self.checkpoints.write().unwrap().remove(&id);
+        self.checkpoints.write().unwrap_or_else(|e| e.into_inner()).remove(&id);
         Ok(())
     }
 

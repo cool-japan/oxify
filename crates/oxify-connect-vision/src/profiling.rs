@@ -306,7 +306,7 @@ impl Profiler {
             return Ok(());
         }
 
-        let mut active = self.active.lock().unwrap();
+        let mut active = self.active.lock().unwrap_or_else(|e| e.into_inner());
 
         if active.contains_key(&name) {
             return Err(ProfilingError::ProfileAlreadyStarted(name));
@@ -314,7 +314,7 @@ impl Profiler {
 
         // Get parent from call stack
         let parent = if self.config.enable_call_hierarchy {
-            let mut stack = self.call_stack.lock().unwrap();
+            let mut stack = self.call_stack.lock().unwrap_or_else(|e| e.into_inner());
             if stack.depth() >= self.config.max_call_depth {
                 None
             } else {
@@ -353,7 +353,7 @@ impl Profiler {
             return Ok(());
         }
 
-        let mut active = self.active.lock().unwrap();
+        let mut active = self.active.lock().unwrap_or_else(|e| e.into_inner());
 
         let active_profile = active
             .remove(&name)
@@ -363,7 +363,7 @@ impl Profiler {
 
         // Pop from call stack
         if self.config.enable_call_hierarchy {
-            let mut stack = self.call_stack.lock().unwrap();
+            let mut stack = self.call_stack.lock().unwrap_or_else(|e| e.into_inner());
             stack.pop();
         }
 
@@ -384,7 +384,7 @@ impl Profiler {
             };
 
         // Update or create profile entry
-        let mut profiles = self.profiles.lock().unwrap();
+        let mut profiles = self.profiles.lock().unwrap_or_else(|e| e.into_inner());
 
         let entry = profiles.entry(name.clone()).or_insert_with(|| {
             let mut entry = ProfileEntry::new(name.clone());
@@ -416,19 +416,19 @@ impl Profiler {
 
     /// Get a profile entry
     pub fn get_profile(&self, name: &str) -> Option<ProfileEntry> {
-        let profiles = self.profiles.lock().unwrap();
+        let profiles = self.profiles.lock().unwrap_or_else(|e| e.into_inner());
         profiles.get(name).cloned()
     }
 
     /// Get all profiles
     pub fn get_all_profiles(&self) -> Vec<ProfileEntry> {
-        let profiles = self.profiles.lock().unwrap();
+        let profiles = self.profiles.lock().unwrap_or_else(|e| e.into_inner());
         profiles.values().cloned().collect()
     }
 
     /// Generate a profiling report
     pub fn generate_report(&self) -> ProfilingReport {
-        let profiles = self.profiles.lock().unwrap();
+        let profiles = self.profiles.lock().unwrap_or_else(|e| e.into_inner());
         let entries: Vec<ProfileEntry> = profiles.values().cloned().collect();
 
         ProfilingReport::new(entries, self.start_time.elapsed())
@@ -436,16 +436,16 @@ impl Profiler {
 
     /// Reset all profiles
     pub fn reset(&self) {
-        let mut profiles = self.profiles.lock().unwrap();
+        let mut profiles = self.profiles.lock().unwrap_or_else(|e| e.into_inner());
         profiles.clear();
 
-        let mut active = self.active.lock().unwrap();
+        let mut active = self.active.lock().unwrap_or_else(|e| e.into_inner());
         active.clear();
 
-        let mut stack = self.call_stack.lock().unwrap();
+        let mut stack = self.call_stack.lock().unwrap_or_else(|e| e.into_inner());
         *stack = CallStack::default();
 
-        let mut snapshots = self.memory_snapshots.lock().unwrap();
+        let mut snapshots = self.memory_snapshots.lock().unwrap_or_else(|e| e.into_inner());
         snapshots.clear();
     }
 
@@ -453,14 +453,14 @@ impl Profiler {
     pub fn take_memory_snapshot(&self) {
         if self.config.enable_memory_profiling {
             let snapshot = MemorySnapshot::current();
-            let mut snapshots = self.memory_snapshots.lock().unwrap();
+            let mut snapshots = self.memory_snapshots.lock().unwrap_or_else(|e| e.into_inner());
             snapshots.push(snapshot);
         }
     }
 
     /// Get memory snapshots
     pub fn get_memory_snapshots(&self) -> Vec<MemorySnapshot> {
-        let snapshots = self.memory_snapshots.lock().unwrap();
+        let snapshots = self.memory_snapshots.lock().unwrap_or_else(|e| e.into_inner());
         snapshots.clone()
     }
 

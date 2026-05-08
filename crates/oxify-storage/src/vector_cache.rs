@@ -208,27 +208,27 @@ impl VectorCache {
         params: &VectorSearchParams,
     ) -> Option<Vec<VectorSearchResult>> {
         let key = Self::generate_key(query_vector, params);
-        let mut entries = self.entries.write().unwrap();
+        let mut entries = self.entries.write().unwrap_or_else(|e| e.into_inner());
 
         if let Some(entry) = entries.get_mut(&key) {
             if entry.is_expired() {
                 entries.remove(&key);
                 if self.config.enable_metrics {
-                    let mut metrics = self.metrics.write().unwrap();
+                    let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
                     metrics.misses += 1;
                 }
                 return None;
             }
 
             if self.config.enable_metrics {
-                let mut metrics = self.metrics.write().unwrap();
+                let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
                 metrics.hits += 1;
             }
 
             Some(entry.access())
         } else {
             if self.config.enable_metrics {
-                let mut metrics = self.metrics.write().unwrap();
+                let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
                 metrics.misses += 1;
             }
             None
@@ -243,7 +243,7 @@ impl VectorCache {
         results: Vec<VectorSearchResult>,
     ) {
         let key = Self::generate_key(&query_vector, &params);
-        let mut entries = self.entries.write().unwrap();
+        let mut entries = self.entries.write().unwrap_or_else(|e| e.into_inner());
 
         // Evict expired entries first
         self.evict_expired(&mut entries);
@@ -258,7 +258,7 @@ impl VectorCache {
 
     /// Invalidate cache for a specific collection
     pub fn invalidate_collection(&self, _collection: &str) {
-        let mut entries = self.entries.write().unwrap();
+        let mut entries = self.entries.write().unwrap_or_else(|e| e.into_inner());
         let keys_to_remove: Vec<String> = entries
             .keys()
             .filter(|_| {
@@ -275,14 +275,14 @@ impl VectorCache {
         }
 
         if self.config.enable_metrics {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
             metrics.invalidations += removed as u64;
         }
     }
 
     /// Clear all cache entries
     pub fn clear_all(&self) {
-        let mut entries = self.entries.write().unwrap();
+        let mut entries = self.entries.write().unwrap_or_else(|e| e.into_inner());
         entries.clear();
     }
 
@@ -302,7 +302,7 @@ impl VectorCache {
             entries.remove(&lru_key);
 
             if self.config.enable_metrics {
-                let mut metrics = self.metrics.write().unwrap();
+                let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
                 metrics.evictions += 1;
             }
         }
@@ -310,8 +310,8 @@ impl VectorCache {
 
     /// Get cache statistics
     pub fn stats(&self) -> HashMap<String, f64> {
-        let entries = self.entries.read().unwrap();
-        let metrics = self.metrics.read().unwrap();
+        let entries = self.entries.read().unwrap_or_else(|e| e.into_inner());
+        let metrics = self.metrics.read().unwrap_or_else(|e| e.into_inner());
 
         let mut stats = HashMap::new();
         stats.insert("size".to_string(), entries.len() as f64);
@@ -331,12 +331,12 @@ impl VectorCache {
 
     /// Get cache metrics
     pub fn metrics(&self) -> VectorCacheMetrics {
-        self.metrics.read().unwrap().clone()
+        self.metrics.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Reset cache metrics
     pub fn reset_metrics(&self) {
-        let mut metrics = self.metrics.write().unwrap();
+        let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
         *metrics = VectorCacheMetrics::default();
     }
 }

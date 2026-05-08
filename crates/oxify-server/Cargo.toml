@@ -33,6 +33,7 @@ futures = { workspace = true }
 # Security crates
 oxify-authn = { version = "0.2.0", path = "../oxify-authn" }
 oxify-authz = { version = "0.2.0", path = "../oxify-authz" }
+jsonwebtoken = { version = "10.3", features = ["rust_crypto"] }
 
 # Observability
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

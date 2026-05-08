@@ -164,7 +164,7 @@ impl WebhookRegistry {
         let id = config.id;
         self.webhooks
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(id, (config, workflow));
         tracing::info!("Registered webhook {}", id);
         id
@@ -172,7 +172,7 @@ impl WebhookRegistry {
 
     /// Unregister a webhook
     pub fn unregister(&self, webhook_id: WebhookId) -> bool {
-        let removed = self.webhooks.write().unwrap().remove(&webhook_id).is_some();
+        let removed = self.webhooks.write().unwrap_or_else(|e| e.into_inner()).remove(&webhook_id).is_some();
         if removed {
             tracing::info!("Unregistered webhook {}", webhook_id);
         }
@@ -181,14 +181,14 @@ impl WebhookRegistry {
 
     /// Get webhook configuration
     pub fn get(&self, webhook_id: WebhookId) -> Option<(WebhookConfig, Workflow)> {
-        self.webhooks.read().unwrap().get(&webhook_id).cloned()
+        self.webhooks.read().unwrap_or_else(|e| e.into_inner()).get(&webhook_id).cloned()
     }
 
     /// List all webhooks
     pub fn list(&self) -> Vec<WebhookConfig> {
         self.webhooks
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .values()
             .map(|(config, _)| config.clone())
             .collect()
@@ -242,7 +242,7 @@ impl WebhookRegistry {
         config.trigger_count += 1;
         self.webhooks
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(webhook_id, (config.clone(), workflow.clone()));
 
         // Create trigger event
@@ -262,14 +262,14 @@ impl WebhookRegistry {
         trigger.success = true;
 
         // Store trigger event
-        self.triggers.write().unwrap().push(trigger.clone());
+        self.triggers.write().unwrap_or_else(|e| e.into_inner()).push(trigger.clone());
 
         Ok(trigger)
     }
 
     /// Get trigger history
     pub fn get_triggers(&self, webhook_id: Option<WebhookId>) -> Vec<WebhookTrigger> {
-        let triggers = self.triggers.read().unwrap();
+        let triggers = self.triggers.read().unwrap_or_else(|e| e.into_inner());
         if let Some(id) = webhook_id {
             triggers
                 .iter()
@@ -287,7 +287,7 @@ impl WebhookRegistry {
 
         self.triggers
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .retain(|trigger| trigger.triggered_at > cutoff);
     }
 }

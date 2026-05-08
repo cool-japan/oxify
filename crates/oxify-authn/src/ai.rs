@@ -310,7 +310,7 @@ impl AiSecurityEngine {
 
     /// Record a login event
     pub fn record_event(&mut self, event: LoginEvent) {
-        let mut behaviors = self.user_behaviors.lock().unwrap();
+        let mut behaviors = self.user_behaviors.lock().unwrap_or_else(|e| e.into_inner());
         let behavior = behaviors
             .entry(event.user_id.clone())
             .or_insert_with(|| UserBehavior::new(event.user_id.clone()));
@@ -320,7 +320,7 @@ impl AiSecurityEngine {
 
     /// Get behavioral profile for a user
     pub fn get_behavior_profile(&self, user_id: &str) -> Result<BehaviorProfile> {
-        let behaviors = self.user_behaviors.lock().unwrap();
+        let behaviors = self.user_behaviors.lock().unwrap_or_else(|e| e.into_inner());
         let behavior = behaviors
             .get(user_id)
             .ok_or_else(|| AiSecurityError::UserNotFound(user_id.to_string()))?;
@@ -401,7 +401,7 @@ impl AiSecurityEngine {
 
     /// Detect anomalies in recent behavior
     pub fn detect_anomalies(&self, user_id: &str, event: &LoginEvent) -> Result<AnomalyDetection> {
-        let behaviors = self.user_behaviors.lock().unwrap();
+        let behaviors = self.user_behaviors.lock().unwrap_or_else(|e| e.into_inner());
         let behavior = behaviors
             .get(user_id)
             .ok_or_else(|| AiSecurityError::UserNotFound(user_id.to_string()))?;
@@ -459,7 +459,7 @@ impl AiSecurityEngine {
         }
 
         // Check threat intelligence
-        let threat_ips = self.threat_ips.lock().unwrap();
+        let threat_ips = self.threat_ips.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(&threat_time) = threat_ips.get(&event.ip_address) {
             let hours_since_threat = (Utc::now() - threat_time).num_hours();
             if hours_since_threat <= self.config.threat_window_hours {
@@ -515,19 +515,19 @@ impl AiSecurityEngine {
 
     /// Flag an IP address as threat
     pub fn flag_threat_ip(&mut self, ip_address: String) {
-        let mut threat_ips = self.threat_ips.lock().unwrap();
+        let mut threat_ips = self.threat_ips.lock().unwrap_or_else(|e| e.into_inner());
         threat_ips.insert(ip_address, Utc::now());
     }
 
     /// Clear threat IP flag
     pub fn clear_threat_ip(&mut self, ip_address: &str) {
-        let mut threat_ips = self.threat_ips.lock().unwrap();
+        let mut threat_ips = self.threat_ips.lock().unwrap_or_else(|e| e.into_inner());
         threat_ips.remove(ip_address);
     }
 
     /// Clean up old threat intelligence data
     pub fn cleanup_old_threats(&mut self) {
-        let mut threat_ips = self.threat_ips.lock().unwrap();
+        let mut threat_ips = self.threat_ips.lock().unwrap_or_else(|e| e.into_inner());
         let cutoff = Utc::now() - Duration::hours(self.config.threat_window_hours);
         threat_ips.retain(|_, &mut timestamp| timestamp > cutoff);
     }
@@ -535,8 +535,8 @@ impl AiSecurityEngine {
     /// Get statistics
     #[must_use]
     pub fn get_stats(&self) -> AiSecurityStats {
-        let behaviors = self.user_behaviors.lock().unwrap();
-        let threat_ips = self.threat_ips.lock().unwrap();
+        let behaviors = self.user_behaviors.lock().unwrap_or_else(|e| e.into_inner());
+        let threat_ips = self.threat_ips.lock().unwrap_or_else(|e| e.into_inner());
 
         let total_events: usize = behaviors.values().map(|b| b.events.len()).sum();
         let total_users = behaviors.len();
@@ -550,9 +550,9 @@ impl AiSecurityEngine {
 
     /// Clear all user behavior data
     pub fn clear_all_data(&mut self) {
-        let mut behaviors = self.user_behaviors.lock().unwrap();
+        let mut behaviors = self.user_behaviors.lock().unwrap_or_else(|e| e.into_inner());
         behaviors.clear();
-        let mut threat_ips = self.threat_ips.lock().unwrap();
+        let mut threat_ips = self.threat_ips.lock().unwrap_or_else(|e| e.into_inner());
         threat_ips.clear();
     }
 }

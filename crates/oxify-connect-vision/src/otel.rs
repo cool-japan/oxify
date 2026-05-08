@@ -553,7 +553,7 @@ impl TracingProvider {
         let name = name.into();
 
         // Update statistics
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
         stats.total_spans += 1;
         *stats.spans_by_operation.entry(name.clone()).or_insert(0) += 1;
         drop(stats);
@@ -589,7 +589,7 @@ impl TracingProvider {
         };
 
         // Update statistics
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
         match span_data.status {
             SpanStatus::Ok => stats.spans_ok += 1,
             SpanStatus::Error => stats.spans_error += 1,
@@ -599,7 +599,7 @@ impl TracingProvider {
         drop(stats);
 
         // Store the span
-        let mut spans = self.spans.lock().unwrap();
+        let mut spans = self.spans.lock().unwrap_or_else(|e| e.into_inner());
         spans.push(span_data);
 
         // Export if batch size reached
@@ -630,13 +630,13 @@ impl TracingProvider {
             }
         }
 
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
         stats.total_exports += 1;
     }
 
     /// Force flush all pending spans
     pub fn flush(&self) {
-        let mut spans = self.spans.lock().unwrap();
+        let mut spans = self.spans.lock().unwrap_or_else(|e| e.into_inner());
         let to_export = spans.drain(..).collect::<Vec<_>>();
         drop(spans);
         if !to_export.is_empty() {
@@ -646,12 +646,12 @@ impl TracingProvider {
 
     /// Get tracing statistics
     pub fn get_stats(&self) -> TracingStats {
-        self.stats.lock().unwrap().clone()
+        self.stats.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Reset statistics
     pub fn reset_stats(&self) {
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
         *stats = TracingStats::default();
     }
 
@@ -912,7 +912,7 @@ mod tests {
         span.end();
 
         // Span should not be recorded
-        let spans = provider.spans.lock().unwrap();
+        let spans = provider.spans.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(spans.len(), 0);
     }
 

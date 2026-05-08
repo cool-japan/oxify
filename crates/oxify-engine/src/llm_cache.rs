@@ -68,7 +68,7 @@ impl EngineLlmCache {
     /// Get a cached response if it exists and hasn't expired
     pub fn get(&self, provider: &str, model: &str, request: &LlmRequest) -> Option<LlmResponse> {
         let key = CacheKey::from_request(provider, model, request);
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
 
         if let Some(cached) = cache.get(&key) {
             if !cached.is_expired(self.ttl) {
@@ -85,7 +85,7 @@ impl EngineLlmCache {
     /// Store a response in the cache
     pub fn put(&self, provider: &str, model: &str, request: &LlmRequest, response: LlmResponse) {
         let key = CacheKey::from_request(provider, model, request);
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
 
         // Simple eviction: remove first entry if cache is full
         if cache.len() >= self.max_size {
@@ -106,6 +106,6 @@ impl EngineLlmCache {
     /// Get cache size
     #[allow(dead_code)]
     pub fn size(&self) -> usize {
-        self.cache.lock().unwrap().len()
+        self.cache.lock().unwrap_or_else(|e| e.into_inner()).len()
     }
 }

@@ -301,11 +301,11 @@ impl Cache {
 
     /// Get workflow from cache
     pub fn get_workflow(&self, id: &Uuid) -> Option<WorkflowRow> {
-        let mut cache = self.workflows.write().unwrap();
+        let mut cache = self.workflows.write().unwrap_or_else(|e| e.into_inner());
         let result = cache.get(id);
 
         if self.config.enable_metrics {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
             if result.is_some() {
                 metrics.workflow_hits += 1;
             } else {
@@ -318,17 +318,17 @@ impl Cache {
 
     /// Put workflow into cache
     pub fn put_workflow(&self, id: Uuid, workflow: WorkflowRow) {
-        let mut cache = self.workflows.write().unwrap();
+        let mut cache = self.workflows.write().unwrap_or_else(|e| e.into_inner());
         cache.put(id, workflow, self.config.default_ttl);
     }
 
     /// Invalidate workflow cache entry
     pub fn invalidate_workflow(&self, id: &Uuid) {
-        let mut cache = self.workflows.write().unwrap();
+        let mut cache = self.workflows.write().unwrap_or_else(|e| e.into_inner());
         cache.invalidate(id);
 
         if self.config.enable_metrics {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
             metrics.invalidations += 1;
         }
     }
@@ -337,11 +337,11 @@ impl Cache {
 
     /// Get user quota from cache
     pub fn get_user_quota(&self, user_id: &Uuid) -> Option<UserQuota> {
-        let mut cache = self.user_quotas.write().unwrap();
+        let mut cache = self.user_quotas.write().unwrap_or_else(|e| e.into_inner());
         let result = cache.get(user_id);
 
         if self.config.enable_metrics {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
             if result.is_some() {
                 metrics.user_quota_hits += 1;
             } else {
@@ -354,17 +354,17 @@ impl Cache {
 
     /// Put user quota into cache
     pub fn put_user_quota(&self, user_id: Uuid, quota: UserQuota) {
-        let mut cache = self.user_quotas.write().unwrap();
+        let mut cache = self.user_quotas.write().unwrap_or_else(|e| e.into_inner());
         cache.put(user_id, quota, self.config.default_ttl);
     }
 
     /// Invalidate user quota cache entry
     pub fn invalidate_user_quota(&self, user_id: &Uuid) {
-        let mut cache = self.user_quotas.write().unwrap();
+        let mut cache = self.user_quotas.write().unwrap_or_else(|e| e.into_inner());
         cache.invalidate(user_id);
 
         if self.config.enable_metrics {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
             metrics.invalidations += 1;
         }
     }
@@ -373,11 +373,11 @@ impl Cache {
 
     /// Get workflow quota from cache
     pub fn get_workflow_quota(&self, workflow_id: &Uuid) -> Option<WorkflowQuota> {
-        let mut cache = self.workflow_quotas.write().unwrap();
+        let mut cache = self.workflow_quotas.write().unwrap_or_else(|e| e.into_inner());
         let result = cache.get(workflow_id);
 
         if self.config.enable_metrics {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
             if result.is_some() {
                 metrics.workflow_quota_hits += 1;
             } else {
@@ -390,17 +390,17 @@ impl Cache {
 
     /// Put workflow quota into cache
     pub fn put_workflow_quota(&self, workflow_id: Uuid, quota: WorkflowQuota) {
-        let mut cache = self.workflow_quotas.write().unwrap();
+        let mut cache = self.workflow_quotas.write().unwrap_or_else(|e| e.into_inner());
         cache.put(workflow_id, quota, self.config.default_ttl);
     }
 
     /// Invalidate workflow quota cache entry
     pub fn invalidate_workflow_quota(&self, workflow_id: &Uuid) {
-        let mut cache = self.workflow_quotas.write().unwrap();
+        let mut cache = self.workflow_quotas.write().unwrap_or_else(|e| e.into_inner());
         cache.invalidate(workflow_id);
 
         if self.config.enable_metrics {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
             metrics.invalidations += 1;
         }
     }
@@ -409,11 +409,11 @@ impl Cache {
 
     /// Get API key from cache
     pub fn get_api_key(&self, key_hash: &str) -> Option<Vec<u8>> {
-        let mut cache = self.api_keys.write().unwrap();
+        let mut cache = self.api_keys.write().unwrap_or_else(|e| e.into_inner());
         let result = cache.get(&key_hash.to_string());
 
         if self.config.enable_metrics {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
             if result.is_some() {
                 metrics.api_key_hits += 1;
             } else {
@@ -426,17 +426,17 @@ impl Cache {
 
     /// Put API key into cache
     pub fn put_api_key(&self, key_hash: String, encrypted_key: Vec<u8>) {
-        let mut cache = self.api_keys.write().unwrap();
+        let mut cache = self.api_keys.write().unwrap_or_else(|e| e.into_inner());
         cache.put(key_hash, encrypted_key, self.config.default_ttl);
     }
 
     /// Invalidate API key cache entry
     pub fn invalidate_api_key(&self, key_hash: &str) {
-        let mut cache = self.api_keys.write().unwrap();
+        let mut cache = self.api_keys.write().unwrap_or_else(|e| e.into_inner());
         cache.invalidate(&key_hash.to_string());
 
         if self.config.enable_metrics {
-            let mut metrics = self.metrics.write().unwrap();
+            let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
             metrics.invalidations += 1;
         }
     }
@@ -445,18 +445,18 @@ impl Cache {
 
     /// Clear all caches
     pub fn clear_all(&self) {
-        self.workflows.write().unwrap().clear();
-        self.user_quotas.write().unwrap().clear();
-        self.workflow_quotas.write().unwrap().clear();
-        self.api_keys.write().unwrap().clear();
+        self.workflows.write().unwrap_or_else(|e| e.into_inner()).clear();
+        self.user_quotas.write().unwrap_or_else(|e| e.into_inner()).clear();
+        self.workflow_quotas.write().unwrap_or_else(|e| e.into_inner()).clear();
+        self.api_keys.write().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
     /// Evict expired entries from all caches
     pub fn evict_expired(&self) {
-        self.workflows.write().unwrap().evict_expired();
-        self.user_quotas.write().unwrap().evict_expired();
-        self.workflow_quotas.write().unwrap().evict_expired();
-        self.api_keys.write().unwrap().evict_expired();
+        self.workflows.write().unwrap_or_else(|e| e.into_inner()).evict_expired();
+        self.user_quotas.write().unwrap_or_else(|e| e.into_inner()).evict_expired();
+        self.workflow_quotas.write().unwrap_or_else(|e| e.into_inner()).evict_expired();
+        self.api_keys.write().unwrap_or_else(|e| e.into_inner()).evict_expired();
     }
 
     /// Get cache statistics
@@ -464,37 +464,37 @@ impl Cache {
         let mut stats = HashMap::new();
         stats.insert(
             "workflows".to_string(),
-            self.workflows.read().unwrap().stats(),
+            self.workflows.read().unwrap_or_else(|e| e.into_inner()).stats(),
         );
         stats.insert(
             "user_quotas".to_string(),
-            self.user_quotas.read().unwrap().stats(),
+            self.user_quotas.read().unwrap_or_else(|e| e.into_inner()).stats(),
         );
         stats.insert(
             "workflow_quotas".to_string(),
-            self.workflow_quotas.read().unwrap().stats(),
+            self.workflow_quotas.read().unwrap_or_else(|e| e.into_inner()).stats(),
         );
         stats.insert(
             "api_keys".to_string(),
-            self.api_keys.read().unwrap().stats(),
+            self.api_keys.read().unwrap_or_else(|e| e.into_inner()).stats(),
         );
         stats
     }
 
     /// Get cache metrics
     pub fn metrics(&self) -> CacheMetrics {
-        self.metrics.read().unwrap().clone()
+        self.metrics.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Reset cache metrics
     pub fn reset_metrics(&self) {
-        let mut metrics = self.metrics.write().unwrap();
+        let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
         *metrics = CacheMetrics::default();
     }
 
     /// Export metrics in a format suitable for monitoring systems
     pub fn export_metrics(&self) -> HashMap<String, f64> {
-        let metrics = self.metrics.read().unwrap();
+        let metrics = self.metrics.read().unwrap_or_else(|e| e.into_inner());
         let mut export = HashMap::new();
 
         export.insert("workflow_hits".to_string(), metrics.workflow_hits as f64);

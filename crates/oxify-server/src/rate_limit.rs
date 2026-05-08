@@ -110,7 +110,7 @@ impl RateLimiter {
 
     /// Check if a request is allowed for the given key
     pub fn check_rate_limit(&self, key: &str) -> RateLimitResult {
-        let mut buckets = self.buckets.lock().unwrap();
+        let mut buckets = self.buckets.lock().unwrap_or_else(|e| e.into_inner());
 
         let bucket = buckets
             .entry(key.to_string())
@@ -132,7 +132,7 @@ impl RateLimiter {
 
     /// Clean up old buckets (for memory management)
     pub fn cleanup(&self) {
-        let mut buckets = self.buckets.lock().unwrap();
+        let mut buckets = self.buckets.lock().unwrap_or_else(|e| e.into_inner());
         buckets.retain(|_, bucket| {
             // Remove buckets that have been idle for more than 5 minutes
             bucket.last_refill.elapsed() < Duration::from_secs(300)
@@ -175,12 +175,12 @@ pub async fn rate_limit_middleware(
 
             // Add rate limit headers
             let headers = response.headers_mut();
-            headers.insert("X-RateLimit-Limit", limit.to_string().parse().unwrap());
+            headers.insert("X-RateLimit-Limit", limit.to_string().parse().unwrap_or_else(|_| axum::http::HeaderValue::from_static("0")));
             headers.insert(
                 "X-RateLimit-Remaining",
-                remaining.to_string().parse().unwrap(),
+                remaining.to_string().parse().unwrap_or_else(|_| axum::http::HeaderValue::from_static("0")),
             );
-            headers.insert("X-RateLimit-Reset", reset.to_string().parse().unwrap());
+            headers.insert("X-RateLimit-Reset", reset.to_string().parse().unwrap_or_else(|_| axum::http::HeaderValue::from_static("0")));
 
             Ok(response)
         }

@@ -329,7 +329,7 @@ impl EncryptionProvider {
     fn get_or_create_key(&self, salt: &[u8], version: u32) -> Result<Vec<u8>> {
         // Check if key is cached
         {
-            let keys = self.keys.read().unwrap();
+            let keys = self.keys.read().unwrap_or_else(|e| e.into_inner());
             if let Some(key_info) = keys.get(&version) {
                 return Ok(key_info.key.clone());
             }
@@ -340,7 +340,7 @@ impl EncryptionProvider {
 
         // Cache the key
         {
-            let mut keys = self.keys.write().unwrap();
+            let mut keys = self.keys.write().unwrap_or_else(|e| e.into_inner());
             keys.insert(
                 version,
                 KeyInfo {
@@ -408,7 +408,7 @@ impl EncryptionProvider {
 
         // Update statistics
         {
-            let mut stats = self.stats.lock().unwrap();
+            let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
             stats.total_encryptions += 1;
             stats.bytes_encrypted += plaintext.len() as u64;
         }
@@ -518,7 +518,7 @@ impl EncryptionProvider {
 
         // Update statistics
         {
-            let mut stats = self.stats.lock().unwrap();
+            let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
             stats.total_decryptions += 1;
             stats.bytes_decrypted += plaintext.len() as u64;
         }
@@ -596,7 +596,7 @@ impl EncryptionProvider {
 
         // Clear cached keys
         {
-            let mut keys = self.keys.write().unwrap();
+            let mut keys = self.keys.write().unwrap_or_else(|e| e.into_inner());
             keys.clear();
         }
 
@@ -605,12 +605,12 @@ impl EncryptionProvider {
 
     /// Get encryption statistics
     pub fn get_stats(&self) -> EncryptionStats {
-        self.stats.lock().unwrap().clone()
+        self.stats.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Reset statistics
     pub fn reset_stats(&self) {
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
         *stats = EncryptionStats::default();
     }
 
@@ -621,7 +621,7 @@ impl EncryptionProvider {
 
     /// Clear cached keys
     pub fn clear_keys(&self) {
-        let mut keys = self.keys.write().unwrap();
+        let mut keys = self.keys.write().unwrap_or_else(|e| e.into_inner());
         keys.clear();
     }
 }

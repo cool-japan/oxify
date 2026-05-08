@@ -86,7 +86,7 @@ impl WorkflowScheduler {
         // Store schedule
         self.schedules
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(schedule_id, (workflow.clone(), schedule_config, schedule));
 
         // Store execution info
@@ -102,7 +102,7 @@ impl WorkflowScheduler {
 
         self.executions
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(schedule_id, execution);
 
         tracing::info!(
@@ -120,11 +120,11 @@ impl WorkflowScheduler {
         let removed = self
             .schedules
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .remove(&schedule_id)
             .is_some();
         if removed {
-            self.executions.write().unwrap().remove(&schedule_id);
+            self.executions.write().unwrap_or_else(|e| e.into_inner()).remove(&schedule_id);
             tracing::info!("Removed schedule {}", schedule_id);
         }
         removed
@@ -132,17 +132,17 @@ impl WorkflowScheduler {
 
     /// Get all scheduled executions
     pub fn list_schedules(&self) -> Vec<ScheduledExecution> {
-        self.executions.read().unwrap().values().cloned().collect()
+        self.executions.read().unwrap_or_else(|e| e.into_inner()).values().cloned().collect()
     }
 
     /// Get a specific scheduled execution
     pub fn get_schedule(&self, schedule_id: ScheduleId) -> Option<ScheduledExecution> {
-        self.executions.read().unwrap().get(&schedule_id).cloned()
+        self.executions.read().unwrap_or_else(|e| e.into_inner()).get(&schedule_id).cloned()
     }
 
     /// Start the scheduler (runs in background)
     pub fn start(&self) -> JoinHandle<()> {
-        *self.running.write().unwrap() = true;
+        *self.running.write().unwrap_or_else(|e| e.into_inner()) = true;
 
         let schedules = Arc::clone(&self.schedules);
         let executions = Arc::clone(&self.executions);
@@ -152,13 +152,13 @@ impl WorkflowScheduler {
         tokio::spawn(async move {
             tracing::info!("Workflow scheduler started");
 
-            while *running.read().unwrap() {
+            while *running.read().unwrap_or_else(|e| e.into_inner()) {
                 let now = Utc::now();
 
                 // Get schedules that need to run
                 let to_run: Vec<(ScheduleId, Workflow, WorkflowSchedule)> = {
-                    let schedules = schedules.read().unwrap();
-                    let executions = executions.read().unwrap();
+                    let schedules = schedules.read().unwrap_or_else(|e| e.into_inner());
+                    let executions = executions.read().unwrap_or_else(|e| e.into_inner());
 
                     executions
                         .iter()
@@ -183,7 +183,7 @@ impl WorkflowScheduler {
 
                     // Check concurrent run limits
                     let can_run = {
-                        let executions = executions.read().unwrap();
+                        let executions = executions.read().unwrap_or_else(|e| e.into_inner());
                         if let Some(exec) = executions.get(&schedule_id) {
                             if let Some(max_concurrent) = schedule_config.max_concurrent_runs {
                                 exec.active_runs < max_concurrent
@@ -205,13 +205,13 @@ impl WorkflowScheduler {
 
                     // Update execution info
                     {
-                        let mut executions = executions.write().unwrap();
+                        let mut executions = executions.write().unwrap_or_else(|e| e.into_inner());
                         if let Some(exec) = executions.get_mut(&schedule_id) {
                             exec.active_runs += 1;
                             exec.last_run = Some(now);
 
                             // Calculate next run
-                            let schedules_guard = schedules.read().unwrap();
+                            let schedules_guard = schedules.read().unwrap_or_else(|e| e.into_inner());
                             if let Some((_, _, schedule)) = schedules_guard.get(&schedule_id) {
                                 exec.next_run = schedule
                                     .upcoming(Utc)
@@ -235,7 +235,7 @@ impl WorkflowScheduler {
                         let result = engine_clone.execute_sequential(&workflow_clone).await;
 
                         // Update execution stats
-                        let mut executions = executions_clone.write().unwrap();
+                        let mut executions = executions_clone.write().unwrap_or_else(|e| e.into_inner());
                         if let Some(exec) = executions.get_mut(&schedule_id) {
                             exec.active_runs = exec.active_runs.saturating_sub(1);
 
@@ -270,12 +270,12 @@ impl WorkflowScheduler {
 
     /// Stop the scheduler
     pub fn stop(&self) {
-        *self.running.write().unwrap() = false;
+        *self.running.write().unwrap_or_else(|e| e.into_inner()) = false;
     }
 
     /// Check if scheduler is running
     pub fn is_running(&self) -> bool {
-        *self.running.read().unwrap()
+        *self.running.read().unwrap_or_else(|e| e.into_inner())
     }
 }
 

@@ -90,7 +90,7 @@ impl WorkflowTracker {
 
     /// Set a budget limit for a workflow
     pub fn set_budget(&self, workflow_id: &str, budget: BudgetLimit) {
-        let mut workflows = self.workflows.lock().unwrap();
+        let mut workflows = self.workflows.lock().unwrap_or_else(|e| e.into_inner());
         workflows
             .entry(workflow_id.to_string())
             .or_insert_with(|| WorkflowData {
@@ -112,7 +112,7 @@ impl WorkflowTracker {
         completion_tokens: u32,
         cost_cents: u64,
     ) {
-        let mut workflows = self.workflows.lock().unwrap();
+        let mut workflows = self.workflows.lock().unwrap_or_else(|e| e.into_inner());
         let data = workflows
             .entry(workflow_id.to_string())
             .or_insert_with(|| WorkflowData {
@@ -133,7 +133,7 @@ impl WorkflowTracker {
 
     /// Check if a workflow can afford a request (budget check)
     pub fn can_afford(&self, workflow_id: &str, estimated_cost_cents: u64) -> bool {
-        let workflows = self.workflows.lock().unwrap();
+        let workflows = self.workflows.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(data) = workflows.get(workflow_id) {
             if let Some(budget) = &data.budget {
                 let budget_cents = budget.as_cents();
@@ -145,7 +145,7 @@ impl WorkflowTracker {
 
     /// Get statistics for a workflow
     pub fn get_stats(&self, workflow_id: &str) -> WorkflowStats {
-        let workflows = self.workflows.lock().unwrap();
+        let workflows = self.workflows.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(data) = workflows.get(workflow_id) {
             let budget_remaining_cents = data.budget.as_ref().map(|b| {
                 let budget_cents = b.as_cents();
@@ -192,7 +192,7 @@ impl WorkflowTracker {
 
     /// Get statistics for all workflows
     pub fn get_all_stats(&self) -> Vec<WorkflowStats> {
-        let workflows = self.workflows.lock().unwrap();
+        let workflows = self.workflows.lock().unwrap_or_else(|e| e.into_inner());
         workflows
             .iter()
             .map(|(workflow_id, data)| {
@@ -229,7 +229,7 @@ impl WorkflowTracker {
 
     /// Reset statistics for a workflow
     pub fn reset(&self, workflow_id: &str) {
-        let mut workflows = self.workflows.lock().unwrap();
+        let mut workflows = self.workflows.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(data) = workflows.get_mut(workflow_id) {
             let budget = data.budget.clone();
             *data = WorkflowData {
@@ -245,7 +245,7 @@ impl WorkflowTracker {
 
     /// Reset all workflow statistics
     pub fn reset_all(&self) {
-        let mut workflows = self.workflows.lock().unwrap();
+        let mut workflows = self.workflows.lock().unwrap_or_else(|e| e.into_inner());
         for data in workflows.values_mut() {
             let budget = data.budget.clone();
             *data = WorkflowData {
@@ -261,7 +261,7 @@ impl WorkflowTracker {
 
     /// Remove a workflow from tracking
     pub fn remove(&self, workflow_id: &str) {
-        let mut workflows = self.workflows.lock().unwrap();
+        let mut workflows = self.workflows.lock().unwrap_or_else(|e| e.into_inner());
         workflows.remove(workflow_id);
     }
 }

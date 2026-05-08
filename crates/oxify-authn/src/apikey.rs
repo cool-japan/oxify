@@ -356,7 +356,7 @@ impl ApiKeyManager {
             ip_whitelist: None,
         };
 
-        let mut store = self.store.lock().unwrap();
+        let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
         store.insert(key_hash, metadata.clone());
 
         Ok(GeneratedApiKey {
@@ -369,7 +369,7 @@ impl ApiKeyManager {
     pub async fn validate_key(&self, key: &str) -> Result<ApiKeyValidation, AuthError> {
         let key_hash = Self::hash_key(key);
 
-        let mut store = self.store.lock().unwrap();
+        let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
         let metadata = store
             .get_mut(&key_hash)
             .ok_or_else(|| AuthError::InvalidToken("API key not found".into()))?;
@@ -406,7 +406,7 @@ impl ApiKeyManager {
     pub async fn revoke_key(&self, key: &str) -> Result<(), AuthError> {
         let key_hash = Self::hash_key(key);
 
-        let mut store = self.store.lock().unwrap();
+        let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
         let metadata = store
             .get_mut(&key_hash)
             .ok_or_else(|| AuthError::InvalidToken("API key not found".into()))?;
@@ -417,7 +417,7 @@ impl ApiKeyManager {
 
     /// Revoke all keys for a user
     pub async fn revoke_user_keys(&self, user_id: &str) -> Result<usize, AuthError> {
-        let mut store = self.store.lock().unwrap();
+        let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
         let mut revoked_count = 0;
 
         for metadata in store.values_mut() {
@@ -432,7 +432,7 @@ impl ApiKeyManager {
 
     /// Get all keys for a user
     pub async fn get_user_keys(&self, user_id: &str) -> Vec<ApiKeyMetadata> {
-        let store = self.store.lock().unwrap();
+        let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
         store
             .values()
             .filter(|m| m.user_id == user_id)
@@ -446,7 +446,7 @@ impl ApiKeyManager {
 
         // Get old key metadata
         let (user_id, name, scopes) = {
-            let store = self.store.lock().unwrap();
+            let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
             let metadata = store
                 .get(&old_key_hash)
                 .ok_or_else(|| AuthError::InvalidToken("API key not found".into()))?;
@@ -469,7 +469,7 @@ impl ApiKeyManager {
 
     /// Cleanup expired keys
     pub async fn cleanup_expired(&self) -> usize {
-        let mut store = self.store.lock().unwrap();
+        let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
         let initial_count = store.len();
 
         store.retain(|_, metadata| !metadata.is_expired());
@@ -479,7 +479,7 @@ impl ApiKeyManager {
 
     /// Get usage statistics
     pub async fn get_stats(&self) -> ApiKeyStats {
-        let store = self.store.lock().unwrap();
+        let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
 
         let total = store.len();
         let active = store.values().filter(|m| m.active).count();
