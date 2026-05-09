@@ -33,7 +33,7 @@ dirs = { workspace = true }
 reqwest = { workspace = true }
 flate2 = "1.1"
 tar = "0.4"
-oxiarc-archive = "0.2.6"
+oxiarc-archive = "0.2.8"
 uuid = { workspace = true }
 chrono = { workspace = true }
 rpassword = "7.4"

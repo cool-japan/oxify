@@ -23,6 +23,19 @@ exclude = [
 ]
 resolver = "2"
 
+[patch.crates-io]
+oxiarc-core    = { path = "/Users/kitasan/work/oxiarc/oxiarc-core" }
+oxiarc-archive = { path = "/Users/kitasan/work/oxiarc/oxiarc-archive" }
+oxiarc-brotli  = { path = "/Users/kitasan/work/oxiarc/oxiarc-brotli" }
+oxiarc-bzip2   = { path = "/Users/kitasan/work/oxiarc/oxiarc-bzip2" }
+oxiarc-deflate = { path = "/Users/kitasan/work/oxiarc/oxiarc-deflate" }
+oxiarc-lz4     = { path = "/Users/kitasan/work/oxiarc/oxiarc-lz4" }
+oxiarc-lzhuf   = { path = "/Users/kitasan/work/oxiarc/oxiarc-lzhuf" }
+oxiarc-lzma    = { path = "/Users/kitasan/work/oxiarc/oxiarc-lzma" }
+oxiarc-lzw     = { path = "/Users/kitasan/work/oxiarc/oxiarc-lzw" }
+oxiarc-snappy  = { path = "/Users/kitasan/work/oxiarc/oxiarc-snappy" }
+oxiarc-zstd    = { path = "/Users/kitasan/work/oxiarc/oxiarc-zstd" }
+
 [workspace.package]
 version = "0.2.0"
 edition = "2021"

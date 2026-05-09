@@ -69,11 +69,15 @@ impl EncryptionService {
 
         // Create cipher
         let cipher = Aes256Gcm::new(&derived_key.into());
-        let nonce = Nonce::from_slice(&iv);
+        let iv_arr: [u8; 12] = iv
+            .as_slice()
+            .try_into()
+            .context("IV must be exactly 12 bytes")?;
+        let nonce = Nonce::from(iv_arr);
 
         // Encrypt
         let ciphertext = cipher
-            .encrypt(nonce, plaintext.as_bytes())
+            .encrypt(&nonce, plaintext.as_bytes())
             .map_err(|e| anyhow::anyhow!("Encryption failed: {e}"))?;
 
         // Create metadata
@@ -114,11 +118,15 @@ impl EncryptionService {
 
         // Create cipher
         let cipher = Aes256Gcm::new(&derived_key.into());
-        let nonce = Nonce::from_slice(&iv);
+        let iv_arr: [u8; 12] = iv
+            .as_slice()
+            .try_into()
+            .context("IV must be exactly 12 bytes")?;
+        let nonce = Nonce::from(iv_arr);
 
         // Decrypt
         let plaintext = cipher
-            .decrypt(nonce, ciphertext)
+            .decrypt(&nonce, ciphertext)
             .map_err(|e| anyhow::anyhow!("Decryption failed: {e}"))?;
 
         String::from_utf8(plaintext).context("Decrypted value is not valid UTF-8")
