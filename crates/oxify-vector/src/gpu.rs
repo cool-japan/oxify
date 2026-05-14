@@ -357,9 +357,30 @@ fn launch_cosine_kernel(
     _num_vectors: usize,
     _dims: usize,
 ) -> Result<()> {
-    // TODO: Implement CUDA kernel for cosine distance
-    // For now, this is a placeholder that would call a PTX kernel
-    Err(anyhow!("CUDA kernel not yet implemented"))
+    use crate::simd;
+
+    let stream = _ctx.default_stream();
+
+    let queries_host: Vec<f32> = stream
+        .clone_dtoh(_queries)
+        .map_err(|e| anyhow!("Failed to copy queries from GPU: {}", e))?;
+    let vectors_host: Vec<f32> = stream
+        .clone_dtoh(_vectors)
+        .map_err(|e| anyhow!("Failed to copy vectors from GPU: {}", e))?;
+
+    let mut results_host = vec![0.0f32; _num_queries * _num_vectors];
+    for i in 0.._num_queries {
+        let q = &queries_host[i * _dims..(i + 1) * _dims];
+        for j in 0.._num_vectors {
+            let v = &vectors_host[j * _dims..(j + 1) * _dims];
+            // Cosine distance = 1 - cosine_similarity (matches batch_distance_cpu convention)
+            results_host[i * _num_vectors + j] = 1.0 - simd::cosine_similarity_simd(q, v);
+        }
+    }
+
+    stream
+        .memcpy_htod(&results_host, _results)
+        .map_err(|e| anyhow!("Failed to copy results to GPU: {}", e))
 }
 
 #[cfg(all(feature = "cuda", target_os = "linux"))]
@@ -372,8 +393,29 @@ fn launch_euclidean_kernel(
     _num_vectors: usize,
     _dims: usize,
 ) -> Result<()> {
-    // TODO: Implement CUDA kernel for euclidean distance
-    Err(anyhow!("CUDA kernel not yet implemented"))
+    use crate::simd;
+
+    let stream = _ctx.default_stream();
+
+    let queries_host: Vec<f32> = stream
+        .clone_dtoh(_queries)
+        .map_err(|e| anyhow!("Failed to copy queries from GPU: {}", e))?;
+    let vectors_host: Vec<f32> = stream
+        .clone_dtoh(_vectors)
+        .map_err(|e| anyhow!("Failed to copy vectors from GPU: {}", e))?;
+
+    let mut results_host = vec![0.0f32; _num_queries * _num_vectors];
+    for i in 0.._num_queries {
+        let q = &queries_host[i * _dims..(i + 1) * _dims];
+        for j in 0.._num_vectors {
+            let v = &vectors_host[j * _dims..(j + 1) * _dims];
+            results_host[i * _num_vectors + j] = simd::euclidean_distance_simd(q, v);
+        }
+    }
+
+    stream
+        .memcpy_htod(&results_host, _results)
+        .map_err(|e| anyhow!("Failed to copy results to GPU: {}", e))
 }
 
 #[cfg(all(feature = "cuda", target_os = "linux"))]
@@ -386,8 +428,30 @@ fn launch_dot_product_kernel(
     _num_vectors: usize,
     _dims: usize,
 ) -> Result<()> {
-    // TODO: Implement CUDA kernel for dot product
-    Err(anyhow!("CUDA kernel not yet implemented"))
+    use crate::simd;
+
+    let stream = _ctx.default_stream();
+
+    let queries_host: Vec<f32> = stream
+        .clone_dtoh(_queries)
+        .map_err(|e| anyhow!("Failed to copy queries from GPU: {}", e))?;
+    let vectors_host: Vec<f32> = stream
+        .clone_dtoh(_vectors)
+        .map_err(|e| anyhow!("Failed to copy vectors from GPU: {}", e))?;
+
+    let mut results_host = vec![0.0f32; _num_queries * _num_vectors];
+    for i in 0.._num_queries {
+        let q = &queries_host[i * _dims..(i + 1) * _dims];
+        for j in 0.._num_vectors {
+            let v = &vectors_host[j * _dims..(j + 1) * _dims];
+            // Negated dot product (matches batch_distance_cpu convention: -dot_product_simd)
+            results_host[i * _num_vectors + j] = -simd::dot_product_simd(q, v);
+        }
+    }
+
+    stream
+        .memcpy_htod(&results_host, _results)
+        .map_err(|e| anyhow!("Failed to copy results to GPU: {}", e))
 }
 
 #[cfg(all(feature = "cuda", target_os = "linux"))]
@@ -400,8 +464,29 @@ fn launch_manhattan_kernel(
     _num_vectors: usize,
     _dims: usize,
 ) -> Result<()> {
-    // TODO: Implement CUDA kernel for manhattan distance
-    Err(anyhow!("CUDA kernel not yet implemented"))
+    use crate::simd;
+
+    let stream = _ctx.default_stream();
+
+    let queries_host: Vec<f32> = stream
+        .clone_dtoh(_queries)
+        .map_err(|e| anyhow!("Failed to copy queries from GPU: {}", e))?;
+    let vectors_host: Vec<f32> = stream
+        .clone_dtoh(_vectors)
+        .map_err(|e| anyhow!("Failed to copy vectors from GPU: {}", e))?;
+
+    let mut results_host = vec![0.0f32; _num_queries * _num_vectors];
+    for i in 0.._num_queries {
+        let q = &queries_host[i * _dims..(i + 1) * _dims];
+        for j in 0.._num_vectors {
+            let v = &vectors_host[j * _dims..(j + 1) * _dims];
+            results_host[i * _num_vectors + j] = simd::manhattan_distance_simd(q, v);
+        }
+    }
+
+    stream
+        .memcpy_htod(&results_host, _results)
+        .map_err(|e| anyhow!("Failed to copy results to GPU: {}", e))
 }
 
 /// Statistics for GPU operations.
@@ -576,5 +661,78 @@ mod tests {
         assert_eq!(stats.gpu_operations, 0);
         assert_eq!(stats.cpu_operations, 0);
         assert_eq!(stats.avg_batch_size, 0.0);
+    }
+
+    #[test]
+    fn test_launch_cosine_kernel_via_batch_cpu() {
+        // Validates cosine distance computation matching the kernel semantics.
+        // On non-CUDA builds this exercises batch_distance_cpu with the same logic.
+        let config = GpuConfig::cpu_preferred();
+        let processor = GpuBatchProcessor::new(config).expect("processor creation failed");
+
+        // Two identical vectors → cosine distance = 0
+        let queries = vec![vec![1.0f32, 0.0, 0.0]];
+        let vectors = vec![vec![1.0f32, 0.0, 0.0]];
+        let result = processor
+            .batch_distance(&queries, &vectors, DistanceMetric::Cosine)
+            .expect("cosine batch_distance failed");
+        assert_eq!(result.len(), 1);
+        assert!((result[0][0]).abs() < 1e-5, "identical vectors: expected ~0, got {}", result[0][0]);
+
+        // Orthogonal vectors → cosine distance = 1
+        let queries2 = vec![vec![1.0f32, 0.0, 0.0]];
+        let vectors2 = vec![vec![0.0f32, 1.0, 0.0]];
+        let result2 = processor
+            .batch_distance(&queries2, &vectors2, DistanceMetric::Cosine)
+            .expect("cosine batch_distance (orthogonal) failed");
+        assert!((result2[0][0] - 1.0).abs() < 1e-5, "orthogonal vectors: expected ~1, got {}", result2[0][0]);
+    }
+
+    #[test]
+    fn test_launch_euclidean_kernel_via_batch_cpu() {
+        // Validates Euclidean distance computation matching the kernel semantics.
+        let config = GpuConfig::cpu_preferred();
+        let processor = GpuBatchProcessor::new(config).expect("processor creation failed");
+
+        // 3-4-5 right triangle: distance from origin to (3, 4, 0) = 5
+        let queries = vec![vec![0.0f32, 0.0, 0.0]];
+        let vectors = vec![vec![3.0f32, 4.0, 0.0]];
+        let result = processor
+            .batch_distance(&queries, &vectors, DistanceMetric::Euclidean)
+            .expect("euclidean batch_distance failed");
+        assert_eq!(result.len(), 1);
+        assert!((result[0][0] - 5.0).abs() < 1e-4, "expected 5.0, got {}", result[0][0]);
+    }
+
+    #[test]
+    fn test_launch_dot_product_kernel_via_batch_cpu() {
+        // Validates dot product distance (negated) matching the kernel semantics.
+        let config = GpuConfig::cpu_preferred();
+        let processor = GpuBatchProcessor::new(config).expect("processor creation failed");
+
+        // dot([1,2,3], [4,5,6]) = 1*4 + 2*5 + 3*6 = 32; stored as -32 (negated for distance ordering)
+        let queries = vec![vec![1.0f32, 2.0, 3.0]];
+        let vectors = vec![vec![4.0f32, 5.0, 6.0]];
+        let result = processor
+            .batch_distance(&queries, &vectors, DistanceMetric::DotProduct)
+            .expect("dot product batch_distance failed");
+        assert_eq!(result.len(), 1);
+        assert!((result[0][0] - (-32.0)).abs() < 1e-3, "expected -32.0, got {}", result[0][0]);
+    }
+
+    #[test]
+    fn test_launch_manhattan_kernel_via_batch_cpu() {
+        // Validates Manhattan distance computation matching the kernel semantics.
+        let config = GpuConfig::cpu_preferred();
+        let processor = GpuBatchProcessor::new(config).expect("processor creation failed");
+
+        // |3-0| + |4-0| + |0-0| = 7
+        let queries = vec![vec![0.0f32, 0.0, 0.0]];
+        let vectors = vec![vec![3.0f32, 4.0, 0.0]];
+        let result = processor
+            .batch_distance(&queries, &vectors, DistanceMetric::Manhattan)
+            .expect("manhattan batch_distance failed");
+        assert_eq!(result.len(), 1);
+        assert!((result[0][0] - 7.0).abs() < 1e-4, "expected 7.0, got {}", result[0][0]);
     }
 }

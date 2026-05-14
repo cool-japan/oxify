@@ -10,7 +10,7 @@
 use oxify_vector::{
     CacheConfig, CacheStats, DistanceMetric, QueryCache, SearchConfig, VectorSearchIndex,
 };
-use rand::{Rng, RngExt};
+use rand::RngExt;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 

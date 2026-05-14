@@ -18,7 +18,7 @@ use oxify_vector::{
 
 #[cfg(feature = "fp16")]
 use oxify_vector::quantization::{Fp16QuantizedIndex, Fp16Quantizer};
-use rand::{Rng, RngExt};
+use rand::RngExt;
 use std::collections::HashMap;
 use std::hint::black_box;
 
