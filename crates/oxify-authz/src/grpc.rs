@@ -108,7 +108,7 @@ impl AuthorizationService for AuthzGrpcService {
             object_id: proto_resource.object_id,
             relation: req.relation,
             subject: proto_to_subject(proto_subject),
-            context: None, // TODO: Map proto context to engine context
+            context: req.context.map(proto_to_context),
         };
 
         let response = self
@@ -149,7 +149,7 @@ impl AuthorizationService for AuthzGrpcService {
                     object_id: proto_resource.object_id,
                     relation: check.relation,
                     subject: proto_to_subject(proto_subject),
-                    context: None,
+                    context: check.context.map(proto_to_context),
                 })
             })
             .collect();
@@ -324,6 +324,34 @@ impl AuthorizationService for AuthzGrpcService {
 }
 
 // Conversion helpers
+
+/// Convert a proto `RequestContext` into the engine's `RequestContext`.
+///
+/// - `ip_address`: parsed as a standard [`std::net::IpAddr`]; invalid strings are silently
+///   dropped so that a malformed IP in the proto doesn't abort an otherwise valid check.
+/// - `attributes`: copied verbatim as a `HashMap<String, String>`.
+/// - `timestamp`: treated as Unix seconds; if absent or unparseable, defaults to `Utc::now()`.
+fn proto_to_context(proto: proto::RequestContext) -> crate::RequestContext {
+    use chrono::{TimeZone, Utc};
+    use std::net::IpAddr;
+
+    let client_ip = proto
+        .ip_address
+        .as_deref()
+        .and_then(|s| s.parse::<IpAddr>().ok());
+
+    let timestamp = proto
+        .timestamp
+        .and_then(|secs| Utc.timestamp_opt(secs, 0).single())
+        .unwrap_or_else(Utc::now);
+
+    crate::RequestContext {
+        client_ip,
+        attributes: proto.attributes.into_iter().collect(),
+        timestamp,
+    }
+}
+
 fn proto_to_resource(proto: proto::Resource) -> Resource {
     Resource {
         namespace: proto.namespace,
@@ -547,5 +575,102 @@ mod tests {
 
         let expand_resp = service.expand(expand_req).await.unwrap().into_inner();
         assert_eq!(expand_resp.count, 2);
+    }
+
+    // ── proto_to_context unit tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_proto_to_context_full() {
+        let proto = proto::RequestContext {
+            ip_address: Some("203.0.113.42".to_string()),
+            attributes: [
+                ("role".to_string(), "admin".to_string()),
+                ("region".to_string(), "eu-west-1".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+            timestamp: Some(1_700_000_000),
+        };
+
+        let ctx = proto_to_context(proto);
+
+        // IP parses correctly
+        assert_eq!(
+            ctx.client_ip,
+            Some("203.0.113.42".parse::<std::net::IpAddr>().unwrap())
+        );
+
+        // Attributes are copied verbatim
+        assert_eq!(ctx.attributes.get("role").map(String::as_str), Some("admin"));
+        assert_eq!(
+            ctx.attributes.get("region").map(String::as_str),
+            Some("eu-west-1")
+        );
+
+        // Timestamp corresponds to the Unix epoch value supplied
+        use chrono::{TimeZone, Utc};
+        let expected = Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+        assert_eq!(ctx.timestamp, expected);
+    }
+
+    #[test]
+    fn test_proto_to_context_invalid_ip_is_none() {
+        let proto = proto::RequestContext {
+            ip_address: Some("not-an-ip".to_string()),
+            attributes: Default::default(),
+            timestamp: Some(0),
+        };
+
+        let ctx = proto_to_context(proto);
+        assert!(ctx.client_ip.is_none(), "invalid IP must yield None");
+    }
+
+    #[test]
+    fn test_proto_to_context_ipv6() {
+        let proto = proto::RequestContext {
+            ip_address: Some("::1".to_string()),
+            attributes: Default::default(),
+            timestamp: None,
+        };
+
+        let ctx = proto_to_context(proto);
+        assert_eq!(
+            ctx.client_ip,
+            Some("::1".parse::<std::net::IpAddr>().unwrap())
+        );
+    }
+
+    #[test]
+    fn test_proto_to_context_missing_timestamp_defaults_to_now() {
+        use chrono::Utc;
+
+        let before = Utc::now();
+
+        let proto = proto::RequestContext {
+            ip_address: None,
+            attributes: Default::default(),
+            timestamp: None,
+        };
+
+        let ctx = proto_to_context(proto);
+
+        let after = Utc::now();
+        assert!(
+            ctx.timestamp >= before && ctx.timestamp <= after,
+            "absent timestamp must default to roughly Utc::now()"
+        );
+    }
+
+    #[test]
+    fn test_proto_to_context_empty() {
+        let proto = proto::RequestContext {
+            ip_address: None,
+            attributes: Default::default(),
+            timestamp: Some(0),
+        };
+
+        let ctx = proto_to_context(proto);
+        assert!(ctx.client_ip.is_none());
+        assert!(ctx.attributes.is_empty());
     }
 }

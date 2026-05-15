@@ -617,23 +617,27 @@ impl HybridRebacEngine {
         Ok(results)
     }
 
-    /// List all tuples for a subject
+    /// List all tuples for a subject.
+    ///
+    /// Checks the in-memory layer first; falls back to the SQLite engine so
+    /// that tuples written directly to the durable store (e.g. after a restart)
+    /// are still returned even when the hot-path cache has not been warmed yet.
     pub async fn list_subject_tuples(&self, subject: &Subject) -> Result<Vec<RelationTuple>> {
         // Try memory first
         let memory_tuples = self.memory.list_subject_tuples(subject).await?;
 
-        // If we find tuples in memory, return them
         if !memory_tuples.is_empty() {
             return Ok(memory_tuples);
         }
 
-        // Fall back to PostgreSQL
-        // Note: PostgreSQL engine doesn't have this method yet, so we return empty
-        // TODO: Implement list_subject_tuples in AuthzEngine
-        Ok(memory_tuples)
+        // Fall back to the SQLite engine
+        self.postgres.list_subject_tuples(subject).await
     }
 
-    /// List all tuples for an object
+    /// List all tuples for an object.
+    ///
+    /// Checks the in-memory layer first; falls back to the SQLite engine for
+    /// tuples that have not been loaded into the hot-path cache.
     pub async fn list_object_tuples(
         &self,
         namespace: &str,
@@ -642,15 +646,36 @@ impl HybridRebacEngine {
         // Try memory first
         let memory_tuples = self.memory.list_object_tuples(namespace, object_id).await?;
 
-        // If we find tuples in memory, return them
         if !memory_tuples.is_empty() {
             return Ok(memory_tuples);
         }
 
-        // Fall back to PostgreSQL
-        // Note: PostgreSQL engine doesn't have this method yet, so we return empty
-        // TODO: Implement list_object_tuples in AuthzEngine
-        Ok(memory_tuples)
+        // Fall back to the SQLite engine
+        self.postgres.list_object_tuples(namespace, object_id).await
+    }
+
+    /// List all tuples belonging to a particular namespace, up to `limit` rows.
+    ///
+    /// Delegates directly to the SQLite engine because the in-memory layer is
+    /// not indexed by namespace alone — enumerating all in-memory tuples would
+    /// require a full scan, while the SQLite index on `(namespace)` is cheap.
+    pub async fn list_namespace_tuples(
+        &self,
+        namespace: &str,
+        limit: usize,
+    ) -> Result<Vec<RelationTuple>> {
+        self.postgres.list_namespace_tuples(namespace, limit).await
+    }
+
+    /// List the most recently inserted tuples (within the last `days` days).
+    ///
+    /// Delegates to the SQLite engine, which can use the `created_at` index.
+    pub async fn list_recent_tuples(
+        &self,
+        days: u32,
+        limit: usize,
+    ) -> Result<Vec<RelationTuple>> {
+        self.postgres.list_recent_tuples(days, limit).await
     }
 
     /// Synchronize in-memory layer from PostgreSQL

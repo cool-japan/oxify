@@ -220,22 +220,49 @@ impl CacheWarmer {
         Ok(all_tuples)
     }
 
-    /// Load tuples for specific namespaces
+    /// Load tuples for specific namespaces.
+    ///
+    /// Delegates to `HybridRebacEngine::list_object_tuples` on a per-namespace
+    /// basis via the underlying SQLite engine.  Results are truncated to
+    /// `limit` total entries across all requested namespaces.
     async fn load_namespaces(
         &self,
-        _namespaces: &[String],
-        _limit: usize,
+        namespaces: &[String],
+        limit: usize,
     ) -> Result<Vec<RelationTuple>> {
-        // TODO: Implement namespace listing API in HybridRebacEngine
-        // For now, return empty vector
-        Ok(Vec::new())
+        let mut all_tuples: Vec<RelationTuple> = Vec::new();
+
+        for namespace in namespaces {
+            // Per-namespace quota: share the overall limit equally so that no
+            // single namespace can starve the others.
+            let per_ns_limit = if namespaces.is_empty() {
+                limit
+            } else {
+                (limit / namespaces.len()).max(1)
+            };
+
+            let ns_tuples = self
+                .engine
+                .list_namespace_tuples(namespace, per_ns_limit)
+                .await?;
+
+            all_tuples.extend(ns_tuples);
+
+            if all_tuples.len() >= limit {
+                break;
+            }
+        }
+
+        all_tuples.truncate(limit);
+        Ok(all_tuples)
     }
 
-    /// Load recent tuples
-    async fn load_recent_tuples(&self, _days: u32, _limit: usize) -> Result<Vec<RelationTuple>> {
-        // TODO: Implement tuple listing API with timestamps in HybridRebacEngine
-        // For now, return empty vector
-        Ok(Vec::new())
+    /// Load recent tuples (those inserted within the last `days` days).
+    ///
+    /// Delegates to `HybridRebacEngine::list_recent_tuples` which queries the
+    /// `created_at` column on the SQLite backing store.
+    async fn load_recent_tuples(&self, days: u32, limit: usize) -> Result<Vec<RelationTuple>> {
+        self.engine.list_recent_tuples(days, limit).await
     }
 
     /// Pre-load tuples into cache (parallel)

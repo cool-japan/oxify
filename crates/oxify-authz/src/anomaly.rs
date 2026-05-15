@@ -610,10 +610,10 @@ mod tests {
             if let Some(anomaly) = anomaly {
                 match anomaly.anomaly_type {
                     AnomalyType::RateLimitExceeded => return,
-                    AnomalyType::Combined(types) => {
-                        if types.contains(&AnomalyType::RateLimitExceeded) {
-                            return;
-                        }
+                    AnomalyType::Combined(ref types)
+                        if types.contains(&AnomalyType::RateLimitExceeded) =>
+                    {
+                        return
                     }
                     _ => {}
                 }

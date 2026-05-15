@@ -623,11 +623,216 @@ impl AuthzEngine {
 
         Ok(count)
     }
+
+    /// Parse a database row into a `RelationTuple`.
+    ///
+    /// Returns `None` when the row contains a malformed userset entry that
+    /// should be silently skipped (mirrors the `continue` pattern used in
+    /// `warm_bloom_filter`).
+    fn row_to_tuple(row: &sqlx::sqlite::SqliteRow) -> Option<RelationTuple> {
+        let namespace: String = row
+            .try_get("namespace")
+            .map_err(|e| {
+                tracing::warn!("Failed to get namespace from row: {}", e);
+                e
+            })
+            .ok()?;
+        let object_id: String = row
+            .try_get("object_id")
+            .map_err(|e| {
+                tracing::warn!("Failed to get object_id from row: {}", e);
+                e
+            })
+            .ok()?;
+        let relation: String = row
+            .try_get("relation")
+            .map_err(|e| {
+                tracing::warn!("Failed to get relation from row: {}", e);
+                e
+            })
+            .ok()?;
+        let subject_type: String = row
+            .try_get("subject_type")
+            .map_err(|e| {
+                tracing::warn!("Failed to get subject_type from row: {}", e);
+                e
+            })
+            .ok()?;
+        let subject_id: String = row
+            .try_get("subject_id")
+            .map_err(|e| {
+                tracing::warn!("Failed to get subject_id from row: {}", e);
+                e
+            })
+            .ok()?;
+        let subject_relation: Option<String> = row
+            .try_get("subject_relation")
+            .map_err(|e| {
+                tracing::warn!("Failed to get subject_relation from row: {}", e);
+                e
+            })
+            .ok()?;
+
+        let subject = if subject_type == "user" {
+            Subject::User(subject_id)
+        } else {
+            let parts: Vec<&str> = subject_id.split(':').collect();
+            if parts.len() == 2 {
+                Subject::UserSet {
+                    namespace: parts[0].to_string(),
+                    object_id: parts[1].to_string(),
+                    relation: subject_relation.unwrap_or_default(),
+                }
+            } else {
+                return None;
+            }
+        };
+
+        Some(RelationTuple::new(&namespace, &relation, &object_id, subject))
+    }
+
+    /// List all tuples for a given subject.
+    ///
+    /// Returns every `(namespace, object_id, relation)` combination where the
+    /// provided subject appears on the right-hand side of the stored tuple.
+    pub async fn list_subject_tuples(&self, subject: &Subject) -> Result<Vec<RelationTuple>> {
+        let (subject_type, subject_id) = match subject {
+            Subject::User(id) => ("user".to_string(), id.clone()),
+            Subject::UserSet {
+                namespace,
+                object_id,
+                ..
+            } => (
+                "userset".to_string(),
+                format!("{}:{}", namespace, object_id),
+            ),
+        };
+
+        let rows = sqlx::query(
+            r#"
+            SELECT namespace, object_id, relation, subject_type, subject_id, subject_relation
+            FROM authz_relation_tuples
+            WHERE subject_type = ?
+              AND subject_id = ?
+            "#,
+        )
+        .bind(&subject_type)
+        .bind(&subject_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            AuthzError::DatabaseError(format!("Failed to list subject tuples: {}", e))
+        })?;
+
+        Ok(rows.iter().filter_map(Self::row_to_tuple).collect())
+    }
+
+    /// List all tuples for a given object (namespace + object_id pair).
+    ///
+    /// Returns every `(namespace, object_id, relation, subject)` tuple stored
+    /// against the named object, allowing callers to enumerate who has any
+    /// relation to it.
+    pub async fn list_object_tuples(
+        &self,
+        namespace: &str,
+        object_id: &str,
+    ) -> Result<Vec<RelationTuple>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT namespace, object_id, relation, subject_type, subject_id, subject_relation
+            FROM authz_relation_tuples
+            WHERE namespace = ?
+              AND object_id = ?
+            "#,
+        )
+        .bind(namespace)
+        .bind(object_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            AuthzError::DatabaseError(format!("Failed to list object tuples: {}", e))
+        })?;
+
+        Ok(rows.iter().filter_map(Self::row_to_tuple).collect())
+    }
+
+    /// List all tuples belonging to a particular namespace.
+    ///
+    /// Results are ordered by insertion order (rowid ascending) and limited
+    /// to `limit` rows to prevent unbounded scans.  Used by cache warming to
+    /// pre-load namespace-scoped permissions.
+    pub async fn list_namespace_tuples(
+        &self,
+        namespace: &str,
+        limit: usize,
+    ) -> Result<Vec<RelationTuple>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT namespace, object_id, relation, subject_type, subject_id, subject_relation
+            FROM authz_relation_tuples
+            WHERE namespace = ?
+            ORDER BY id ASC
+            LIMIT ?
+            "#,
+        )
+        .bind(namespace)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            AuthzError::DatabaseError(format!("Failed to list namespace tuples: {}", e))
+        })?;
+
+        Ok(rows.iter().filter_map(Self::row_to_tuple).collect())
+    }
+
+    /// List the most recently inserted tuples.
+    ///
+    /// Uses the `created_at` column (populated by the SQLite `datetime('now')`
+    /// default) to find tuples created within the last `days` days.  Results
+    /// are ordered newest-first and capped at `limit` rows.
+    pub async fn list_recent_tuples(
+        &self,
+        days: u32,
+        limit: usize,
+    ) -> Result<Vec<RelationTuple>> {
+        let cutoff = format!("-{} days", days);
+        let rows = sqlx::query(
+            r#"
+            SELECT namespace, object_id, relation, subject_type, subject_id, subject_relation
+            FROM authz_relation_tuples
+            WHERE created_at >= datetime('now', ?)
+            ORDER BY created_at DESC
+            LIMIT ?
+            "#,
+        )
+        .bind(&cutoff)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            AuthzError::DatabaseError(format!("Failed to list recent tuples: {}", e))
+        })?;
+
+        Ok(rows.iter().filter_map(Self::row_to_tuple).collect())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Create a fresh in-memory SQLite engine with the schema already applied.
+    async fn make_engine() -> AuthzEngine {
+        let engine = AuthzEngine::new("sqlite::memory:")
+            .await
+            .expect("Failed to create in-memory engine");
+        engine
+            .migrate()
+            .await
+            .expect("Failed to run migrations");
+        engine
+    }
 
     #[tokio::test]
     #[ignore] // Requires database
@@ -635,8 +840,10 @@ mod tests {
         let database_url =
             std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite::memory:".to_string());
 
-        let engine = AuthzEngine::new(&database_url).await.unwrap();
-        engine.migrate().await.unwrap();
+        let engine = AuthzEngine::new(&database_url)
+            .await
+            .expect("Failed to create engine");
+        engine.migrate().await.expect("Migration failed");
 
         // Write: alice owns document:123
         engine
@@ -647,7 +854,7 @@ mod tests {
                 Subject::User("alice".to_string()),
             ))
             .await
-            .unwrap();
+            .expect("write_tuple failed");
 
         // Check: alice can view (owner inherits viewer)
         let response = engine
@@ -659,8 +866,218 @@ mod tests {
                 context: None,
             })
             .await
-            .unwrap();
+            .expect("check failed");
 
         assert!(response.allowed);
+    }
+
+    #[tokio::test]
+    async fn test_list_subject_tuples_empty() {
+        let engine = make_engine().await;
+        let tuples = engine
+            .list_subject_tuples(&Subject::User("nobody".to_string()))
+            .await
+            .expect("list_subject_tuples failed");
+        assert!(tuples.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_subject_tuples_single_user() {
+        let engine = make_engine().await;
+
+        engine
+            .write_tuple(RelationTuple::new(
+                "document",
+                "owner",
+                "doc1",
+                Subject::User("alice".to_string()),
+            ))
+            .await
+            .expect("write_tuple failed");
+        engine
+            .write_tuple(RelationTuple::new(
+                "document",
+                "viewer",
+                "doc2",
+                Subject::User("alice".to_string()),
+            ))
+            .await
+            .expect("write_tuple failed");
+        // Tuple for a different user — should not appear in alice's list
+        engine
+            .write_tuple(RelationTuple::new(
+                "document",
+                "viewer",
+                "doc2",
+                Subject::User("bob".to_string()),
+            ))
+            .await
+            .expect("write_tuple failed");
+
+        let tuples = engine
+            .list_subject_tuples(&Subject::User("alice".to_string()))
+            .await
+            .expect("list_subject_tuples failed");
+
+        assert_eq!(tuples.len(), 2);
+        assert!(tuples
+            .iter()
+            .all(|t| t.subject == Subject::User("alice".to_string())));
+    }
+
+    #[tokio::test]
+    async fn test_list_object_tuples_empty() {
+        let engine = make_engine().await;
+        let tuples = engine
+            .list_object_tuples("document", "nonexistent")
+            .await
+            .expect("list_object_tuples failed");
+        assert!(tuples.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_object_tuples_multiple_subjects() {
+        let engine = make_engine().await;
+
+        for user in &["alice", "bob", "carol"] {
+            engine
+                .write_tuple(RelationTuple::new(
+                    "document",
+                    "viewer",
+                    "shared_doc",
+                    Subject::User(user.to_string()),
+                ))
+                .await
+                .expect("write_tuple failed");
+        }
+        // Different object — should not appear
+        engine
+            .write_tuple(RelationTuple::new(
+                "document",
+                "viewer",
+                "private_doc",
+                Subject::User("alice".to_string()),
+            ))
+            .await
+            .expect("write_tuple failed");
+
+        let tuples = engine
+            .list_object_tuples("document", "shared_doc")
+            .await
+            .expect("list_object_tuples failed");
+
+        assert_eq!(tuples.len(), 3);
+        assert!(tuples.iter().all(|t| t.object_id == "shared_doc"));
+    }
+
+    #[tokio::test]
+    async fn test_list_namespace_tuples() {
+        let engine = make_engine().await;
+
+        engine
+            .write_tuple(RelationTuple::new(
+                "document",
+                "owner",
+                "doc1",
+                Subject::User("alice".to_string()),
+            ))
+            .await
+            .expect("write_tuple failed");
+        engine
+            .write_tuple(RelationTuple::new(
+                "folder",
+                "owner",
+                "folder1",
+                Subject::User("alice".to_string()),
+            ))
+            .await
+            .expect("write_tuple failed");
+
+        let doc_tuples = engine
+            .list_namespace_tuples("document", 100)
+            .await
+            .expect("list_namespace_tuples failed");
+        assert_eq!(doc_tuples.len(), 1);
+        assert_eq!(doc_tuples[0].namespace, "document");
+
+        let folder_tuples = engine
+            .list_namespace_tuples("folder", 100)
+            .await
+            .expect("list_namespace_tuples failed");
+        assert_eq!(folder_tuples.len(), 1);
+        assert_eq!(folder_tuples[0].namespace, "folder");
+    }
+
+    #[tokio::test]
+    async fn test_list_namespace_tuples_limit() {
+        let engine = make_engine().await;
+
+        for i in 0..10 {
+            engine
+                .write_tuple(RelationTuple::new(
+                    "document",
+                    "viewer",
+                    format!("doc{}", i),
+                    Subject::User("alice".to_string()),
+                ))
+                .await
+                .expect("write_tuple failed");
+        }
+
+        let limited = engine
+            .list_namespace_tuples("document", 5)
+            .await
+            .expect("list_namespace_tuples failed");
+        assert_eq!(limited.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_list_recent_tuples() {
+        let engine = make_engine().await;
+
+        engine
+            .write_tuple(RelationTuple::new(
+                "document",
+                "owner",
+                "doc_recent",
+                Subject::User("alice".to_string()),
+            ))
+            .await
+            .expect("write_tuple failed");
+
+        // Requesting the last 7 days should include the just-inserted row
+        let recent = engine
+            .list_recent_tuples(7, 100)
+            .await
+            .expect("list_recent_tuples failed");
+        assert!(!recent.is_empty());
+        assert!(recent.iter().any(|t| t.object_id == "doc_recent"));
+    }
+
+    #[tokio::test]
+    async fn test_list_subject_tuples_userset() {
+        let engine = make_engine().await;
+
+        let userset = Subject::UserSet {
+            namespace: "team".to_string(),
+            object_id: "engineering".to_string(),
+            relation: "member".to_string(),
+        };
+        engine
+            .write_tuple(RelationTuple::new(
+                "document",
+                "viewer",
+                "doc1",
+                userset.clone(),
+            ))
+            .await
+            .expect("write_tuple failed");
+
+        let tuples = engine
+            .list_subject_tuples(&userset)
+            .await
+            .expect("list_subject_tuples failed");
+        assert_eq!(tuples.len(), 1);
+        assert_eq!(tuples[0].object_id, "doc1");
     }
 }
