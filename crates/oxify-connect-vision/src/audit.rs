@@ -382,7 +382,12 @@ impl AuditLogger {
 
     /// Get all events
     pub fn get_events(&self) -> Vec<AuditEvent> {
-        self.events.read().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect()
+        self.events
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .cloned()
+            .collect()
     }
 
     /// Get events by type
@@ -454,7 +459,10 @@ impl AuditLogger {
 
     /// Clear all events
     pub fn clear(&self) {
-        self.events.write().unwrap_or_else(|e| e.into_inner()).clear();
+        self.events
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     /// Get statistics

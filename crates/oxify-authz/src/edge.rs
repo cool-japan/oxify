@@ -421,9 +421,9 @@ impl EdgeEngine {
 
             // write_tuple merges through CRDT and then into the in-memory manager,
             // which is idempotent for duplicate tuples.
-            self.write_tuple(tuple).await.map_err(|e| {
-                AuthzError::DatabaseError(format!("Failed to upsert tuple: {e}"))
-            })?;
+            self.write_tuple(tuple)
+                .await
+                .map_err(|e| AuthzError::DatabaseError(format!("Failed to upsert tuple: {e}")))?;
 
             synced += 1;
         }

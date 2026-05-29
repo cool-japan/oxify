@@ -127,13 +127,20 @@ impl ApprovalStore {
     /// Add a new approval request
     pub fn add(&self, request: ApprovalRequest) -> ApprovalId {
         let id = request.id;
-        self.approvals.write().unwrap_or_else(|e| e.into_inner()).insert(id, request);
+        self.approvals
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, request);
         id
     }
 
     /// Get an approval request by ID
     pub fn get(&self, id: ApprovalId) -> Option<ApprovalRequest> {
-        self.approvals.read().unwrap_or_else(|e| e.into_inner()).get(&id).cloned()
+        self.approvals
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&id)
+            .cloned()
     }
 
     /// List all pending approvals
@@ -160,7 +167,10 @@ impl ApprovalStore {
 
     /// Update an approval request
     pub fn update(&self, request: ApprovalRequest) {
-        self.approvals.write().unwrap_or_else(|e| e.into_inner()).insert(request.id, request);
+        self.approvals
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(request.id, request);
     }
 
     /// Approve a request
@@ -189,13 +199,16 @@ impl ApprovalStore {
     pub fn cleanup_old(&self, max_age_seconds: u64) {
         let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(max_age_seconds);
 
-        self.approvals.write().unwrap_or_else(|e| e.into_inner()).retain(|_, request| {
-            if let Some(resolved_at) = request.resolved_at {
-                resolved_at > cutoff
-            } else {
-                true // Keep pending approvals
-            }
-        });
+        self.approvals
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|_, request| {
+                if let Some(resolved_at) = request.resolved_at {
+                    resolved_at > cutoff
+                } else {
+                    true // Keep pending approvals
+                }
+            });
     }
 }
 

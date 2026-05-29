@@ -384,7 +384,10 @@ impl<P> MetricsProvider<P> {
 
     /// Get current metrics snapshot
     pub fn get_metrics(&self) -> Metrics {
-        self.metrics.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.metrics
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Reset metrics

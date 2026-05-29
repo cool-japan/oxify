@@ -110,13 +110,19 @@ impl Metrics {
 
     /// Record a search latency
     pub fn record_search_latency(&self, latency: Duration) {
-        let mut metrics = self.search_metrics.lock().unwrap_or_else(|e| e.into_inner());
+        let mut metrics = self
+            .search_metrics
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         metrics.record_latency(latency);
     }
 
     /// Get search statistics
     pub fn get_search_stats(&self) -> SearchStats {
-        let metrics = self.search_metrics.lock().unwrap_or_else(|e| e.into_inner());
+        let metrics = self
+            .search_metrics
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         metrics.compute_stats()
     }
 
@@ -134,7 +140,10 @@ impl Metrics {
 
     /// Reset all metrics
     pub fn reset(&self) {
-        let mut search_metrics = self.search_metrics.lock().unwrap_or_else(|e| e.into_inner());
+        let mut search_metrics = self
+            .search_metrics
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         *search_metrics = SearchMetrics::new();
 
         let mut index_stats = self.index_stats.lock().unwrap_or_else(|e| e.into_inner());

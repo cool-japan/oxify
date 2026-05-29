@@ -172,7 +172,12 @@ impl WebhookRegistry {
 
     /// Unregister a webhook
     pub fn unregister(&self, webhook_id: WebhookId) -> bool {
-        let removed = self.webhooks.write().unwrap_or_else(|e| e.into_inner()).remove(&webhook_id).is_some();
+        let removed = self
+            .webhooks
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&webhook_id)
+            .is_some();
         if removed {
             tracing::info!("Unregistered webhook {}", webhook_id);
         }
@@ -181,7 +186,11 @@ impl WebhookRegistry {
 
     /// Get webhook configuration
     pub fn get(&self, webhook_id: WebhookId) -> Option<(WebhookConfig, Workflow)> {
-        self.webhooks.read().unwrap_or_else(|e| e.into_inner()).get(&webhook_id).cloned()
+        self.webhooks
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&webhook_id)
+            .cloned()
     }
 
     /// List all webhooks
@@ -262,7 +271,10 @@ impl WebhookRegistry {
         trigger.success = true;
 
         // Store trigger event
-        self.triggers.write().unwrap_or_else(|e| e.into_inner()).push(trigger.clone());
+        self.triggers
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(trigger.clone());
 
         Ok(trigger)
     }

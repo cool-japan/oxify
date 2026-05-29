@@ -174,7 +174,10 @@ impl ChaosEngine {
         mut exec_config: ExecutionConfig,
     ) -> Result<(ExecutionContext, ChaosReport)> {
         // Reset history
-        self.failure_history.write().unwrap_or_else(|e| e.into_inner()).clear();
+        self.failure_history
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
 
         // Apply chaos configuration to execution config
         if self.config.timeout_rate > 0.0 {
@@ -195,7 +198,10 @@ impl ChaosEngine {
         let duration_ms = start_time.elapsed().as_millis() as u64;
 
         // Generate report
-        let history = self.failure_history.read().unwrap_or_else(|e| e.into_inner());
+        let history = self
+            .failure_history
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
         let report = ChaosReport {
             total_failures: history.failures.len(),
             total_latency_injections: history.latency_injections.len(),
@@ -245,7 +251,10 @@ impl ChaosEngine {
 
     /// Get chaos report for last execution
     pub fn get_report(&self) -> ChaosReport {
-        let history = self.failure_history.read().unwrap_or_else(|e| e.into_inner());
+        let history = self
+            .failure_history
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
         ChaosReport {
             total_failures: history.failures.len(),
             total_latency_injections: history.latency_injections.len(),

@@ -445,7 +445,10 @@ impl Profiler {
         let mut stack = self.call_stack.lock().unwrap_or_else(|e| e.into_inner());
         *stack = CallStack::default();
 
-        let mut snapshots = self.memory_snapshots.lock().unwrap_or_else(|e| e.into_inner());
+        let mut snapshots = self
+            .memory_snapshots
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         snapshots.clear();
     }
 
@@ -453,14 +456,20 @@ impl Profiler {
     pub fn take_memory_snapshot(&self) {
         if self.config.enable_memory_profiling {
             let snapshot = MemorySnapshot::current();
-            let mut snapshots = self.memory_snapshots.lock().unwrap_or_else(|e| e.into_inner());
+            let mut snapshots = self
+                .memory_snapshots
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             snapshots.push(snapshot);
         }
     }
 
     /// Get memory snapshots
     pub fn get_memory_snapshots(&self) -> Vec<MemorySnapshot> {
-        let snapshots = self.memory_snapshots.lock().unwrap_or_else(|e| e.into_inner());
+        let snapshots = self
+            .memory_snapshots
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         snapshots.clone()
     }
 

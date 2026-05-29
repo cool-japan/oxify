@@ -466,7 +466,10 @@ impl CertAuthenticator {
     async fn check_revocation_status(&self, serial_number: &str) -> RevocationStatus {
         // Check cache first
         {
-            let cache = self.revocation_cache.lock().unwrap_or_else(|e| e.into_inner());
+            let cache = self
+                .revocation_cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             if let Some(&revoked) = cache.get(serial_number) {
                 return if revoked {
                     RevocationStatus::Revoked
@@ -487,13 +490,19 @@ impl CertAuthenticator {
 
     /// Add certificate to revocation cache
     pub fn revoke_certificate(&self, serial_number: String) {
-        let mut cache = self.revocation_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = self
+            .revocation_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         cache.insert(serial_number, true);
     }
 
     /// Clear revocation cache
     pub fn clear_revocation_cache(&self) {
-        let mut cache = self.revocation_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = self
+            .revocation_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         cache.clear();
     }
 }

@@ -670,11 +670,7 @@ impl HybridRebacEngine {
     /// List the most recently inserted tuples (within the last `days` days).
     ///
     /// Delegates to the SQLite engine, which can use the `created_at` index.
-    pub async fn list_recent_tuples(
-        &self,
-        days: u32,
-        limit: usize,
-    ) -> Result<Vec<RelationTuple>> {
+    pub async fn list_recent_tuples(&self, days: u32, limit: usize) -> Result<Vec<RelationTuple>> {
         self.postgres.list_recent_tuples(days, limit).await
     }
 

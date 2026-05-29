@@ -176,7 +176,11 @@ impl AuthzProfiler {
 
     /// Get metrics for a specific operation
     pub fn get_operation_metrics(&self, operation_name: &str) -> Option<OperationMetrics> {
-        self.metrics.lock().unwrap_or_else(|e| e.into_inner()).get(operation_name).cloned()
+        self.metrics
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(operation_name)
+            .cloned()
     }
 
     /// Get all profiling statistics
@@ -197,7 +201,10 @@ impl AuthzProfiler {
 
     /// Reset all profiling data
     pub fn reset(&self) {
-        self.metrics.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.metrics
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     /// Generate a performance report

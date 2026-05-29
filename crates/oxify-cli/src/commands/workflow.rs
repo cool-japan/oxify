@@ -889,10 +889,7 @@ async fn package_workflow(file: &str, output: &str, include_deps: bool) -> Resul
                 let path = entry.path();
                 if path.is_file() {
                     let file_name = path.file_name().ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "Workflow entry has no file name component: {:?}",
-                            path
-                        )
+                        anyhow::anyhow!("Workflow entry has no file name component: {:?}", path)
                     })?;
                     let name = format!("workflows/{}", file_name.to_string_lossy());
                     let data = fs::read(&path)

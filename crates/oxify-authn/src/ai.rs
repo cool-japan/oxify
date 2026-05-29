@@ -310,7 +310,10 @@ impl AiSecurityEngine {
 
     /// Record a login event
     pub fn record_event(&mut self, event: LoginEvent) {
-        let mut behaviors = self.user_behaviors.lock().unwrap_or_else(|e| e.into_inner());
+        let mut behaviors = self
+            .user_behaviors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let behavior = behaviors
             .entry(event.user_id.clone())
             .or_insert_with(|| UserBehavior::new(event.user_id.clone()));
@@ -320,7 +323,10 @@ impl AiSecurityEngine {
 
     /// Get behavioral profile for a user
     pub fn get_behavior_profile(&self, user_id: &str) -> Result<BehaviorProfile> {
-        let behaviors = self.user_behaviors.lock().unwrap_or_else(|e| e.into_inner());
+        let behaviors = self
+            .user_behaviors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let behavior = behaviors
             .get(user_id)
             .ok_or_else(|| AiSecurityError::UserNotFound(user_id.to_string()))?;
@@ -401,7 +407,10 @@ impl AiSecurityEngine {
 
     /// Detect anomalies in recent behavior
     pub fn detect_anomalies(&self, user_id: &str, event: &LoginEvent) -> Result<AnomalyDetection> {
-        let behaviors = self.user_behaviors.lock().unwrap_or_else(|e| e.into_inner());
+        let behaviors = self
+            .user_behaviors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let behavior = behaviors
             .get(user_id)
             .ok_or_else(|| AiSecurityError::UserNotFound(user_id.to_string()))?;
@@ -535,7 +544,10 @@ impl AiSecurityEngine {
     /// Get statistics
     #[must_use]
     pub fn get_stats(&self) -> AiSecurityStats {
-        let behaviors = self.user_behaviors.lock().unwrap_or_else(|e| e.into_inner());
+        let behaviors = self
+            .user_behaviors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let threat_ips = self.threat_ips.lock().unwrap_or_else(|e| e.into_inner());
 
         let total_events: usize = behaviors.values().map(|b| b.events.len()).sum();
@@ -550,7 +562,10 @@ impl AiSecurityEngine {
 
     /// Clear all user behavior data
     pub fn clear_all_data(&mut self) {
-        let mut behaviors = self.user_behaviors.lock().unwrap_or_else(|e| e.into_inner());
+        let mut behaviors = self
+            .user_behaviors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         behaviors.clear();
         let mut threat_ips = self.threat_ips.lock().unwrap_or_else(|e| e.into_inner());
         threat_ips.clear();

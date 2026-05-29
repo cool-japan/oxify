@@ -230,7 +230,10 @@ impl CheckpointStore for FileCheckpointStore {
                 .map_err(|e| format!("Failed to delete checkpoint file: {}", e))?;
         }
 
-        self.checkpoints.write().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        self.checkpoints
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id);
 
         tracing::info!("Deleted checkpoint {}", id);
 
@@ -317,7 +320,10 @@ impl CheckpointStore for InMemoryCheckpointStore {
     }
 
     fn delete(&self, id: CheckpointId) -> Result<(), String> {
-        self.checkpoints.write().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        self.checkpoints
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id);
         Ok(())
     }
 

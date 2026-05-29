@@ -78,7 +78,12 @@ impl MockVectorProvider {
 impl VectorProvider for MockVectorProvider {
     async fn search(&self, request: SearchRequest) -> crate::Result<Vec<SearchResult>> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if let Some(err) = self
+            .fail_with
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 
@@ -118,7 +123,12 @@ impl VectorProvider for MockVectorProvider {
 
     async fn insert(&self, request: InsertRequest) -> crate::Result<()> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if let Some(err) = self
+            .fail_with
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 
@@ -145,7 +155,12 @@ impl VectorProvider for MockVectorProvider {
 
     async fn delete(&self, request: DeleteRequest) -> crate::Result<usize> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if let Some(err) = self
+            .fail_with
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 
@@ -166,7 +181,12 @@ impl VectorProvider for MockVectorProvider {
 
     async fn create_collection(&self, name: &str, dimension: usize) -> crate::Result<()> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if let Some(err) = self
+            .fail_with
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 
@@ -192,7 +212,12 @@ impl VectorProvider for MockVectorProvider {
 
     async fn collection_exists(&self, name: &str) -> crate::Result<bool> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if let Some(err) = self
+            .fail_with
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 
@@ -202,7 +227,12 @@ impl VectorProvider for MockVectorProvider {
 
     async fn batch_insert(&self, request: BatchInsertRequest) -> crate::Result<usize> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if let Some(err) = self
+            .fail_with
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 
@@ -231,7 +261,12 @@ impl VectorProvider for MockVectorProvider {
 
     async fn update(&self, request: UpdateRequest) -> crate::Result<()> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if let Some(err) = self
+            .fail_with
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 
@@ -265,7 +300,12 @@ impl VectorProvider for MockVectorProvider {
 
     async fn collection_info(&self, name: &str) -> crate::Result<CollectionInfo> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if let Some(err) = self
+            .fail_with
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 
@@ -283,7 +323,12 @@ impl VectorProvider for MockVectorProvider {
 
     async fn batch_update(&self, requests: Vec<UpdateRequest>) -> crate::Result<usize> {
         // Check for forced error
-        if let Some(err) = self.fail_with.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if let Some(err) = self
+            .fail_with
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
             return Err(VectorError::DatabaseError(err.to_string()));
         }
 

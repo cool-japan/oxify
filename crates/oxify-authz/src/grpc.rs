@@ -601,7 +601,10 @@ mod tests {
         );
 
         // Attributes are copied verbatim
-        assert_eq!(ctx.attributes.get("role").map(String::as_str), Some("admin"));
+        assert_eq!(
+            ctx.attributes.get("role").map(String::as_str),
+            Some("admin")
+        );
         assert_eq!(
             ctx.attributes.get("region").map(String::as_str),
             Some("eu-west-1")

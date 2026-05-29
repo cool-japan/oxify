@@ -677,7 +677,11 @@ mod tests {
             .batch_distance(&queries, &vectors, DistanceMetric::Cosine)
             .expect("cosine batch_distance failed");
         assert_eq!(result.len(), 1);
-        assert!((result[0][0]).abs() < 1e-5, "identical vectors: expected ~0, got {}", result[0][0]);
+        assert!(
+            (result[0][0]).abs() < 1e-5,
+            "identical vectors: expected ~0, got {}",
+            result[0][0]
+        );
 
         // Orthogonal vectors → cosine distance = 1
         let queries2 = vec![vec![1.0f32, 0.0, 0.0]];
@@ -685,7 +689,11 @@ mod tests {
         let result2 = processor
             .batch_distance(&queries2, &vectors2, DistanceMetric::Cosine)
             .expect("cosine batch_distance (orthogonal) failed");
-        assert!((result2[0][0] - 1.0).abs() < 1e-5, "orthogonal vectors: expected ~1, got {}", result2[0][0]);
+        assert!(
+            (result2[0][0] - 1.0).abs() < 1e-5,
+            "orthogonal vectors: expected ~1, got {}",
+            result2[0][0]
+        );
     }
 
     #[test]
@@ -701,7 +709,11 @@ mod tests {
             .batch_distance(&queries, &vectors, DistanceMetric::Euclidean)
             .expect("euclidean batch_distance failed");
         assert_eq!(result.len(), 1);
-        assert!((result[0][0] - 5.0).abs() < 1e-4, "expected 5.0, got {}", result[0][0]);
+        assert!(
+            (result[0][0] - 5.0).abs() < 1e-4,
+            "expected 5.0, got {}",
+            result[0][0]
+        );
     }
 
     #[test]
@@ -717,7 +729,11 @@ mod tests {
             .batch_distance(&queries, &vectors, DistanceMetric::DotProduct)
             .expect("dot product batch_distance failed");
         assert_eq!(result.len(), 1);
-        assert!((result[0][0] - (-32.0)).abs() < 1e-3, "expected -32.0, got {}", result[0][0]);
+        assert!(
+            (result[0][0] - (-32.0)).abs() < 1e-3,
+            "expected -32.0, got {}",
+            result[0][0]
+        );
     }
 
     #[test]
@@ -733,6 +749,10 @@ mod tests {
             .batch_distance(&queries, &vectors, DistanceMetric::Manhattan)
             .expect("manhattan batch_distance failed");
         assert_eq!(result.len(), 1);
-        assert!((result[0][0] - 7.0).abs() < 1e-4, "expected 7.0, got {}", result[0][0]);
+        assert!(
+            (result[0][0] - 7.0).abs() < 1e-4,
+            "expected 7.0, got {}",
+            result[0][0]
+        );
     }
 }

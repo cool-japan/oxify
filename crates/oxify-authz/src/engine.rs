@@ -688,7 +688,9 @@ impl AuthzEngine {
             }
         };
 
-        Some(RelationTuple::new(&namespace, &relation, &object_id, subject))
+        Some(RelationTuple::new(
+            &namespace, &relation, &object_id, subject,
+        ))
     }
 
     /// List all tuples for a given subject.
@@ -720,9 +722,7 @@ impl AuthzEngine {
         .bind(&subject_id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| {
-            AuthzError::DatabaseError(format!("Failed to list subject tuples: {}", e))
-        })?;
+        .map_err(|e| AuthzError::DatabaseError(format!("Failed to list subject tuples: {}", e)))?;
 
         Ok(rows.iter().filter_map(Self::row_to_tuple).collect())
     }
@@ -749,9 +749,7 @@ impl AuthzEngine {
         .bind(object_id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| {
-            AuthzError::DatabaseError(format!("Failed to list object tuples: {}", e))
-        })?;
+        .map_err(|e| AuthzError::DatabaseError(format!("Failed to list object tuples: {}", e)))?;
 
         Ok(rows.iter().filter_map(Self::row_to_tuple).collect())
     }
@@ -791,11 +789,7 @@ impl AuthzEngine {
     /// Uses the `created_at` column (populated by the SQLite `datetime('now')`
     /// default) to find tuples created within the last `days` days.  Results
     /// are ordered newest-first and capped at `limit` rows.
-    pub async fn list_recent_tuples(
-        &self,
-        days: u32,
-        limit: usize,
-    ) -> Result<Vec<RelationTuple>> {
+    pub async fn list_recent_tuples(&self, days: u32, limit: usize) -> Result<Vec<RelationTuple>> {
         let cutoff = format!("-{} days", days);
         let rows = sqlx::query(
             r#"
@@ -810,9 +804,7 @@ impl AuthzEngine {
         .bind(limit as i64)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| {
-            AuthzError::DatabaseError(format!("Failed to list recent tuples: {}", e))
-        })?;
+        .map_err(|e| AuthzError::DatabaseError(format!("Failed to list recent tuples: {}", e)))?;
 
         Ok(rows.iter().filter_map(Self::row_to_tuple).collect())
     }
@@ -827,10 +819,7 @@ mod tests {
         let engine = AuthzEngine::new("sqlite::memory:")
             .await
             .expect("Failed to create in-memory engine");
-        engine
-            .migrate()
-            .await
-            .expect("Failed to run migrations");
+        engine.migrate().await.expect("Failed to run migrations");
         engine
     }
 

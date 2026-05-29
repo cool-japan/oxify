@@ -372,7 +372,11 @@ impl<P: VisionProvider> StreamProcessor<P> {
                     stats.update_avg_processing_time(processing_time);
 
                     // Calculate current FPS
-                    if let Some(last_time) = *self.last_process_time.lock().unwrap_or_else(|e| e.into_inner()) {
+                    if let Some(last_time) = *self
+                        .last_process_time
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                    {
                         let elapsed = start_time.duration_since(last_time);
                         if elapsed.as_secs_f64() > 0.0 {
                             stats.current_fps = 1.0 / elapsed.as_secs_f64();
@@ -381,10 +385,16 @@ impl<P: VisionProvider> StreamProcessor<P> {
                 }
 
                 // Update last process time
-                *self.last_process_time.lock().unwrap_or_else(|e| e.into_inner()) = Some(start_time);
+                *self
+                    .last_process_time
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = Some(start_time);
 
                 // Update last processed frame
-                *self.last_processed.lock().unwrap_or_else(|e| e.into_inner()) = Some(frame);
+                *self
+                    .last_processed
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = Some(frame);
 
                 // Apply smoothing if enabled
                 if self.config.enable_smoothing {
@@ -411,7 +421,11 @@ impl<P: VisionProvider> StreamProcessor<P> {
             }
 
             SamplingStrategy::TimeInterval(interval_ms) => {
-                if let Some(last_time) = *self.last_process_time.lock().unwrap_or_else(|e| e.into_inner()) {
+                if let Some(last_time) = *self
+                    .last_process_time
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                {
                     let elapsed = last_time.elapsed();
                     Ok(elapsed.as_millis() >= interval_ms as u128)
                 } else {
@@ -420,7 +434,12 @@ impl<P: VisionProvider> StreamProcessor<P> {
             }
 
             SamplingStrategy::ChangeDetection => {
-                if let Some(last_frame) = self.last_processed.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+                if let Some(last_frame) = self
+                    .last_processed
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .as_ref()
+                {
                     Ok(frame.is_different_from(last_frame, self.config.change_threshold))
                 } else {
                     Ok(true) // Process first frame
@@ -460,7 +479,10 @@ impl<P: VisionProvider> StreamProcessor<P> {
 
     /// Apply temporal smoothing to results
     fn apply_smoothing(&self, result: OcrResult) -> Result<OcrResult> {
-        let mut smoothing_buffer = self.smoothing_buffer.lock().unwrap_or_else(|e| e.into_inner());
+        let mut smoothing_buffer = self
+            .smoothing_buffer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
 
         smoothing_buffer.push_back(result.clone());
 
@@ -494,7 +516,10 @@ impl<P: VisionProvider> StreamProcessor<P> {
 
     /// Clear buffer
     pub fn clear_buffer(&self) {
-        self.buffer.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.buffer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     /// Get configuration

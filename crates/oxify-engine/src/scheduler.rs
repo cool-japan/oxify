@@ -124,7 +124,10 @@ impl WorkflowScheduler {
             .remove(&schedule_id)
             .is_some();
         if removed {
-            self.executions.write().unwrap_or_else(|e| e.into_inner()).remove(&schedule_id);
+            self.executions
+                .write()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&schedule_id);
             tracing::info!("Removed schedule {}", schedule_id);
         }
         removed
@@ -132,12 +135,21 @@ impl WorkflowScheduler {
 
     /// Get all scheduled executions
     pub fn list_schedules(&self) -> Vec<ScheduledExecution> {
-        self.executions.read().unwrap_or_else(|e| e.into_inner()).values().cloned().collect()
+        self.executions
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect()
     }
 
     /// Get a specific scheduled execution
     pub fn get_schedule(&self, schedule_id: ScheduleId) -> Option<ScheduledExecution> {
-        self.executions.read().unwrap_or_else(|e| e.into_inner()).get(&schedule_id).cloned()
+        self.executions
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&schedule_id)
+            .cloned()
     }
 
     /// Start the scheduler (runs in background)
@@ -211,7 +223,8 @@ impl WorkflowScheduler {
                             exec.last_run = Some(now);
 
                             // Calculate next run
-                            let schedules_guard = schedules.read().unwrap_or_else(|e| e.into_inner());
+                            let schedules_guard =
+                                schedules.read().unwrap_or_else(|e| e.into_inner());
                             if let Some((_, _, schedule)) = schedules_guard.get(&schedule_id) {
                                 exec.next_run = schedule
                                     .upcoming(Utc)
@@ -235,7 +248,8 @@ impl WorkflowScheduler {
                         let result = engine_clone.execute_sequential(&workflow_clone).await;
 
                         // Update execution stats
-                        let mut executions = executions_clone.write().unwrap_or_else(|e| e.into_inner());
+                        let mut executions =
+                            executions_clone.write().unwrap_or_else(|e| e.into_inner());
                         if let Some(exec) = executions.get_mut(&schedule_id) {
                             exec.active_runs = exec.active_runs.saturating_sub(1);
 

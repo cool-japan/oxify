@@ -320,7 +320,10 @@ impl ConnectionTracker {
         }
 
         // Check per-IP limit
-        let connections = self.ip_connections.read().unwrap_or_else(|e| e.into_inner());
+        let connections = self
+            .ip_connections
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
         let count = connections.get(&ip).copied().unwrap_or(0);
         if count >= config.max_connections_per_ip {
             self.stats.record_block();
@@ -335,7 +338,10 @@ impl ConnectionTracker {
         self.global_connections.fetch_add(1, Ordering::Relaxed);
         self.stats.record_connection_start();
 
-        let mut connections = self.ip_connections.write().unwrap_or_else(|e| e.into_inner());
+        let mut connections = self
+            .ip_connections
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         *connections.entry(ip).or_insert(0) += 1;
     }
 
@@ -344,7 +350,10 @@ impl ConnectionTracker {
         self.global_connections.fetch_sub(1, Ordering::Relaxed);
         self.stats.record_connection_end();
 
-        let mut connections = self.ip_connections.write().unwrap_or_else(|e| e.into_inner());
+        let mut connections = self
+            .ip_connections
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         if let Some(count) = connections.get_mut(&ip) {
             *count = count.saturating_sub(1);
             if *count == 0 {

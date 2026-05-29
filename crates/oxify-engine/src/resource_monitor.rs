@@ -196,7 +196,10 @@ impl ResourceMonitor {
 
         // Update stored usage
         {
-            let mut current = self.current_usage.write().unwrap_or_else(|e| e.into_inner());
+            let mut current = self
+                .current_usage
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
             *current = usage;
         }
 

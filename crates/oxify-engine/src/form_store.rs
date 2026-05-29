@@ -118,13 +118,20 @@ impl FormStore {
     /// Add a new form submission request
     pub fn add(&self, request: FormSubmissionRequest) -> FormId {
         let id = request.id;
-        self.forms.write().unwrap_or_else(|e| e.into_inner()).insert(id, request);
+        self.forms
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, request);
         id
     }
 
     /// Get a form submission request by ID
     pub fn get(&self, id: FormId) -> Option<FormSubmissionRequest> {
-        self.forms.read().unwrap_or_else(|e| e.into_inner()).get(&id).cloned()
+        self.forms
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&id)
+            .cloned()
     }
 
     /// List all pending form submissions
@@ -151,7 +158,10 @@ impl FormStore {
 
     /// Update a form submission request
     pub fn update(&self, request: FormSubmissionRequest) {
-        self.forms.write().unwrap_or_else(|e| e.into_inner()).insert(request.id, request);
+        self.forms
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(request.id, request);
     }
 
     /// Submit a form
@@ -169,13 +179,16 @@ impl FormStore {
     pub fn cleanup_old(&self, max_age_seconds: u64) {
         let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(max_age_seconds);
 
-        self.forms.write().unwrap_or_else(|e| e.into_inner()).retain(|_, request| {
-            if let Some(submitted_at) = request.submitted_at {
-                submitted_at > cutoff
-            } else {
-                true // Keep pending forms
-            }
-        });
+        self.forms
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|_, request| {
+                if let Some(submitted_at) = request.submitted_at {
+                    submitted_at > cutoff
+                } else {
+                    true // Keep pending forms
+                }
+            });
     }
 }
 

@@ -175,12 +175,27 @@ pub async fn rate_limit_middleware(
 
             // Add rate limit headers
             let headers = response.headers_mut();
-            headers.insert("X-RateLimit-Limit", limit.to_string().parse().unwrap_or_else(|_| axum::http::HeaderValue::from_static("0")));
+            headers.insert(
+                "X-RateLimit-Limit",
+                limit
+                    .to_string()
+                    .parse()
+                    .unwrap_or_else(|_| axum::http::HeaderValue::from_static("0")),
+            );
             headers.insert(
                 "X-RateLimit-Remaining",
-                remaining.to_string().parse().unwrap_or_else(|_| axum::http::HeaderValue::from_static("0")),
+                remaining
+                    .to_string()
+                    .parse()
+                    .unwrap_or_else(|_| axum::http::HeaderValue::from_static("0")),
             );
-            headers.insert("X-RateLimit-Reset", reset.to_string().parse().unwrap_or_else(|_| axum::http::HeaderValue::from_static("0")));
+            headers.insert(
+                "X-RateLimit-Reset",
+                reset
+                    .to_string()
+                    .parse()
+                    .unwrap_or_else(|_| axum::http::HeaderValue::from_static("0")),
+            );
 
             Ok(response)
         }

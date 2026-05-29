@@ -366,12 +366,21 @@ impl AccessController {
 
     /// Get an API key
     pub fn get_key(&self, key: &str) -> Option<ApiKey> {
-        self.keys.read().unwrap_or_else(|e| e.into_inner()).get(key).cloned()
+        self.keys
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(key)
+            .cloned()
     }
 
     /// Revoke an API key
     pub fn revoke_key(&self, key: &str) -> bool {
-        if let Some(api_key) = self.keys.write().unwrap_or_else(|e| e.into_inner()).get_mut(key) {
+        if let Some(api_key) = self
+            .keys
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(key)
+        {
             api_key.active = false;
             true
         } else {
@@ -482,12 +491,21 @@ impl AccessController {
 
     /// Get usage statistics for a key
     pub fn get_usage(&self, key: &str) -> Option<UsageSnapshot> {
-        self.usage.read().unwrap_or_else(|e| e.into_inner()).get(key).map(|stats| stats.get())
+        self.usage
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(key)
+            .map(|stats| stats.get())
     }
 
     /// List all API keys
     pub fn list_keys(&self) -> Vec<ApiKey> {
-        self.keys.read().unwrap_or_else(|e| e.into_inner()).values().cloned().collect()
+        self.keys
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect()
     }
 
     /// Get statistics for all keys

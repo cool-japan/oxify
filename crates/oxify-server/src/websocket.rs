@@ -252,7 +252,7 @@ struct WsClaims {
 ///
 /// Invalid or expired tokens also return `None`.
 fn validate_token(token: &str) -> Option<String> {
-    use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
+    use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 
     if token.is_empty() {
         return None;
@@ -382,7 +382,12 @@ async fn handle_websocket(socket: WebSocket, user_id: String, manager: Arc<WsCon
                                     };
                                     manager_clone.send_to_user(&user_id_clone, ack).await;
                                 }
-                                WsMessage::ExecutionUpdate { execution_id, status, progress, .. } => {
+                                WsMessage::ExecutionUpdate {
+                                    execution_id,
+                                    status,
+                                    progress,
+                                    ..
+                                } => {
                                     debug!(
                                         connection_id = connection_id,
                                         execution_id = %execution_id,
@@ -611,7 +616,7 @@ mod tests {
 
     #[test]
     fn test_validate_token() {
-        use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+        use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 
         // Empty token → None regardless of environment.
         assert_eq!(validate_token(""), None);
@@ -765,7 +770,11 @@ mod tests {
 
         // Chatting user gets the ack.
         match rx_sender.recv().await {
-            Some(WsMessage::LlmResponse { session_id: sid, content, .. }) => {
+            Some(WsMessage::LlmResponse {
+                session_id: sid,
+                content,
+                ..
+            }) => {
                 assert_eq!(sid, "sess-1");
                 assert!(content.is_empty());
             }
