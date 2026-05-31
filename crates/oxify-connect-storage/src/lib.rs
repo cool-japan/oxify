@@ -37,3 +37,12 @@ pub use types::{ObjectData, ObjectListing, ObjectMeta, PresignOp, PutResult};
 
 #[cfg(feature = "aws")]
 pub use providers::s3::{S3Config, S3StoreProvider};
+
+#[cfg(feature = "gcs")]
+pub use providers::gcs::{GcsConfig, GcsStoreProvider};
+
+#[cfg(feature = "azure")]
+pub use providers::azure_blob::{AzureBlobConfig, AzureBlobStoreProvider};
+
+#[cfg(feature = "local")]
+pub use providers::local::{LocalFsConfig, LocalFsProvider};

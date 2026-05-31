@@ -67,17 +67,16 @@ impl Default for TracingConfig {
     }
 }
 
-/// Initialize OpenTelemetry tracing
+/// Build an `SdkTracerProvider` from a `TracingConfig` without installing it globally.
 ///
-/// This sets up the global tracer provider with the specified configuration.
-/// Call this once at application startup.
+/// Useful when you want to compose the OTel layer into an existing `tracing` subscriber
+/// rather than letting `init_tracing` own the full subscriber stack.
 #[cfg(feature = "otel")]
-pub fn init_tracing(config: TracingConfig) -> Result<()> {
-    // Create resource with service information using builder
+pub fn build_otel_provider(config: &TracingConfig) -> Result<SdkTracerProvider> {
     let resource = Resource::builder()
         .with_attributes([
-            KeyValue::new("service.name", config.service_name),
-            KeyValue::new("service.version", config.service_version),
+            KeyValue::new("service.name", config.service_name.clone()),
+            KeyValue::new("service.version", config.service_version.clone()),
         ])
         .build();
 
@@ -87,7 +86,42 @@ pub fn init_tracing(config: TracingConfig) -> Result<()> {
         .with_sampler(Sampler::TraceIdRatioBased(config.sampling_ratio))
         .build();
 
+    Ok(provider)
+}
+
+/// Initialize OpenTelemetry tracing
+///
+/// Installs a `tracing-subscriber` registry with the OpenTelemetry bridge layer so that
+/// every `tracing` span is forwarded to the configured OTel provider.  If a global
+/// subscriber has already been installed (e.g. in tests), the "already initialized"
+/// error is silently ignored so callers do not need to guard against double-init.
+///
+/// Call this once at application startup.
+#[cfg(feature = "otel")]
+pub fn init_tracing(config: TracingConfig) -> Result<()> {
+    use opentelemetry::trace::TracerProvider as _;
+    use tracing_opentelemetry::OpenTelemetryLayer;
+    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+    let provider = build_otel_provider(&config)?;
+    let tracer = provider.tracer("oxify-engine");
     global::set_tracer_provider(provider);
+
+    // Bridge every `tracing` span into the OTel provider
+    let otel_layer = OpenTelemetryLayer::new(tracer);
+
+    let result = tracing_subscriber::registry()
+        .with(otel_layer)
+        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+
+    // "already initialized" is benign — the test harness or host app may have already
+    // set up a subscriber.
+    if let Err(e) = result {
+        if !e.to_string().contains("already") {
+            return Err(anyhow::anyhow!("tracing init error: {}", e));
+        }
+    }
 
     Ok(())
 }
@@ -99,7 +133,7 @@ pub fn shutdown_tracing() {
     // This function is kept for backward compatibility but does nothing
 }
 
-/// Trace a workflow execution
+/// Trace a workflow execution (sync closure variant — kept for compatibility)
 ///
 /// Creates a span for the entire workflow execution and records key metrics.
 ///
@@ -145,7 +179,7 @@ where
     result
 }
 
-/// Trace a node execution
+/// Trace a node execution (sync closure variant — kept for compatibility)
 ///
 /// Creates a span for a single node execution and records node-specific metrics.
 ///
@@ -328,6 +362,94 @@ pub fn record_event(event_name: &str, attributes: Vec<KeyValue>) {
     span.end();
 }
 
+// ---------------------------------------------------------------------------
+// Async span helpers — use `tracing::Instrument` so the span travels with the
+// future across `.await` points.  The `#[cfg(feature = "otel")]` variant
+// creates a named `tracing` span; the stub variant is a transparent pass-through.
+// ---------------------------------------------------------------------------
+
+/// Wrap an async workflow execution in a tracing span.
+///
+/// When the `otel` feature is enabled the span is wired into the OTel bridge
+/// installed by `init_tracing`.  Without `otel` the call is a zero-cost
+/// pass-through.
+#[cfg(feature = "otel")]
+pub async fn trace_workflow_async<F, Fut, T>(
+    workflow_id: &str,
+    workflow_name: &str,
+    node_count: usize,
+    f: F,
+) -> Result<T>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    use tracing::Instrument;
+    let span = tracing::info_span!(
+        "oxify.workflow.execute",
+        "workflow.id" = workflow_id,
+        "workflow.name" = workflow_name,
+        "workflow.node_count" = node_count,
+    );
+    f().instrument(span).await
+}
+
+/// Stub variant — transparent pass-through when `otel` feature is disabled.
+#[cfg(not(feature = "otel"))]
+pub async fn trace_workflow_async<F, Fut, T>(
+    _workflow_id: &str,
+    _workflow_name: &str,
+    _node_count: usize,
+    f: F,
+) -> Result<T>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    f().await
+}
+
+/// Wrap an async node execution in a tracing span.
+///
+/// When the `otel` feature is enabled the span is wired into the OTel bridge
+/// installed by `init_tracing`.  Without `otel` the call is a zero-cost
+/// pass-through.
+#[cfg(feature = "otel")]
+pub async fn trace_node_async<F, Fut, T>(
+    node_id: &str,
+    node_type: &str,
+    node_label: &str,
+    f: F,
+) -> Result<T>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    use tracing::Instrument;
+    let span = tracing::info_span!(
+        "oxify.node.execute",
+        "node.id" = node_id,
+        "node.type" = node_type,
+        "node.label" = node_label,
+    );
+    f().instrument(span).await
+}
+
+/// Stub variant — transparent pass-through when `otel` feature is disabled.
+#[cfg(not(feature = "otel"))]
+pub async fn trace_node_async<F, Fut, T>(
+    _node_id: &str,
+    _node_type: &str,
+    _node_label: &str,
+    f: F,
+) -> Result<T>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    f().await
+}
+
 // Stub implementations when otel feature is disabled
 #[cfg(not(feature = "otel"))]
 #[allow(dead_code)]
@@ -414,6 +536,14 @@ mod tests {
         assert_eq!(config.sampling_ratio, 0.5);
         assert!(!config.trace_nodes);
         assert!(config.trace_templates);
+    }
+
+    #[test]
+    #[cfg(feature = "otel")]
+    fn test_build_otel_provider() {
+        let config = TracingConfig::default();
+        let result = build_otel_provider(&config);
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -530,6 +660,50 @@ mod tests {
         );
 
         shutdown_tracing();
+    }
+
+    // ---------------------------------------------------------------------------
+    // Async span helper tests — run in both otel and non-otel configurations
+    // ---------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_trace_workflow_async_success() {
+        let result = trace_workflow_async("wf-123", "test_workflow", 5, || async {
+            Ok::<&str, anyhow::Error>("success")
+        })
+        .await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "success");
+    }
+
+    #[tokio::test]
+    async fn test_trace_workflow_async_failure() {
+        let result: anyhow::Result<()> =
+            trace_workflow_async("wf-123", "test_workflow", 5, || async {
+                Err(anyhow::anyhow!("test error"))
+            })
+            .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("test error"));
+    }
+
+    #[tokio::test]
+    async fn test_trace_node_async_success() {
+        let result = trace_node_async("n-1", "LLM", "my_node", || async {
+            Ok::<i32, anyhow::Error>(42)
+        })
+        .await;
+        assert_eq!(result.unwrap(), 42);
+    }
+
+    #[tokio::test]
+    async fn test_trace_node_async_failure() {
+        let result: anyhow::Result<()> =
+            trace_node_async("n-2", "Code", "failing_node", || async {
+                Err(anyhow::anyhow!("node failed"))
+            })
+            .await;
+        assert!(result.is_err());
     }
 
     #[test]

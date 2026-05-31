@@ -17,6 +17,11 @@ mod google_vision;
 #[cfg(feature = "azure-vision")]
 mod azure_vision;
 
+#[cfg(feature = "aws-textract")]
+pub mod aws_sigv4;
+#[cfg(feature = "aws-textract")]
+pub mod textract;
+
 // Re-exports
 pub use mock::MockVisionProvider;
 
@@ -34,6 +39,11 @@ pub use google_vision::{CostStats, GoogleVisionConfig, GoogleVisionProvider};
 
 #[cfg(feature = "azure-vision")]
 pub use azure_vision::{AzureVisionConfig, AzureVisionProvider, CostStats as AzureVisionCostStats};
+
+#[cfg(feature = "aws-textract")]
+pub use aws_sigv4::AwsCredentials;
+#[cfg(feature = "aws-textract")]
+pub use textract::{AnalyzeFeature, TextractProvider};
 
 use crate::errors::{Result, VisionError};
 use crate::types::OcrResult;

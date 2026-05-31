@@ -80,7 +80,11 @@ use loop_executor::LoopExecutor;
 use mcp_executor::McpExecutor;
 pub use metrics::{ExecutionInfo, ExecutionMetrics, ExecutionStats};
 pub use optimizer::{Impact, Optimization, OptimizationCategory, Priority, WorkflowOptimizer};
-pub use otel::{init_tracing, shutdown_tracing, TracingConfig};
+#[cfg(feature = "otel")]
+pub use otel::build_otel_provider;
+pub use otel::{
+    init_tracing, shutdown_tracing, trace_node_async, trace_workflow_async, TracingConfig,
+};
 use oxify_connect_llm::{
     AnthropicProvider, EmbeddingProvider, EmbeddingRequest, ImageInput, LlmProvider, LlmRequest,
     OllamaProvider, OpenAIProvider, Tool,
@@ -157,6 +161,16 @@ pub use webhook::{WebhookConfig, WebhookId, WebhookRegistry, WebhookTrigger};
 pub mod nats_bridge;
 #[cfg(feature = "nats")]
 pub use nats_bridge::{NatsBridge, NatsBridgeConfig, NatsBridgeError, NatsCreds};
+
+#[cfg(feature = "kafka")]
+pub mod kafka_bridge;
+#[cfg(feature = "kafka")]
+pub use kafka_bridge::{KafkaBridge, KafkaBridgeConfig, KafkaBridgeError, KafkaCreds};
+
+#[cfg(feature = "rabbitmq")]
+pub mod rabbitmq_bridge;
+#[cfg(feature = "rabbitmq")]
+pub use rabbitmq_bridge::{RabbitMqBridge, RabbitMqBridgeConfig, RabbitMqBridgeError};
 #[cfg(feature = "websocket")]
 pub use websocket_connector::{
     ConnectionState, WebSocketConfig, WebSocketConnector, WebSocketError, WebSocketMessage,
@@ -742,6 +756,15 @@ impl Engine {
     /// - Event emission for monitoring
     /// - Per-node timeouts
     /// - Concurrency limits
+    #[tracing::instrument(
+        name = "oxify.workflow.execute",
+        skip(self, workflow, config),
+        fields(
+            workflow.id = %workflow.metadata.id,
+            workflow.name = %workflow.metadata.name,
+            workflow.nodes = workflow.nodes.len(),
+        )
+    )]
     pub async fn execute_with_config(
         &self,
         workflow: &Workflow,
@@ -1135,6 +1158,8 @@ impl Engine {
 
         let duration_ms = start_time.elapsed().as_millis();
 
+        tracing::info!(duration_ms = duration_ms as u64, "workflow completed");
+
         // Emit workflow completed event
         if config.emit_events {
             self.emit_event(WorkflowEvent::workflow_completed(
@@ -1150,6 +1175,14 @@ impl Engine {
     }
 
     /// Execute a node with retry logic
+    #[tracing::instrument(
+        name = "oxify.node.execute",
+        skip(self, node, ctx, workflow),
+        fields(
+            node.id = ?node.id,
+            node.name = %node.name,
+        )
+    )]
     async fn execute_node_with_retry(
         &self,
         node: &Node,
@@ -1198,6 +1231,13 @@ impl Engine {
     }
 
     /// Execute a single node
+    #[tracing::instrument(
+        name = "oxify.node.step",
+        skip(self, node, ctx, _workflow),
+        fields(
+            node.id = ?node.id,
+        )
+    )]
     async fn execute_node(
         &self,
         node: &Node,

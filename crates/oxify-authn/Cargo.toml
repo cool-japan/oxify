@@ -66,6 +66,7 @@ criterion = { workspace = true }
 [[bench]]
 name = "auth_benchmarks"
 harness = false
+required-features = ["session", "ratelimit", "apikey", "metrics"]
 
 [features]
 default = ["jwt", "oauth", "password"]

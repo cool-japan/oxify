@@ -32,9 +32,14 @@ octocrab = { workspace = true, optional = true }
 default = []
 database = ["sqlx"]
 github = ["octocrab"]
+github-actions = []
+gitlab = []
+jira = []
+linear = []
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
-# Required for tests that construct GitHubServer — octocrab's TLS stack needs a
-# process-level rustls CryptoProvider to be installed before use.
+# Required for tests that construct GitHubServer / GitHubActionsServer —
+# reqwest/octocrab TLS stacks need a process-level rustls CryptoProvider.
 rustls = { version = "0.23", features = ["ring"] }
+wiremock = { workspace = true }

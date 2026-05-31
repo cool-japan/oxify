@@ -42,3 +42,15 @@ pub use providers::slack::{SlackConfig, SlackProvider};
 
 #[cfg(feature = "smtp")]
 pub use providers::smtp::{SmtpConfig, SmtpProvider};
+
+#[cfg(feature = "discord")]
+pub use providers::discord::{DiscordConfig, DiscordProvider};
+
+#[cfg(feature = "twilio")]
+pub use providers::twilio::{TwilioConfig, TwilioProvider};
+
+#[cfg(feature = "onesignal")]
+pub use providers::onesignal::{OneSignalConfig, OneSignalProvider};
+
+#[cfg(feature = "firebase")]
+pub use providers::firebase_fcm::{FirebaseFcmConfig, FirebaseFcmProvider};

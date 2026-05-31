@@ -44,7 +44,9 @@ num_cpus = { workspace = true }
 
 # Model downloading
 dirs = { workspace = true }
-sha2 = "0.10"
+sha2 = { workspace = true }
+hmac = { workspace = true }
+hex = { workspace = true }
 reqwest = { workspace = true }
 
 # Configuration
@@ -63,17 +65,19 @@ surya = ["onnx"]
 paddle = ["onnx"]
 google-vision = []
 azure-vision = []
+aws-textract = []
 cuda = []
 coreml = []
 redis = []
 sqlite = []
-all-providers = ["mock", "tesseract", "surya", "paddle", "google-vision", "azure-vision"]
+all-providers = ["mock", "tesseract", "surya", "paddle", "google-vision", "azure-vision", "aws-textract"]
 all-features = ["all-providers", "redis", "sqlite", "cuda", "coreml"]
 
 [dev-dependencies]
 tokio-test = "0.4"
 criterion = { workspace = true, features = ["async_tokio"] }
 tempfile = { workspace = true }
+wiremock = { workspace = true }
 
 [[bench]]
 name = "vision_bench"

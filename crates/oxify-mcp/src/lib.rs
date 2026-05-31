@@ -18,8 +18,16 @@ pub use servers::{
     QueryResult, ShellServer, StatementResult, TransactionResult, WebServer, WorkflowExecutor,
     WorkflowServer, WorkflowServerConfig,
 };
+#[cfg(feature = "github-actions")]
+pub use servers::{GitHubActionsConfig, GitHubActionsServer};
 #[cfg(feature = "github")]
 pub use servers::{GitHubConfig, GitHubServer};
+#[cfg(feature = "gitlab")]
+pub use servers::{GitLabConfig, GitLabServer};
+#[cfg(feature = "jira")]
+pub use servers::{JiraConfig, JiraServer};
+#[cfg(feature = "linear")]
+pub use servers::{LinearConfig, LinearServer};
 pub use transport::{HttpTransport, McpTransport, StdioTransport};
 
 use async_trait::async_trait;

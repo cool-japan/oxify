@@ -32,16 +32,20 @@ rhai = { workspace = true }
 wasmer = { workspace = true, optional = true }
 reqwest = { workspace = true }
 futures = { workspace = true }
-hmac = "0.12"
-sha2 = "0.10"
-hex = "0.4"
+hmac = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
 base64 = "0.22"
 rand = { workspace = true }
 toml = { workspace = true }
 opentelemetry = { workspace = true, optional = true }
 opentelemetry_sdk = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
 tokio-tungstenite = { version = "0.29", optional = true }
 async-nats = { workspace = true, optional = true }
+rdkafka = { workspace = true, optional = true }
+lapin = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
 url = "2.5"
 
@@ -53,9 +57,11 @@ proptest = { workspace = true }
 [features]
 default = []
 wasm = ["wasmer"]
-otel = ["opentelemetry", "opentelemetry_sdk"]
+otel = ["opentelemetry", "opentelemetry_sdk", "tracing-opentelemetry", "tracing-subscriber"]
 websocket = ["tokio-tungstenite"]
 nats = ["async-nats", "bytes"]
+kafka = ["rdkafka", "bytes"]
+rabbitmq = ["lapin", "bytes"]
 
 [[bench]]
 name = "engine_bench"

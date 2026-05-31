@@ -1,0 +1,31 @@
+[package]
+name = "oxify-connect-data"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SaaS data connectors for OxiFY - Google Sheets, Airtable, Notion"
+repository = "https://github.com/cool-japan/oxify"
+categories = ["web-programming", "api-bindings"]
+keywords = ["google-sheets", "airtable", "notion", "data-connector"]
+
+[dependencies]
+async-trait.workspace = true
+thiserror.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+reqwest = { workspace = true }
+tokio = { workspace = true }
+tracing.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+wiremock.workspace = true
+
+[features]
+default = []
+google-sheets = []
+airtable = []
+notion = []
+all-providers = ["google-sheets", "airtable", "notion"]

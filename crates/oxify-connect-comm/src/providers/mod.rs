@@ -1,8 +1,16 @@
+#[cfg(feature = "discord")]
+pub mod discord;
+#[cfg(feature = "firebase")]
+pub mod firebase_fcm;
 pub mod mock;
+#[cfg(feature = "onesignal")]
+pub mod onesignal;
 #[cfg(feature = "slack")]
 pub mod slack;
 #[cfg(feature = "smtp")]
 pub mod smtp;
+#[cfg(feature = "twilio")]
+pub mod twilio;
 
 pub use mock::MockMessageProvider;
 

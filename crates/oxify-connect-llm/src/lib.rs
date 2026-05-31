@@ -1,5 +1,6 @@
 //! LLM provider connections for OxiFY
 
+mod aws_sigv4;
 mod batch;
 mod bedrock;
 mod cache;
@@ -12,6 +13,7 @@ mod fallback;
 mod gemini;
 mod health_check;
 mod helpers;
+mod huggingface;
 mod interceptor;
 mod llamacpp;
 mod load_balancer;
@@ -26,8 +28,10 @@ mod recommender;
 mod redis_budget;
 #[cfg(feature = "redis-cache")]
 mod redis_cache;
+mod replicate;
 mod response_utils;
 mod retry;
+mod sagemaker;
 mod selector;
 mod semantic_cache;
 mod streaming;
@@ -35,9 +39,11 @@ mod templates;
 mod timeout;
 mod usage;
 mod validation;
+mod vertexai;
 mod vllm;
 mod workflow;
 
+pub use aws_sigv4::AwsCredentials;
 pub use batch::{BatchConfig, BatchProvider, BatchStats, EmbeddingBatchProvider};
 pub use bedrock::BedrockProvider;
 pub use cache::{CacheStats, CachedProvider, LlmCache};
@@ -50,6 +56,7 @@ pub use fallback::FallbackProvider;
 pub use gemini::GeminiProvider;
 pub use health_check::{HealthCheckConfig, HealthCheckProvider, HealthStats, HealthStatus};
 pub use helpers::{LlmRequestBuilder, ModelUtils, QuickRequest, TokenUtils};
+pub use huggingface::HuggingFaceProvider;
 pub use interceptor::{
     ContentLengthInterceptor, EmbeddingInterceptorProvider, EmbeddingRequestInterceptor,
     EmbeddingResponseInterceptor, InterceptorProvider, LoggingInterceptor, RequestInterceptor,
@@ -79,8 +86,10 @@ pub use redis_budget::{RedisBudgetStats, RedisBudgetStore};
 pub use redis_cache::{
     RedisCache, RedisCacheStats, RedisCachedEmbeddingProvider, RedisCachedProvider,
 };
+pub use replicate::ReplicateProvider;
 pub use response_utils::{CodeBlock, ResponseUtils};
 pub use retry::{RetryConfig, RetryProvider};
+pub use sagemaker::SageMakerProvider;
 pub use selector::{ProviderMetadata, ProviderSelector, SelectionCriteria};
 pub use semantic_cache::{
     SemanticCache, SemanticCacheStats, SemanticCachedProvider, SimilarityThreshold,
@@ -92,6 +101,7 @@ pub use usage::{
     BudgetLimit, BudgetProvider, ModelPricing, TrackedProvider, UsageStats, UsageTracker,
 };
 pub use validation::{RequestValidator, ValidationRules};
+pub use vertexai::VertexAiProvider;
 pub use vllm::VllmProvider;
 pub use workflow::{WorkflowEmbeddingProvider, WorkflowProvider, WorkflowStats, WorkflowTracker};
 

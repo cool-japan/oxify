@@ -1,8 +1,4 @@
-//! AWS Bedrock LLM provider
-//!
-//! This provider supports Claude models on AWS Bedrock.
-//! Note: Full implementation requires AWS credentials and SigV4 signing.
-
+use crate::aws_sigv4::{sign_request, AwsCredentials};
 use crate::{LlmError, LlmProvider, LlmRequest, LlmResponse, Result, ToolCall, Usage};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -24,12 +20,12 @@ use serde::{Deserialize, Serialize};
 ///     "anthropic.claude-3-sonnet-20240229-v1:0".to_string()
 /// );
 /// ```
+#[derive(Debug)]
 pub struct BedrockProvider {
     region: String,
     model_id: String,
     client: reqwest::Client,
-    access_key_id: Option<String>,
-    secret_access_key: Option<String>,
+    credentials: Option<AwsCredentials>,
 }
 
 #[derive(Serialize)]
@@ -98,8 +94,7 @@ impl BedrockProvider {
             region,
             model_id,
             client: reqwest::Client::new(),
-            access_key_id: None,
-            secret_access_key: None,
+            credentials: None,
         }
     }
 
@@ -114,34 +109,27 @@ impl BedrockProvider {
             region,
             model_id,
             client: reqwest::Client::new(),
-            access_key_id: Some(access_key_id),
-            secret_access_key: Some(secret_access_key),
+            credentials: Some(AwsCredentials::new(access_key_id, secret_access_key)),
         }
     }
 
     /// Create a new Bedrock provider from environment variables
     pub fn from_env(region: String, model_id: String) -> Result<Self> {
-        let access_key_id = std::env::var("AWS_ACCESS_KEY_ID").ok();
-        let secret_access_key = std::env::var("AWS_SECRET_ACCESS_KEY").ok();
-
-        if access_key_id.is_none() || secret_access_key.is_none() {
-            return Err(LlmError::ConfigError(
+        let credentials = AwsCredentials::from_env().map_err(|_| {
+            LlmError::ConfigError(
                 "AWS credentials not found in environment variables. \
                  Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY."
                     .to_string(),
-            ));
-        }
-
+            )
+        })?;
         Ok(Self {
             region,
             model_id,
             client: reqwest::Client::new(),
-            access_key_id,
-            secret_access_key,
+            credentials: Some(credentials),
         })
     }
 
-    /// Get the Bedrock endpoint URL
     fn endpoint_url(&self) -> String {
         format!(
             "https://bedrock-runtime.{}.amazonaws.com/model/{}/invoke",
@@ -153,30 +141,12 @@ impl BedrockProvider {
 #[async_trait]
 impl LlmProvider for BedrockProvider {
     async fn complete(&self, request: LlmRequest) -> Result<LlmResponse> {
-        // Check if credentials are available
-        let _access_key_id = self
-            .access_key_id
-            .clone()
-            .or_else(|| std::env::var("AWS_ACCESS_KEY_ID").ok())
-            .ok_or_else(|| {
-                LlmError::ConfigError(
-                    "AWS_ACCESS_KEY_ID not found. Use with_credentials() or set environment variable."
-                        .to_string(),
-                )
-            })?;
+        let creds = match &self.credentials {
+            Some(c) => AwsCredentials::new(c.access_key_id.clone(), c.secret_access_key.clone())
+                .with_session_token_opt(c.session_token.clone()),
+            None => AwsCredentials::from_env()?,
+        };
 
-        let _secret_access_key = self
-            .secret_access_key
-            .clone()
-            .or_else(|| std::env::var("AWS_SECRET_ACCESS_KEY").ok())
-            .ok_or_else(|| {
-                LlmError::ConfigError(
-                    "AWS_SECRET_ACCESS_KEY not found. Use with_credentials() or set environment variable."
-                        .to_string(),
-                )
-            })?;
-
-        // Convert tools to Bedrock format
         let tools: Vec<BedrockTool> = request
             .tools
             .iter()
@@ -199,35 +169,40 @@ impl LlmProvider for BedrockProvider {
             tools,
         };
 
-        let body = serde_json::to_string(&bedrock_request)
+        let body_bytes = serde_json::to_vec(&bedrock_request)
             .map_err(|e| LlmError::SerializationError(e.to_string()))?;
 
-        // Note: This is a simplified implementation without full AWS SigV4 signing
-        // For production use, consider using the AWS SDK for Rust
-        tracing::warn!(
-            "AWS Bedrock provider requires proper AWS SigV4 signing for production use. \
-             Consider using the AWS SDK for Rust (aws-sdk-bedrockruntime)."
+        let url = self.endpoint_url();
+        let datetime = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+
+        let sig_headers = sign_request(
+            "POST",
+            &url,
+            &self.region,
+            "bedrock",
+            &body_bytes,
+            &creds,
+            &datetime,
         );
 
-        // Make request (this will fail without proper AWS SigV4 signing)
-        let response = self
+        let mut req_builder = self
             .client
-            .post(self.endpoint_url())
+            .post(&url)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
-            // Note: AWS SigV4 signature should be added here
-            .body(body)
-            .send()
-            .await?;
+            .body(body_bytes);
 
+        for (k, v) in &sig_headers {
+            req_builder = req_builder.header(k.as_str(), v.as_str());
+        }
+
+        let response = req_builder.send().await?;
         let status = response.status();
 
         if !status.is_success() {
             let error_body = response.text().await?;
             return Err(LlmError::ApiError(format!(
-                "AWS Bedrock error (HTTP {}): {}. \
-                 Note: This implementation requires proper AWS SigV4 signing. \
-                 Use AWS SDK for production: aws-sdk-bedrockruntime",
+                "AWS Bedrock error (HTTP {}): {}",
                 status, error_body
             )));
         }
@@ -323,8 +298,9 @@ mod tests {
             "access-key".to_string(),
             "secret-key".to_string(),
         );
-        assert_eq!(provider.access_key_id, Some("access-key".to_string()));
-        assert_eq!(provider.secret_access_key, Some("secret-key".to_string()));
+        let creds = provider.credentials.as_ref().unwrap();
+        assert_eq!(creds.access_key_id, "access-key");
+        assert_eq!(creds.secret_access_key, "secret-key");
     }
 
     #[test]
@@ -332,5 +308,16 @@ mod tests {
         assert!(models::CLAUDE_3_OPUS.contains("opus"));
         assert!(models::CLAUDE_3_SONNET.contains("sonnet"));
         assert!(models::CLAUDE_3_HAIKU.contains("haiku"));
+    }
+
+    #[test]
+    fn test_bedrock_credentials_from_env_error() {
+        unsafe {
+            std::env::remove_var("AWS_ACCESS_KEY_ID");
+            std::env::remove_var("AWS_SECRET_ACCESS_KEY");
+        }
+        let result = BedrockProvider::from_env("us-east-1".to_string(), "model".to_string());
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), LlmError::ConfigError(_)));
     }
 }

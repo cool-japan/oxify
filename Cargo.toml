@@ -6,6 +6,9 @@ members = [
     "crates/oxify-authz",
     "crates/oxify-cli",
     "crates/oxify-connect-comm",
+    "crates/oxify-connect-data",
+    "crates/oxify-connect-db",
+    "crates/oxify-connect-graphql",
     "crates/oxify-connect-llm",
     "crates/oxify-connect-storage",
     "crates/oxify-connect-vector",
@@ -42,7 +45,7 @@ serde_yaml = "0.9"
 thiserror = "2.0.18"
 anyhow = "1.0.102"
 tracing = "0.1.44"
-tracing-subscriber = "0.3.23"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "registry"] }
 
 # Web framework
 axum = { version = "0.8.8", features = ["macros", "ws"] }
@@ -85,15 +88,28 @@ tracing-opentelemetry = "0.32"
 
 # Event-driven / messaging
 async-nats = "0.38"
+rdkafka = { version = "0.39", default-features = false, features = ["tokio"] }
+lapin = "4.3.0"
 
 # GitHub API
 octocrab = "0.49"
 
+# Cryptography (AWS SigV4, etc.)
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+
+# JWT / auth tokens
+jsonwebtoken = "9.3"
+
 # Communications
 lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder"] }
 
+# Document database
+mongodb = "3.7.0"
+
 # Object storage
-object_store = { version = "0.11", default-features = false, features = ["aws"] }
+object_store = { version = "0.11", default-features = false, features = ["aws", "gcp", "azure"] }
 bytes = "1.10"
 
 # TUI

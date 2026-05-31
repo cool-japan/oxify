@@ -12,6 +12,15 @@ pub mod memory;
 #[cfg(feature = "aws")]
 pub mod s3;
 
+#[cfg(feature = "gcs")]
+pub mod gcs;
+
+#[cfg(feature = "azure")]
+pub mod azure_blob;
+
+#[cfg(feature = "local")]
+pub mod local;
+
 /// Abstraction over an object storage backend.
 ///
 /// All methods are async and object-safe (via [`async_trait`]).  Providers
