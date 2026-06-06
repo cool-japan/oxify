@@ -31,9 +31,9 @@ serde_yaml = { workspace = true }
 toml = { workspace = true }
 dirs = { workspace = true }
 reqwest = { workspace = true }
-flate2 = "1.1"
+oxiarc-deflate = { workspace = true }
 tar = "0.4"
-oxiarc-archive = "0.3.2"
+oxiarc-archive = "0.3.3"
 uuid = { workspace = true }
 chrono = { workspace = true }
 rpassword = "7.4"

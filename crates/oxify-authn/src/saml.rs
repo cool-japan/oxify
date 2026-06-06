@@ -41,11 +41,10 @@
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chrono::{DateTime, Utc};
-use flate2::{write::DeflateEncoder, Compression};
+use oxiarc_deflate::deflate::Deflater;
 use quick_xml::{events::Event, Reader};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::Write;
 use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
@@ -321,14 +320,12 @@ impl AuthnRequest {
     pub fn encode_for_redirect(&self) -> Result<String, SamlError> {
         let xml = self.to_xml()?;
 
-        // Deflate compression
-        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
-        encoder
-            .write_all(xml.as_bytes())
+        // Raw DEFLATE compression (RFC 1951, no gzip/zlib wrapper) for the
+        // SAML HTTP-Redirect binding. Level 6 matches flate2's previous default.
+        let mut compressed = Vec::new();
+        Deflater::new(6)
+            .deflate(xml.as_bytes(), &mut compressed, true)
             .map_err(|e| SamlError::CompressionError(format!("Deflate failed: {e}")))?;
-        let compressed = encoder
-            .finish()
-            .map_err(|e| SamlError::CompressionError(format!("Deflate finish failed: {e}")))?;
 
         // Base64 encode
         Ok(BASE64.encode(compressed))
@@ -865,5 +862,41 @@ mod tests {
         let result = sp.validate_signatures(xml_without_sig);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SamlError::SignatureError(_)));
+    }
+
+    #[test]
+    fn test_redirect_deflate_roundtrip_is_raw_deflate() {
+        // The HTTP-Redirect binding uses RAW DEFLATE (RFC 1951) with no gzip
+        // or zlib wrapper. This test encodes an AuthnRequest, base64-decodes
+        // it, and inflates with the raw-DEFLATE inflater, asserting we recover
+        // the exact original XML. If the encoder ever emitted a gzip/zlib
+        // wrapper instead, the raw inflate would fail or mismatch.
+        let config = SpConfig::builder()
+            .entity_id("https://sp.example.com/metadata")
+            .acs_url("https://sp.example.com/saml/acs")
+            .idp_sso_url("https://idp.example.com/sso")
+            .idp_entity_id("https://idp.example.com/metadata")
+            .build()
+            .unwrap();
+
+        let sp = ServiceProvider::new(config);
+        let (authn_request, _relay_state) = sp.create_authn_request().unwrap();
+
+        let original_xml = authn_request.to_xml().unwrap();
+        let encoded = authn_request.encode_for_redirect().unwrap();
+
+        // base64 -> raw DEFLATE bytes
+        let compressed = BASE64.decode(&encoded).unwrap();
+        // A raw DEFLATE stream does NOT start with the gzip magic (0x1f 0x8b).
+        assert!(
+            !compressed.starts_with(&[0x1f, 0x8b]),
+            "SAML redirect payload must be raw DEFLATE, not gzip"
+        );
+
+        let decompressed = oxiarc_deflate::inflate(&compressed)
+            .expect("raw-DEFLATE inflate of SAML redirect payload must succeed");
+        let decompressed_xml = String::from_utf8(decompressed).unwrap();
+
+        assert_eq!(decompressed_xml, original_xml);
     }
 }

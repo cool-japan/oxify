@@ -856,20 +856,25 @@ async fn package_workflow(file: &str, output: &str, include_deps: bool) -> Resul
     // Create archive
     match extension {
         "tar" | "gz" | "tgz" => {
-            use flate2::write::GzEncoder;
-            use flate2::Compression;
+            use oxiarc_deflate::streaming::GzipStreamEncoder;
             use tar::Builder;
 
             let tar_gz = fs::File::create(output)
                 .with_context(|| format!("Failed to create output file: {}", output))?;
-            let enc = GzEncoder::new(tar_gz, Compression::default());
+            // Level 6 matches flate2's previous default compression level.
+            let enc = GzipStreamEncoder::new(tar_gz, 6);
             let mut tar = Builder::new(enc);
 
             tar.append_dir_all(".", &temp_dir)
                 .with_context(|| "Failed to create tar archive")?;
 
-            tar.finish()
+            // Finalize the tar (writes trailing blocks) and recover the gzip
+            // encoder, then write the gzip trailer (CRC-32 + ISIZE).
+            let enc = tar
+                .into_inner()
                 .with_context(|| "Failed to finalize tar archive")?;
+            enc.finish()
+                .with_context(|| "Failed to finalize gzip stream")?;
         }
         "zip" => {
             use oxiarc_archive::ZipWriter;
@@ -917,4 +922,61 @@ async fn package_workflow(file: &str, output: &str, include_deps: bool) -> Resul
     println!("  Format: {}", extension);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use oxiarc_deflate::streaming::{GzipStreamDecoder, GzipStreamEncoder};
+    use std::fs;
+    use std::io::Read;
+    use tar::Builder;
+
+    /// Exercises the same gzip+tar plumbing used by `package_workflow` for the
+    /// `tar`/`gz`/`tgz` formats, and verifies the output is a valid, readable
+    /// gzip stream (gzip magic + tar round-trip).
+    #[test]
+    fn test_gzip_tar_archive_roundtrip() {
+        let base = std::env::temp_dir().join(format!("oxify_cli_gztest_{}", uuid::Uuid::new_v4()));
+        let src_dir = base.join("src");
+        fs::create_dir_all(&src_dir).expect("create src dir");
+
+        let payload = b"{\"hello\":\"gzip\"}\n";
+        fs::write(src_dir.join("manifest.json"), payload).expect("write payload");
+
+        let archive_path = base.join("package.tar.gz");
+
+        // --- Mirror the production archive creation path ---
+        {
+            let tar_gz = fs::File::create(&archive_path).expect("create archive");
+            let enc = GzipStreamEncoder::new(tar_gz, 6);
+            let mut tar = Builder::new(enc);
+            tar.append_dir_all(".", &src_dir).expect("append dir");
+            let enc = tar.into_inner().expect("finalize tar");
+            enc.finish().expect("finalize gzip");
+        }
+
+        // --- The file must be a valid gzip stream (RFC 1952 magic) ---
+        let raw = fs::read(&archive_path).expect("read archive");
+        assert!(
+            raw.starts_with(&[0x1f, 0x8b]),
+            "archive must start with gzip magic bytes"
+        );
+
+        // --- And it must decompress + untar back to the original payload ---
+        let file = fs::File::open(&archive_path).expect("open archive");
+        let mut archive = tar::Archive::new(GzipStreamDecoder::new(file));
+        let mut found = None;
+        for entry in archive.entries().expect("read entries") {
+            let mut entry = entry.expect("entry");
+            let path = entry.path().expect("entry path").into_owned();
+            if path.file_name().and_then(|n| n.to_str()) == Some("manifest.json") {
+                let mut contents = Vec::new();
+                entry.read_to_end(&mut contents).expect("read entry");
+                found = Some(contents);
+            }
+        }
+
+        let _ = fs::remove_dir_all(&base);
+        assert_eq!(found.as_deref(), Some(&payload[..]));
+    }
 }

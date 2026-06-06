@@ -112,6 +112,9 @@ mongodb = "3.7.0"
 object_store = { version = "0.11", default-features = false, features = ["aws", "gcp", "azure"] }
 bytes = "1.10"
 
+# Compression (Pure Rust, OxiARC ecosystem)
+oxiarc-deflate = "0.3.3"
+
 # TUI
 ratatui = "0.29"
 crossterm = "0.28"
