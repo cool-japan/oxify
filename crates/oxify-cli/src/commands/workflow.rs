@@ -964,8 +964,8 @@ fn add_dir_to_tar<W: std::io::Write>(
                 .with_context(|| format!("Failed to add directory to archive: {}", entry_name))?;
             add_dir_to_tar(tar, &path, &entry_name)?;
         } else if file_type.is_file() {
-            let data = fs::read(&path)
-                .with_context(|| format!("Failed to read file: {:?}", path))?;
+            let data =
+                fs::read(&path).with_context(|| format!("Failed to read file: {:?}", path))?;
             tar.add_file(&entry_name, &data)
                 .with_context(|| format!("Failed to add file to archive: {}", entry_name))?;
         }
