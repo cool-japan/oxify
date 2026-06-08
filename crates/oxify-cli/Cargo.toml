@@ -32,8 +32,7 @@ toml = { workspace = true }
 dirs = { workspace = true }
 reqwest = { workspace = true }
 oxiarc-deflate = { workspace = true }
-tar = "0.4"
-oxiarc-archive = "0.3.3"
+oxiarc-archive = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 rpassword = "7.4"

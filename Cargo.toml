@@ -114,6 +114,7 @@ bytes = "1.10"
 
 # Compression (Pure Rust, OxiARC ecosystem)
 oxiarc-deflate = "0.3.3"
+oxiarc-archive = "0.3.3"
 
 # TUI
 ratatui = "0.29"

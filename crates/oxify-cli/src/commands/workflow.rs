@@ -856,16 +856,18 @@ async fn package_workflow(file: &str, output: &str, include_deps: bool) -> Resul
     // Create archive
     match extension {
         "tar" | "gz" | "tgz" => {
+            use oxiarc_archive::tar::TarWriter;
             use oxiarc_deflate::streaming::GzipStreamEncoder;
-            use tar::Builder;
 
             let tar_gz = fs::File::create(output)
                 .with_context(|| format!("Failed to create output file: {}", output))?;
             // Level 6 matches flate2's previous default compression level.
             let enc = GzipStreamEncoder::new(tar_gz, 6);
-            let mut tar = Builder::new(enc);
+            let mut tar = TarWriter::new(enc);
 
-            tar.append_dir_all(".", &temp_dir)
+            // Recursively add the package contents under `temp_dir`, mirroring the
+            // behaviour of the previous `append_dir_all(".", &temp_dir)` call.
+            add_dir_to_tar(&mut tar, &temp_dir, "")
                 .with_context(|| "Failed to create tar archive")?;
 
             // Finalize the tar (writes trailing blocks) and recover the gzip
@@ -924,12 +926,64 @@ async fn package_workflow(file: &str, output: &str, include_deps: bool) -> Resul
     Ok(())
 }
 
+/// Recursively append the contents of `dir` to a [`oxiarc_archive::tar::TarWriter`].
+///
+/// `prefix` is the slash-separated path of `dir` within the archive (empty for
+/// the archive root). Directory entries are emitted before their contents so
+/// the resulting TAR mirrors the layout produced by the previous
+/// `tar::Builder::append_dir_all(".", dir)` call. Entry names always use `/`
+/// separators regardless of the host platform.
+fn add_dir_to_tar<W: std::io::Write>(
+    tar: &mut oxiarc_archive::tar::TarWriter<W>,
+    dir: &Path,
+    prefix: &str,
+) -> Result<()> {
+    let mut entries: Vec<_> = fs::read_dir(dir)
+        .with_context(|| format!("Failed to read directory: {:?}", dir))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .with_context(|| format!("Failed to enumerate directory: {:?}", dir))?;
+    // Deterministic ordering so archives are reproducible across runs/platforms.
+    entries.sort_by_key(|entry| entry.file_name());
+
+    for entry in entries {
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy();
+        let entry_name = if prefix.is_empty() {
+            name.to_string()
+        } else {
+            format!("{}/{}", prefix, name)
+        };
+
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("Failed to read file type: {:?}", path))?;
+
+        if file_type.is_dir() {
+            tar.add_directory(&entry_name)
+                .with_context(|| format!("Failed to add directory to archive: {}", entry_name))?;
+            add_dir_to_tar(tar, &path, &entry_name)?;
+        } else if file_type.is_file() {
+            let data = fs::read(&path)
+                .with_context(|| format!("Failed to read file: {:?}", path))?;
+            tar.add_file(&entry_name, &data)
+                .with_context(|| format!("Failed to add file to archive: {}", entry_name))?;
+        }
+        // Symlinks and other special entries are intentionally skipped; the
+        // package layout only contains regular files and directories.
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    use super::add_dir_to_tar;
+    use oxiarc_archive::tar::TarStreamReader;
     use oxiarc_deflate::streaming::{GzipStreamDecoder, GzipStreamEncoder};
     use std::fs;
     use std::io::Read;
-    use tar::Builder;
+    use std::path::Path;
 
     /// Exercises the same gzip+tar plumbing used by `package_workflow` for the
     /// `tar`/`gz`/`tgz` formats, and verifies the output is a valid, readable
@@ -947,10 +1001,11 @@ mod tests {
 
         // --- Mirror the production archive creation path ---
         {
+            use oxiarc_archive::tar::TarWriter;
             let tar_gz = fs::File::create(&archive_path).expect("create archive");
             let enc = GzipStreamEncoder::new(tar_gz, 6);
-            let mut tar = Builder::new(enc);
-            tar.append_dir_all(".", &src_dir).expect("append dir");
+            let mut tar = TarWriter::new(enc);
+            add_dir_to_tar(&mut tar, &src_dir, "").expect("append dir");
             let enc = tar.into_inner().expect("finalize tar");
             enc.finish().expect("finalize gzip");
         }
@@ -963,13 +1018,17 @@ mod tests {
         );
 
         // --- And it must decompress + untar back to the original payload ---
+        // `GzipStreamDecoder` is `Read`-only (not `Seek`), so use the streaming
+        // TAR reader, which only requires `Read`.
         let file = fs::File::open(&archive_path).expect("open archive");
-        let mut archive = tar::Archive::new(GzipStreamDecoder::new(file));
+        let mut stream = TarStreamReader::new(GzipStreamDecoder::new(file));
         let mut found = None;
-        for entry in archive.entries().expect("read entries") {
-            let mut entry = entry.expect("entry");
-            let path = entry.path().expect("entry path").into_owned();
-            if path.file_name().and_then(|n| n.to_str()) == Some("manifest.json") {
+        while let Some(mut entry) = stream.next_entry().expect("read entry") {
+            let basename = Path::new(&entry.header.name)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string());
+            if basename.as_deref() == Some("manifest.json") {
                 let mut contents = Vec::new();
                 entry.read_to_end(&mut contents).expect("read entry");
                 found = Some(contents);
