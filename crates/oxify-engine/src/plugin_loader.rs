@@ -14,7 +14,7 @@
 use crate::plugin::PluginRegistry;
 use crate::plugin_manifest::{PluginManager, PluginManifest};
 use crate::plugin_security::{PluginSecurityScanner, SecurityPolicy, SecurityScanResult};
-use crate::plugin_wasm::{WasmPluginConfig, WasmPluginLoader};
+use crate::plugin_wasm::WasmPluginConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -130,20 +130,24 @@ pub struct PluginLoader {
     config: PluginLoaderConfig,
     /// Plugin manager (manifest-based)
     plugin_manager: Arc<RwLock<PluginManager>>,
-    /// Plugin registry (execution-based)
+    /// Plugin registry (execution-based) — may be shared with the engine
     plugin_registry: Arc<PluginRegistry>,
     /// Security scanner
     security_scanner: PluginSecurityScanner,
-    /// WASM loader (for future WASM plugin execution)
-    #[allow(dead_code)]
-    wasm_loader: Arc<RwLock<Option<WasmPluginLoader>>>,
     /// Load results cache
     load_results: Arc<RwLock<HashMap<String, PluginLoadResult>>>,
 }
 
 impl PluginLoader {
-    /// Create a new plugin loader
+    /// Create a new plugin loader with a fresh, private plugin registry.
     pub fn new(config: PluginLoaderConfig) -> Self {
+        Self::with_registry(config, Arc::new(PluginRegistry::new()))
+    }
+
+    /// Create a plugin loader that shares an existing [`PluginRegistry`] with
+    /// the engine.  Every sandboxed plugin loaded via this loader is registered
+    /// into `plugin_registry` and becomes immediately dispatchable by the engine.
+    pub fn with_registry(config: PluginLoaderConfig, plugin_registry: Arc<PluginRegistry>) -> Self {
         let mut plugin_manager = PluginManager::new();
 
         // Configure plugin manager
@@ -162,19 +166,11 @@ impl PluginLoader {
             PluginSecurityScanner::new()
         };
 
-        // Create WASM loader if needed
-        let wasm_loader = if config.wasm_config.max_memory_pages > 0 {
-            Some(WasmPluginLoader::new(config.wasm_config.clone()))
-        } else {
-            None
-        };
-
         Self {
             config,
             plugin_manager: Arc::new(RwLock::new(plugin_manager)),
-            plugin_registry: Arc::new(PluginRegistry::new()),
+            plugin_registry,
             security_scanner,
-            wasm_loader: Arc::new(RwLock::new(wasm_loader)),
             load_results: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -226,9 +222,38 @@ impl PluginLoader {
         // Load plugin into manager
         let manager = self.plugin_manager.write().await;
         manager
-            .load(manifest.clone(), plugin_path)
+            .load(manifest.clone(), plugin_path.clone())
             .await
             .map_err(|e| PluginLoaderError::LoadFailed(e.to_string()))?;
+
+        // Register executable sandboxed plugins into the shared engine registry.
+        if manifest.capabilities.sandboxed {
+            #[cfg(feature = "wasm")]
+            {
+                let wasm_path = resolve_wasm_path(&manifest, &plugin_path);
+                let wasm_config = self.config.wasm_config.clone();
+                let adapter = crate::plugin_wasm::WasmNodePlugin::from_wasm_file(
+                    wasm_config,
+                    &wasm_path,
+                    manifest.plugin.name.clone(),
+                    manifest.plugin.version.clone(),
+                    manifest.capabilities.node_types.clone(),
+                )
+                .map_err(|e| PluginLoaderError::LoadFailed(e.to_string()))?;
+                self.plugin_registry
+                    .register(std::sync::Arc::new(adapter))
+                    .await
+                    .map_err(PluginLoaderError::LoadFailed)?;
+            }
+            #[cfg(not(feature = "wasm"))]
+            {
+                return Err(PluginLoaderError::LoadFailed(format!(
+                    "Plugin '{}' is sandboxed (WASM) but the 'wasm' feature is not enabled. \
+                     Enable it with --features wasm.",
+                    manifest.plugin.name
+                )));
+            }
+        }
 
         // Create load result
         let result = PluginLoadResult {
@@ -388,6 +413,21 @@ pub struct PluginLoaderStats {
     pub hot_reload_active: bool,
 }
 
+/// Resolve the path to the `.wasm` module for a sandboxed plugin.
+///
+/// Uses `manifest.capabilities.wasm_module` when present; otherwise falls back
+/// to `<plugin_name>.wasm` inside the plugin directory.
+#[cfg(feature = "wasm")]
+fn resolve_wasm_path(
+    manifest: &crate::plugin_manifest::PluginManifest,
+    plugin_dir: &std::path::Path,
+) -> std::path::PathBuf {
+    match &manifest.capabilities.wasm_module {
+        Some(rel) => plugin_dir.join(rel),
+        None => plugin_dir.join(format!("{}.wasm", manifest.plugin.name)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -493,5 +533,90 @@ mod tests {
         assert!(result.is_ok());
 
         loader.stop_hot_reload().await;
+    }
+
+    /// `load_all` on an empty directory returns an empty results vec.
+    #[tokio::test]
+    async fn test_load_all_empty_dir_returns_ok() {
+        let dir = std::env::temp_dir().join("oxify_test_load_all_empty");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let config = PluginLoaderConfig::default().with_search_path(dir.clone());
+        let loader = PluginLoader::new(config);
+
+        let results = loader.load_all().await.unwrap();
+        assert!(
+            results.is_empty(),
+            "empty directory should yield no plugins"
+        );
+    }
+
+    /// `with_registry` shares the registry with an independently created loader.
+    #[tokio::test]
+    async fn test_with_registry_shares_plugin_registry() {
+        let shared = Arc::new(PluginRegistry::new());
+        let config = PluginLoaderConfig::default();
+        let loader = PluginLoader::with_registry(config, shared.clone());
+
+        // The loader should be created without error
+        let stats = loader.stats().await;
+        assert_eq!(stats.total_discovered, 0);
+
+        // The shared registry is the same object (zero plugins registered yet)
+        let listed = shared.list().await;
+        assert!(listed.is_empty());
+    }
+
+    /// Attempting to load a sandboxed plugin without the `wasm` feature active
+    /// must return a descriptive error.
+    #[cfg(not(feature = "wasm"))]
+    #[tokio::test]
+    async fn test_sandboxed_plugin_without_wasm_feature_errors() {
+        use crate::plugin_manifest::{PluginCapabilities, PluginInfo, PluginManifest};
+        use std::path::PathBuf;
+
+        // Create a temp dir with a minimal plugin.toml that has sandboxed = true
+        let dir = std::env::temp_dir().join("oxify_test_sandboxed_no_wasm");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Build a manifest in memory (no file needed for this path — we call load_plugin
+        // directly with the manifest we construct)
+        let manifest = PluginManifest {
+            plugin: PluginInfo {
+                name: "sandboxed_test_plugin".to_string(),
+                version: "0.1.0".to_string(),
+                description: None,
+                author: None,
+                license: None,
+                homepage: None,
+                repository: None,
+                keywords: vec![],
+                category: None,
+            },
+            capabilities: PluginCapabilities {
+                node_types: vec!["custom".to_string()],
+                sandboxed: true,
+                ..Default::default()
+            },
+            config: Default::default(),
+            dependencies: Default::default(),
+            hooks: Default::default(),
+        };
+
+        let config = PluginLoaderConfig::default();
+        let loader = PluginLoader::new(config);
+
+        let result = loader.load_plugin(manifest, PathBuf::from(&dir)).await;
+
+        assert!(
+            result.is_err(),
+            "sandboxed plugin without wasm feature should error"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("wasm"),
+            "error message should mention 'wasm', got: {}",
+            err_msg
+        );
     }
 }

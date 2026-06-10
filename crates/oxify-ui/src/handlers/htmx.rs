@@ -16,8 +16,10 @@ use crate::mock;
 use crate::state::AppState;
 use crate::templates::partials::{
     ExecutionListPartial, ExecutionLogs, ExecutionRow, ExecutionRowsPartial, ExecutionStatus,
-    NodeFormPartial, ToastPartial, WorkflowCard, WorkflowListPartial, WorkflowPreview,
+    NodeFormPartial, TemplateDetailPartial, TemplateListPartial, ToastPartial, WorkflowCard,
+    WorkflowListPartial, WorkflowPreview,
 };
+use crate::validation;
 
 /// Query parameters for workflow search
 #[derive(Debug, Deserialize)]
@@ -143,9 +145,56 @@ pub async fn workflow_preview(
     State(_state): State<Arc<AppState>>,
     Path(id): Path<Uuid>,
 ) -> Result<Html<String>, UiError> {
+    // Build a representative mock DAG for preview using the SVG module
+    let nodes = vec![
+        crate::svg::SvgNode {
+            id: "start_1".into(),
+            label: "Start".into(),
+            node_type: "start".into(),
+            x: 0.0,
+            y: 0.0,
+        },
+        crate::svg::SvgNode {
+            id: "llm_1".into(),
+            label: "LLM Process".into(),
+            node_type: "llm".into(),
+            x: 0.0,
+            y: 0.0,
+        },
+        crate::svg::SvgNode {
+            id: "code_1".into(),
+            label: "Transform".into(),
+            node_type: "code".into(),
+            x: 0.0,
+            y: 0.0,
+        },
+        crate::svg::SvgNode {
+            id: "end_1".into(),
+            label: "End".into(),
+            node_type: "end".into(),
+            x: 0.0,
+            y: 0.0,
+        },
+    ];
+    let edges = vec![
+        crate::svg::SvgEdge {
+            from_id: "start_1".into(),
+            to_id: "llm_1".into(),
+        },
+        crate::svg::SvgEdge {
+            from_id: "llm_1".into(),
+            to_id: "code_1".into(),
+        },
+        crate::svg::SvgEdge {
+            from_id: "code_1".into(),
+            to_id: "end_1".into(),
+        },
+    ];
+    let svg_content = crate::svg::workflow_to_svg(&nodes, &edges, 400, 120);
+
     let template = WorkflowPreview {
         workflow_id: id,
-        svg_content: generate_dag_svg(),
+        svg_content,
     };
 
     Ok(Html(template.render()?))
@@ -377,12 +426,57 @@ pub struct NodeValidateRequest {
 /// Validate node configuration (HTMX)
 pub async fn node_validate(
     State(_state): State<Arc<AppState>>,
-    Form(_form): Form<NodeValidateRequest>,
+    Form(form): Form<NodeValidateRequest>,
 ) -> Result<Html<String>, UiError> {
-    // Validate and return result
-    Ok(Html(
-        r#"<span class="text-green-500">Valid configuration</span>"#.to_string(),
-    ))
+    let errors = validation::validate_node_config(&form.node_type, &form.config);
+
+    if errors.is_empty() {
+        Ok(Html(
+            r#"<span class="text-green-500 flex items-center gap-1">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+            </svg>
+            Valid configuration
+        </span>"#
+            .to_string(),
+        ))
+    } else {
+        let error_items: String = errors
+            .iter()
+            .map(|e| {
+                format!(
+                    r#"<li class="text-red-500 text-sm">{}</li>"#,
+                    validation::html_escape(e)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        Ok(Html(format!(
+            r#"<ul class="space-y-1 list-disc list-inside" role="alert" aria-label="Validation errors">{}</ul>"#,
+            error_items
+        )))
+    }
+}
+
+/// Template gallery list partial (HTMX)
+pub async fn template_list_partial(
+    State(_state): State<Arc<AppState>>,
+) -> Result<Html<String>, UiError> {
+    let templates = mock::mock_templates();
+    Ok(Html(TemplateListPartial { templates }.render()?))
+}
+
+/// Template detail partial for a single template (HTMX)
+pub async fn template_detail_partial(
+    State(_state): State<Arc<AppState>>,
+    Path(template_id): Path<String>,
+) -> Result<Html<String>, UiError> {
+    let templates = mock::mock_templates();
+    let template = templates
+        .into_iter()
+        .find(|t| t.id == template_id)
+        .ok_or_else(|| UiError::NotFound(format!("Template '{}' not found", template_id)))?;
+    Ok(Html(TemplateDetailPartial { template }.render()?))
 }
 
 /// Toast notification (HTMX OOB)
@@ -536,24 +630,108 @@ fn generate_mock_node_statuses(
     statuses
 }
 
-/// Generate a simple DAG SVG preview
-fn generate_dag_svg() -> String {
-    let svg = r##"<svg viewBox="0 0 200 100" class="w-full h-full">
-  <defs>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
-      <path d="M0,0 L0,6 L9,3 z" fill="#6b7280"/>
-    </marker>
-  </defs>
-  <circle cx="30" cy="50" r="12" fill="#10b981" stroke="#047857" stroke-width="2"/>
-  <circle cx="100" cy="30" r="12" fill="#3b82f6" stroke="#1d4ed8" stroke-width="2"/>
-  <circle cx="100" cy="70" r="12" fill="#3b82f6" stroke="#1d4ed8" stroke-width="2"/>
-  <circle cx="170" cy="50" r="12" fill="#ef4444" stroke="#b91c1c" stroke-width="2"/>
-  <line x1="42" y1="45" x2="85" y2="32" stroke="#6b7280" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="42" y1="55" x2="85" y2="68" stroke="#6b7280" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="115" y1="32" x2="155" y2="47" stroke="#6b7280" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="115" y1="68" x2="155" y2="53" stroke="#6b7280" stroke-width="2" marker-end="url(#arrow)"/>
-</svg>"##;
-    svg.to_string()
+#[cfg(test)]
+mod node_validate_tests {
+    use crate::validation::{html_escape, validate_node_config};
+
+    #[test]
+    fn test_validate_llm_node_missing_required_fields() {
+        let errors = validate_node_config("LLM", "{}");
+        assert!(
+            errors.iter().any(|e| e.contains("Model")),
+            "Should require model"
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("Prompt")),
+            "Should require prompt_template"
+        );
+    }
+
+    #[test]
+    fn test_validate_llm_node_valid() {
+        let config = r#"{"model": "gpt-4", "prompt_template": "Hello {{input}}"}"#;
+        let errors = validate_node_config("LLM", config);
+        assert!(
+            errors.is_empty(),
+            "Valid LLM config should have no errors: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_validate_llm_node_bad_temperature() {
+        let config = r#"{"model": "gpt-4", "prompt_template": "Hi", "temperature": 3.5}"#;
+        let errors = validate_node_config("LLM", config);
+        assert!(errors.iter().any(|e| e.contains("Temperature")));
+    }
+
+    #[test]
+    fn test_validate_loop_node_zero_iterations() {
+        let config = r#"{"max_iterations": 0}"#;
+        let errors = validate_node_config("Loop", config);
+        assert!(errors.iter().any(|e| e.contains("greater than 0")));
+    }
+
+    #[test]
+    fn test_validate_start_node_no_required_fields() {
+        let errors = validate_node_config("Start", "{}");
+        assert!(
+            errors.is_empty(),
+            "Start nodes should need no required fields"
+        );
+    }
+
+    #[test]
+    fn test_validate_invalid_json() {
+        let errors = validate_node_config("LLM", "not json at all {{{");
+        assert!(!errors.is_empty(), "Invalid JSON should produce an error");
+    }
+
+    #[test]
+    fn test_html_escape_xss() {
+        // Verify single-quote escaping is present (&#x27; form).
+        let result = html_escape("<script>alert('xss')</script>");
+        assert_eq!(
+            result,
+            "&lt;script&gt;alert(&#x27;xss&#x27;)&lt;/script&gt;"
+        );
+    }
+}
+
+#[cfg(test)]
+mod mock_templates_tests {
+    use crate::mock;
+
+    #[test]
+    fn test_mock_templates_returns_at_least_three() {
+        let templates = mock::mock_templates();
+        assert!(
+            templates.len() >= 3,
+            "Expected at least 3 templates, got {}",
+            templates.len()
+        );
+    }
+
+    #[test]
+    fn test_mock_templates_all_have_non_empty_id_name_description() {
+        for tmpl in mock::mock_templates() {
+            assert!(!tmpl.id.is_empty(), "Template id must not be empty");
+            assert!(!tmpl.name.is_empty(), "Template name must not be empty");
+            assert!(
+                !tmpl.description.is_empty(),
+                "Template description must not be empty"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mock_templates_ids_are_unique() {
+        let templates = mock::mock_templates();
+        let mut seen = std::collections::HashSet::new();
+        for tmpl in &templates {
+            assert!(seen.insert(&tmpl.id), "Duplicate template id: {}", tmpl.id);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -561,12 +739,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_generate_dag_svg() {
-        let svg = generate_dag_svg();
+    fn test_workflow_to_svg_via_module() {
+        let nodes = vec![
+            crate::svg::SvgNode {
+                id: "s".into(),
+                label: "Start".into(),
+                node_type: "start".into(),
+                x: 0.0,
+                y: 0.0,
+            },
+            crate::svg::SvgNode {
+                id: "e".into(),
+                label: "End".into(),
+                node_type: "end".into(),
+                x: 0.0,
+                y: 0.0,
+            },
+        ];
+        let edges = vec![crate::svg::SvgEdge {
+            from_id: "s".into(),
+            to_id: "e".into(),
+        }];
+        let svg = crate::svg::workflow_to_svg(&nodes, &edges, 300, 120);
         assert!(svg.contains("<svg"));
         assert!(svg.contains("</svg>"));
-        assert!(svg.contains("circle"));
-        assert!(svg.contains("line"));
+        assert!(svg.contains("rect"));
+        assert!(svg.contains("path"));
     }
 
     #[test]

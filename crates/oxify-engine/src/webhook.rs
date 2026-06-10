@@ -87,7 +87,7 @@ impl WebhookConfig {
 
     /// Verify HMAC signature
     pub fn verify_signature(&self, payload: &[u8], signature: &str) -> bool {
-        use hmac::{Hmac, Mac};
+        use hmac::{digest::KeyInit, Hmac, Mac};
         use sha2::Sha256;
 
         if let Some(secret) = &self.secret {

@@ -21,7 +21,7 @@ chrono = { workspace = true }
 anyhow = { workspace = true }
 
 # Authentication
-jsonwebtoken = { version = "10.3", features = ["rust_crypto"] }
+jsonwebtoken = { version = "10.4", features = ["rust_crypto"] }
 oauth2 = "5.0"
 reqwest = { workspace = true }
 
@@ -45,10 +45,10 @@ uuid = { workspace = true }
 percent-encoding = "2.3"
 
 # SHA256 for PKCE
-sha2 = "0.10"
+sha2 = "0.11"
 
 # SAML 2.0 support (optional)
-quick-xml = { version = "0.39", features = ["serialize"], optional = true }
+quick-xml = { version = "0.40", features = ["serialize"], optional = true }
 oxiarc-deflate = { workspace = true, optional = true }
 url = { version = "2.5", optional = true }
 

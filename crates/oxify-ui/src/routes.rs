@@ -1,6 +1,7 @@
 //! Route definitions for the UI
 
 use axum::{
+    http::StatusCode,
     middleware,
     routing::{delete, get, post, put},
     Router,
@@ -9,6 +10,14 @@ use std::sync::Arc;
 
 use crate::handlers;
 use crate::state::AppState;
+
+/// Health check routes for Kubernetes liveness/readiness probes
+pub fn health_routes() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/health", get(|| async { StatusCode::OK }))
+        .route("/readyz", get(|| async { StatusCode::OK }))
+        .route("/livez", get(|| async { StatusCode::OK }))
+}
 
 /// UI page routes (HTML responses)
 pub fn ui_routes() -> Router<Arc<AppState>> {
@@ -32,10 +41,14 @@ pub fn ui_routes() -> Router<Arc<AppState>> {
             get(handlers::pages::execution_compare),
         )
         .route("/executions/{id}", get(handlers::pages::execution_detail))
+        // Templates gallery
+        .route("/templates", get(handlers::pages::templates_gallery))
         // Search
         .route("/search", get(handlers::pages::search))
         // Settings
         .route("/settings", get(handlers::pages::settings))
+        // Custom 404 fallback
+        .fallback(handlers::pages::handler_404)
 }
 
 /// HTMX routes (HTML partial responses)
@@ -90,6 +103,15 @@ pub fn htmx_routes() -> Router<Arc<AppState>> {
             get(handlers::htmx::node_form),
         )
         .route("/htmx/nodes/validate", post(handlers::htmx::node_validate))
+        // Template gallery endpoints
+        .route(
+            "/htmx/templates",
+            get(handlers::htmx::template_list_partial),
+        )
+        .route(
+            "/htmx/templates/{id}",
+            get(handlers::htmx::template_detail_partial),
+        )
         // Toast notifications
         .route("/htmx/toast", get(handlers::htmx::toast))
 }
@@ -97,6 +119,15 @@ pub fn htmx_routes() -> Router<Arc<AppState>> {
 /// JSON API routes (for frontend AJAX/fetch requests)
 pub fn json_api_routes() -> Router<Arc<AppState>> {
     Router::new()
+        // Import/export endpoints
+        .route(
+            "/api/workflows/export",
+            get(handlers::export::export_workflows),
+        )
+        .route(
+            "/api/workflows/import",
+            post(handlers::export::import_workflows),
+        )
         // Workflow endpoints
         .route(
             "/api/v1/workflows",

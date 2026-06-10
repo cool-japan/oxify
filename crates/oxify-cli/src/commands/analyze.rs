@@ -101,7 +101,17 @@ pub async fn handle_analyze_batching_command(
                     oxify_model::NodeKind::Loop(_) => "Loop node",
                     oxify_model::NodeKind::TryCatch(_) => "Error handler",
                     oxify_model::NodeKind::SubWorkflow(_) => "Sub-workflow",
-                    _ => "Insufficient similar nodes",
+                    oxify_model::NodeKind::Parallel(_) => "Parallel execution",
+                    oxify_model::NodeKind::Approval(_) => "Human approval gate",
+                    oxify_model::NodeKind::Form(_) => "Human form submission",
+                    oxify_model::NodeKind::Vision(_) => "Vision processing",
+                    oxify_model::NodeKind::Custom(_) => "Plugin dispatch",
+                    oxify_model::NodeKind::LLM(_)
+                    | oxify_model::NodeKind::Retriever(_)
+                    | oxify_model::NodeKind::Code(_)
+                    | oxify_model::NodeKind::IfElse(_)
+                    | oxify_model::NodeKind::Tool(_)
+                    | oxify_model::NodeKind::Switch(_) => "Insufficient similar nodes",
                 };
                 println!("  - {} ({}) - {}", node.name, node_id, reason);
             }
@@ -220,6 +230,7 @@ pub async fn handle_analyze_structure_command(workflow_file: String) -> Result<(
             oxify_model::NodeKind::Approval(_) => "Approval",
             oxify_model::NodeKind::Form(_) => "Form",
             oxify_model::NodeKind::Vision(_) => "Vision",
+            oxify_model::NodeKind::Custom(_) => "Custom",
         };
         *node_types.entry(type_name).or_insert(0) += 1;
     }

@@ -3,7 +3,8 @@
 use askama::Template;
 use axum::{
     extract::{Path, Query, State},
-    response::Html,
+    http::StatusCode,
+    response::{Html, IntoResponse},
 };
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -15,9 +16,43 @@ use crate::mock;
 use crate::state::AppState;
 use crate::templates::{
     DashboardTemplate, ExecutionCompareData, ExecutionCompareTemplate, ExecutionDetailTemplate,
-    ExecutionListTemplate, NodeComparisonRow, NodeResultData, SettingsTemplate,
-    WorkflowDetailTemplate, WorkflowEditTemplate, WorkflowListTemplate, WorkflowNewTemplate,
+    ExecutionListTemplate, InternalErrorPage, NodeComparisonRow, NodeResultData, NotFoundPage,
+    SettingsTemplate, TemplatesPageTemplate, WorkflowDetailTemplate, WorkflowEditTemplate,
+    WorkflowListTemplate, WorkflowNewTemplate,
 };
+
+/// Wrapper to render an Askama template as HTML with a given status code.
+struct HtmlTemplate<T>(T);
+
+impl<T: askama::Template> IntoResponse for HtmlTemplate<T> {
+    fn into_response(self) -> axum::response::Response {
+        match self.0.render() {
+            Ok(html) => Html(html).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Template error: {e}"),
+            )
+                .into_response(),
+        }
+    }
+}
+
+/// Custom 404 handler
+pub async fn handler_404() -> impl IntoResponse {
+    (StatusCode::NOT_FOUND, HtmlTemplate(NotFoundPage))
+}
+
+/// Custom 500 handler — `request_path` is passed explicitly by callers.
+pub async fn handler_500(request_path: String) -> impl IntoResponse {
+    let error_id = uuid::Uuid::new_v4().to_string();
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        HtmlTemplate(InternalErrorPage {
+            error_id,
+            request_path,
+        }),
+    )
+}
 
 /// Dashboard home page
 pub async fn dashboard(State(state): State<Arc<AppState>>) -> Result<Html<String>, UiError> {
@@ -227,6 +262,18 @@ pub async fn settings(State(state): State<Arc<AppState>>) -> Result<Html<String>
         title: "Settings".to_string(),
         dark_mode: false, // Would be loaded from user preferences
         api_url: state.api_base_url.clone(),
+    };
+
+    Ok(Html(template.render()?))
+}
+
+/// Template gallery page
+pub async fn templates_gallery(
+    State(_state): State<Arc<AppState>>,
+) -> Result<Html<String>, UiError> {
+    let template = TemplatesPageTemplate {
+        title: "Templates".to_string(),
+        templates: mock::mock_templates(),
     };
 
     Ok(Html(template.render()?))

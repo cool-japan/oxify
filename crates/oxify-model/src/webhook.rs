@@ -301,7 +301,7 @@ pub fn generate_webhook_secret() -> String {
 
 /// Helper to verify HMAC signature
 pub fn verify_webhook_signature(secret: &str, payload: &[u8], signature: &str) -> bool {
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     use sha2::Sha256;
 
     type HmacSha256 = Hmac<Sha256>;
@@ -320,7 +320,7 @@ pub fn verify_webhook_signature(secret: &str, payload: &[u8], signature: &str) -
 
 /// Helper to create HMAC signature for testing
 pub fn create_webhook_signature(secret: &str, payload: &[u8]) -> String {
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     use sha2::Sha256;
 
     type HmacSha256 = Hmac<Sha256>;

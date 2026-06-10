@@ -239,7 +239,18 @@ impl VariableOptimizer {
                     }
                 }
             }
-            _ => {}
+            // Custom plugin nodes are treated as pass-through — plugin config is opaque
+            NodeKind::Custom(_) => {}
+            NodeKind::Start
+            | NodeKind::End
+            | NodeKind::Code(_)
+            | NodeKind::Tool(_)
+            | NodeKind::TryCatch(_)
+            | NodeKind::SubWorkflow(_)
+            | NodeKind::Parallel(_)
+            | NodeKind::Approval(_)
+            | NodeKind::Form(_)
+            | NodeKind::Vision(_) => {}
         }
 
         refs

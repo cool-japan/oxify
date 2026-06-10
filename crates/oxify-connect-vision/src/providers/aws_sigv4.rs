@@ -14,7 +14,7 @@
 //! 5. `signature = hex(HMAC(signing_key, string_to_sign))`
 //! 6. `Authorization = "AWS4-HMAC-SHA256 Credential={ak}/{scope}, SignedHeaders={headers}, Signature={signature}"`
 
-use hmac::{Hmac, Mac};
+use hmac::{digest::KeyInit, Hmac, Mac};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 

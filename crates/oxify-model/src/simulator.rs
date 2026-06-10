@@ -379,7 +379,24 @@ impl WorkflowSimulator {
                 ));
                 self.execute_next_nodes(context, workflow, node_id)?;
             }
-            _ => {
+            NodeKind::Custom(ref cfg) => {
+                // Simulated plugin dispatch — warn and continue
+                context.warnings.push(format!(
+                    "Custom node '{}' (plugin: '{}') simulated without real plugin dispatch",
+                    node.name, cfg.plugin_id
+                ));
+                self.execute_next_nodes(context, workflow, node_id)?;
+            }
+            NodeKind::LLM(_)
+            | NodeKind::Retriever(_)
+            | NodeKind::Code(_)
+            | NodeKind::Tool(_)
+            | NodeKind::TryCatch(_)
+            | NodeKind::SubWorkflow(_)
+            | NodeKind::Parallel(_)
+            | NodeKind::Approval(_)
+            | NodeKind::Form(_)
+            | NodeKind::Vision(_) => {
                 // For other nodes, just continue to next
                 self.execute_next_nodes(context, workflow, node_id)?;
             }
@@ -410,7 +427,18 @@ impl WorkflowSimulator {
                 Value::String("Simulated document 2".to_string()),
             ]),
             NodeKind::Tool(_) => Value::String("Simulated tool result".to_string()),
-            _ => Value::Null,
+            NodeKind::Custom(cfg) => {
+                Value::String(format!("Simulated plugin execution: {}", cfg.plugin_id))
+            }
+            NodeKind::IfElse(_)
+            | NodeKind::Switch(_)
+            | NodeKind::Loop(_)
+            | NodeKind::TryCatch(_)
+            | NodeKind::SubWorkflow(_)
+            | NodeKind::Parallel(_)
+            | NodeKind::Approval(_)
+            | NodeKind::Form(_)
+            | NodeKind::Vision(_) => Value::Null,
         };
 
         Ok(output)

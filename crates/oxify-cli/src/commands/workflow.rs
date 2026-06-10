@@ -435,6 +435,7 @@ async fn show_workflow_info(file: &str) -> Result<()> {
             oxify_model::NodeKind::Approval(_) => "Approval",
             oxify_model::NodeKind::Form(_) => "Form",
             oxify_model::NodeKind::Vision(_) => "Vision",
+            oxify_model::NodeKind::Custom(_) => "Custom",
         };
         *node_types.entry(type_name).or_insert(0) += 1;
     }
@@ -661,6 +662,7 @@ fn get_node_type_name(kind: &oxify_model::NodeKind) -> &str {
         oxify_model::NodeKind::Approval(_) => "Approval",
         oxify_model::NodeKind::Form(_) => "Form",
         oxify_model::NodeKind::Vision(_) => "Vision",
+        oxify_model::NodeKind::Custom(_) => "Custom",
     }
 }
 

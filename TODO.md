@@ -1,5 +1,17 @@
 # OxiFY - Development TODO
 
+## v0.2.9 Additions (2026-06-10)
+1. **oxify-engine: lib.rs split** — 3120-line monolith split into `lib.rs` (1598), `executor.rs` (525), `node_executor.rs` (1174); all public APIs preserved via re-exports; 315 tests pass; zero warnings
+2. **Event sourcing** (`oxify-engine/src/event_store.rs`, 540 lines) — `EventStore` async trait, `InMemoryEventStore` (AtomicU64 seq), `FileEventStore` (JSONL append + replay), `attach_to_bus()` mirroring nats_bridge pattern; `EventRecorder` shutdown handle; 6 tests using `temp_dir()`; `check_triggers` stub replaced with real "workflow.trigger.fired" pub/sub implementation
+3. **Plugin system wired** (`NodeKind::Custom(CustomConfig)`) — `CustomConfig { plugin_id, plugin_version, config }` added to oxify-model; 25 files across 3 crates updated (oxify-model ×13, oxify-engine ×5, oxify-cli ×4 — all explicit arms, no wildcards); `Engine` gets `plugin_registry: Arc<PluginRegistry>`; `EngineBuilder::with_plugin_registry()`; executor dispatch in `node_executor.rs`; purple `#8B5CF6` visualization; 3 integration tests
+4. **LRU flaky-test fixes** (`oxify-storage/cache.rs`, `oxify-vector/embeddings.rs`) — both `evict_lru`/`evict_oldest` methods changed from `min_by_key(timestamp)` to `min_by_key(seq)` using monotonic `u64` counters; `true LRU` access-bump in `cache.rs`; `Arc<AtomicU64>` in `embeddings.rs` (preserves `Clone`); deterministic eviction tests + 1000-iteration stress loop confirmed non-flaky over 20 consecutive runs
+5. **oxify-ui template gallery + real node validation** — `/templates` page + `/htmx/templates` + `/htmx/templates/{id}` endpoints; 5 built-in templates (LLM Pipeline, RAG Pipeline, Data Extraction, Webhook Triggered, Vision OCR) with parameter tables; `node_validate` htmx handler replaced with real `validate_node_config()` (covers 14 node types, temperature bounds, loop iteration limits, XSS-safe HTML error output); `src/validation.rs` extracted; 61 tests (28 unit + 7 handler + 3 mock + 18 integration)
+
+## v0.2.8 Additions (2026-06-10)
+1. **GitHub API extended tools** (`oxify-mcp`, feature `github`) — 7 new tools added to `GitHubServer` (total now 15): `get_issue`, `comment_on_issue`, `close_issue`, `get_pr`, `merge_pr`, `list_commits`, `get_commit`; octocrab 0.53 API; 13 new tests (106 total for crate); file: `servers/github.rs` now 1308 lines
+2. **Docker/k8s/Helm/CI deployment** — 20 production-quality artifacts: `Dockerfile` (multi-stage, port 3000, non-root user, static file copy), `docker-compose.yml` (oxify-ui + postgres + redis + qdrant), `k8s/` (namespace, configmap, secret, deployment, service, ingress, hpa, pvc), `helm/` (Chart.yaml, values.yaml, `_helpers.tpl`, deployment/service/ingress/hpa/configmap/secret templates), `.github/workflows/ci.yml` (test + feature-tests + security audit + docker build/push jobs)
+3. **oxify-ui completion** — Error pages (404, 500 templates + Rust handlers + `.fallback()`), dark mode (Tailwind dark: variants across all templates + localStorage JS toggle + FOUC prevention + `aria-pressed`), HTMX infinite scroll pagination for workflow list (intersection observer sentinel), workflow import (multipart JSON/YAML) + export (JSON/YAML download), SVG workflow preview generator (`src/svg.rs` — Kahn's algorithm topological layout + cubic Bezier edges, 365 lines, 5 tests), PWA manifest.json, `/health`+`/readyz`+`/livez` k8s probe endpoints, accessibility (ARIA roles, live regions, `aria-busy` HTMX hooks)
+
 ## v0.2.7 Additions (2026-05-31)
 1. **GitHub Actions MCP server** (`oxify-mcp`, feature `github-actions`) — `GitHubActionsServer`; 8 tools (list/get/trigger/cancel/rerun workflows and runs, list artifacts); reqwest-based GitHub REST API; `from_env()` reads `GITHUB_TOKEN`; 13 new tests (99 total in crate)
 2. **Local filesystem object store** (`oxify-connect-storage`, feature `local`) — `LocalFsProvider` backed by `object_store::local::LocalFileSystem::new_with_prefix`; built-in sandboxing; bucket-as-subdirectory layout; `from_env()` reads `LOCAL_STORE_ROOT`; 11 new tests (24 total in crate)
@@ -126,7 +138,7 @@ Defined DAGs (code-based) can be executed in parallel with vector search support
   - [ ] Search and filter (hx-trigger="keyup changed delay:300ms")
   - [ ] Sort by various fields (hx-get with query params)
   - [ ] Bulk operations (HTMX multi-select + hx-delete)
-  - [ ] Workflow templates gallery
+  - [x] Workflow templates gallery ✅ NEW (5 built-in templates, parameter detail view, "Use Template" button prefills new-workflow form)
   - [ ] Import/export workflows (file upload + download)
 
 #### Execution Monitoring Dashboard
@@ -149,9 +161,9 @@ Defined DAGs (code-based) can be executed in parallel with vector search support
   - [ ] Preview/test node in isolation
 
 #### Common Features
-- [ ] Dark mode support (Tailwind dark: classes + localStorage)
+- [x] Dark mode support (Tailwind dark: classes + localStorage) ✅ NEW (all templates updated with dark: variants; JS toggle in base.html with FOUC prevention; `aria-pressed` state)
 - [ ] Responsive design (Tailwind breakpoints)
-- [ ] Accessibility (semantic HTML, ARIA attributes)
+- [x] Accessibility (semantic HTML, ARIA attributes) ✅ NEW (`role="main"`, `role="navigation"`, `aria-live="polite"`, `aria-busy` on HTMX regions, `aria-label` on icon-only buttons, `aria-current="page"`, `aria-hidden` on decorative SVGs)
 - [ ] Multi-language support (Askama + fluent-rs)
 - [ ] User onboarding tour (Alpine.js component)
 - [ ] Keyboard-driven workflow (Alpine.js keybindings)
@@ -372,7 +384,7 @@ Defined DAGs (code-based) can be executed in parallel with vector search support
 
 - [ ] **Developer Tools:**
   - [x] GitHub Actions integration ✅ NEW (`oxify-mcp` GitHubActionsServer, feature `github-actions` — 8 tools: list_workflows/get_workflow/list_runs/get_run/trigger_workflow/cancel_run/rerun_failed_jobs/list_artifacts; `Authorization: Bearer` header; query-param filtering for runs (branch, status); `from_env()` reads `GITHUB_TOKEN`/`GITHUB_DEFAULT_OWNER`/`GITHUB_DEFAULT_REPO`)
-  - [ ] GitHub API (issues, PRs, commits)
+  - [x] GitHub API (issues, PRs, commits) ✅ NEW (`oxify-mcp` GitHubServer extended to 15 tools — `get_issue`, `comment_on_issue`, `close_issue`, `get_pr`, `merge_pr`, `list_commits`, `get_commit`; octocrab 0.53 API)
   - [x] GitLab API ✅ NEW (`oxify-mcp` GitLabServer, feature `gitlab` — 8 tools: list/get project, list/create issues, list/create MRs, get file, search)
   - [x] Jira integration ✅ NEW (`oxify-mcp` JiraServer, feature `jira` — 8 tools: list/get project, search/get/create issues, add comment, list/transition)
   - [x] Linear integration ✅ NEW (`oxify-mcp` LinearServer, feature `linear` — 8 tools: list_teams/list_issues/get_issue/create_issue/update_issue/list_projects/create_comment/search_issues; GraphQL API with raw API-key auth)
@@ -406,7 +418,7 @@ Defined DAGs (code-based) can be executed in parallel with vector search support
 
 ### Extensibility
 - [ ] **Plugin System:**
-  - [ ] Custom node type registration
+  - [x] Custom node type registration ✅ NEW (`NodeKind::Custom(CustomConfig)`, `PluginRegistry`, `Engine::with_plugin_registry()`, executor dispatch)
   - [ ] Plugin manifest format (TOML/YAML)
   - [ ] Hot-reload plugins in development
   - [ ] Plugin marketplace/registry
@@ -467,10 +479,10 @@ Defined DAGs (code-based) can be executed in parallel with vector search support
 
 ## DevOps & Deployment
 
-- [ ] Create Docker images
-- [ ] Create Kubernetes manifests
-- [ ] Add Helm charts
-- [ ] Set up CI/CD pipeline
+- [x] Create Docker images ✅ NEW (multi-stage Dockerfile, port 3000, non-root `oxify` user)
+- [x] Create Kubernetes manifests ✅ NEW (`k8s/` — namespace, configmap, secret, deployment with HPA, service, ingress, pvc)
+- [x] Add Helm charts ✅ NEW (`helm/` — Chart.yaml, values.yaml, full template suite with `_helpers.tpl`)
+- [x] Set up CI/CD pipeline ✅ NEW (`.github/workflows/ci.yml` — test, feature-tests, security audit, multi-arch docker build/push to ghcr.io)
 - [ ] Add health checks and monitoring
 - [ ] Create deployment documentation
 

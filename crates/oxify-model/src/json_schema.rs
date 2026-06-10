@@ -360,6 +360,8 @@ impl WorkflowSchemaGenerator {
             json!("Parallel"),
             json!("Approval"),
             json!("Form"),
+            json!("Vision"),
+            json!("Custom"),
         ])
     }
 
@@ -420,6 +422,14 @@ impl WorkflowSchemaGenerator {
         let mut condition = JsonSchema::object();
         condition.add_property("expression".to_string(), JsonSchema::string());
         schema.add_definition("Condition".to_string(), condition);
+
+        // CustomConfig: plugin dispatch node
+        let mut custom_config = JsonSchema::object();
+        custom_config.add_property("plugin_id".to_string(), JsonSchema::string());
+        custom_config.add_required("plugin_id".to_string());
+        custom_config.add_property("plugin_version".to_string(), JsonSchema::string());
+        custom_config.add_property("config".to_string(), JsonSchema::object());
+        schema.add_definition("CustomConfig".to_string(), custom_config);
     }
 
     /// Generate schema for a specific node type
@@ -430,7 +440,18 @@ impl WorkflowSchemaGenerator {
             }
             NodeKind::LLM(_) => JsonSchema::reference("#/$defs/LlmConfig"),
             NodeKind::Code(_) => JsonSchema::reference("#/$defs/ScriptConfig"),
-            _ => {
+            NodeKind::Custom(_) => JsonSchema::reference("#/$defs/CustomConfig"),
+            NodeKind::Retriever(_)
+            | NodeKind::IfElse(_)
+            | NodeKind::Tool(_)
+            | NodeKind::Loop(_)
+            | NodeKind::TryCatch(_)
+            | NodeKind::SubWorkflow(_)
+            | NodeKind::Switch(_)
+            | NodeKind::Parallel(_)
+            | NodeKind::Approval(_)
+            | NodeKind::Form(_)
+            | NodeKind::Vision(_) => {
                 JsonSchema::object().with_description(format!("{:?} node configuration", node_kind))
             }
         }

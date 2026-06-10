@@ -242,8 +242,8 @@ impl McpServer for GitHubServer {
                             "number": pr.number,
                             "title": pr.title,
                             "state": pr.state.as_ref().map(|s| format!("{:?}", s).to_lowercase()),
-                            "head_ref": pr.head.ref_field,
-                            "base_ref": pr.base.ref_field,
+                            "head_ref": pr.head.as_deref().map(|h| h.ref_field.as_str()),
+                            "base_ref": pr.base.as_deref().map(|b| b.ref_field.as_str()),
                             "html_url": pr.html_url.as_ref().map(|u| u.to_string()),
                         })
                     })
@@ -372,6 +372,254 @@ impl McpServer for GitHubServer {
                     .collect();
 
                 Ok(json!({ "results": results }))
+            }
+
+            // ── 9. get_issue ─────────────────────────────────────────────────
+            "get_issue" => {
+                let owner = self.cfg.resolve_owner(&arguments)?;
+                let repo = arguments["repo"]
+                    .as_str()
+                    .ok_or_else(|| McpError::InvalidRequest("Missing 'repo'".to_string()))?;
+                let issue_number = arguments["issue_number"].as_u64().ok_or_else(|| {
+                    McpError::InvalidRequest("Missing 'issue_number'".to_string())
+                })?;
+
+                let issue = self
+                    .client
+                    .issues(owner, repo)
+                    .get(issue_number)
+                    .await
+                    .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
+
+                let labels: Vec<String> = issue.labels.iter().map(|l| l.name.clone()).collect();
+                Ok(json!({
+                    "number": issue.number,
+                    "title": issue.title,
+                    "state": format!("{:?}", issue.state).to_lowercase(),
+                    "body": issue.body,
+                    "html_url": issue.html_url.to_string(),
+                    "user": issue.user.login,
+                    "labels": labels,
+                    "created_at": issue.created_at.to_rfc3339(),
+                    "updated_at": issue.updated_at.to_rfc3339(),
+                    "closed_at": issue.closed_at.map(|t| t.to_rfc3339()),
+                }))
+            }
+
+            // ── 10. comment_on_issue ─────────────────────────────────────────
+            "comment_on_issue" => {
+                let owner = self.cfg.resolve_owner(&arguments)?;
+                let repo = arguments["repo"]
+                    .as_str()
+                    .ok_or_else(|| McpError::InvalidRequest("Missing 'repo'".to_string()))?;
+                let issue_number = arguments["issue_number"].as_u64().ok_or_else(|| {
+                    McpError::InvalidRequest("Missing 'issue_number'".to_string())
+                })?;
+                let body = arguments["body"]
+                    .as_str()
+                    .ok_or_else(|| McpError::InvalidRequest("Missing 'body'".to_string()))?;
+
+                let comment = self
+                    .client
+                    .issues(owner, repo)
+                    .create_comment(issue_number, body)
+                    .await
+                    .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
+
+                Ok(json!({
+                    "id": comment.id,
+                    "html_url": comment.html_url.to_string(),
+                    "body": comment.body,
+                    "user": comment.user.login,
+                    "created_at": comment.created_at.to_rfc3339(),
+                }))
+            }
+
+            // ── 11. close_issue ──────────────────────────────────────────────
+            "close_issue" => {
+                let owner = self.cfg.resolve_owner(&arguments)?;
+                let repo = arguments["repo"]
+                    .as_str()
+                    .ok_or_else(|| McpError::InvalidRequest("Missing 'repo'".to_string()))?;
+                let issue_number = arguments["issue_number"].as_u64().ok_or_else(|| {
+                    McpError::InvalidRequest("Missing 'issue_number'".to_string())
+                })?;
+                let state_str = arguments["state"].as_str().unwrap_or("closed");
+
+                let issue_state = parse_issue_state(state_str)?;
+
+                let issue = self
+                    .client
+                    .issues(owner, repo)
+                    .update(issue_number)
+                    .state(issue_state)
+                    .send()
+                    .await
+                    .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
+
+                let labels: Vec<String> = issue.labels.iter().map(|l| l.name.clone()).collect();
+                Ok(json!({
+                    "number": issue.number,
+                    "title": issue.title,
+                    "state": format!("{:?}", issue.state).to_lowercase(),
+                    "html_url": issue.html_url.to_string(),
+                    "labels": labels,
+                }))
+            }
+
+            // ── 12. get_pr ───────────────────────────────────────────────────
+            "get_pr" => {
+                let owner = self.cfg.resolve_owner(&arguments)?;
+                let repo = arguments["repo"]
+                    .as_str()
+                    .ok_or_else(|| McpError::InvalidRequest("Missing 'repo'".to_string()))?;
+                let pr_number = arguments["pr_number"]
+                    .as_u64()
+                    .ok_or_else(|| McpError::InvalidRequest("Missing 'pr_number'".to_string()))?;
+
+                let pr = self
+                    .client
+                    .pulls(owner, repo)
+                    .get(pr_number)
+                    .await
+                    .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
+
+                Ok(json!({
+                    "number": pr.number,
+                    "title": pr.title,
+                    "state": pr.state.as_ref().map(|s| format!("{:?}", s).to_lowercase()),
+                    "body": pr.body,
+                    "head_ref": pr.head.as_deref().map(|h| h.ref_field.as_str()),
+                    "base_ref": pr.base.as_deref().map(|b| b.ref_field.as_str()),
+                    "html_url": pr.html_url.as_ref().map(|u| u.to_string()),
+                    "merged": pr.merged,
+                    "merged_at": pr.merged_at.map(|t| t.to_rfc3339()),
+                    "user": pr.user.as_ref().map(|u| u.login.as_str()),
+                }))
+            }
+
+            // ── 13. merge_pr ─────────────────────────────────────────────────
+            "merge_pr" => {
+                let owner = self.cfg.resolve_owner(&arguments)?;
+                let repo = arguments["repo"]
+                    .as_str()
+                    .ok_or_else(|| McpError::InvalidRequest("Missing 'repo'".to_string()))?;
+                let pr_number = arguments["pr_number"]
+                    .as_u64()
+                    .ok_or_else(|| McpError::InvalidRequest("Missing 'pr_number'".to_string()))?;
+                let merge_method_str = arguments["merge_method"].as_str().unwrap_or("merge");
+                let commit_title_opt: Option<String> =
+                    arguments["commit_title"].as_str().map(|s| s.to_string());
+
+                let merge_method = parse_merge_method(merge_method_str)?;
+
+                let pulls_handler = self.client.pulls(owner, repo);
+                let merge_builder = pulls_handler.merge(pr_number).method(merge_method);
+                let merge_builder = match commit_title_opt {
+                    Some(t) => merge_builder.title(t),
+                    None => merge_builder,
+                };
+
+                let merge_result = merge_builder
+                    .send()
+                    .await
+                    .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
+
+                Ok(json!({
+                    "merged": merge_result.merged,
+                    "sha": merge_result.sha,
+                    "message": merge_result.message,
+                }))
+            }
+
+            // ── 14. list_commits ─────────────────────────────────────────────
+            "list_commits" => {
+                let owner = self.cfg.resolve_owner(&arguments)?;
+                let repo = arguments["repo"]
+                    .as_str()
+                    .ok_or_else(|| McpError::InvalidRequest("Missing 'repo'".to_string()))?;
+                let branch_opt: Option<String> =
+                    arguments["branch"].as_str().map(|s| s.to_string());
+                let per_page_opt: Option<u8> =
+                    arguments["per_page"].as_u64().map(|v| v.min(100) as u8);
+
+                let repo_handler = self.client.repos(owner, repo);
+                let commits_builder = repo_handler.list_commits();
+                let commits_builder = match branch_opt {
+                    Some(branch) => commits_builder.branch(branch),
+                    None => commits_builder,
+                };
+                let commits_builder = match per_page_opt {
+                    Some(pp) => commits_builder.per_page(pp),
+                    None => commits_builder,
+                };
+
+                let page = commits_builder
+                    .send()
+                    .await
+                    .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
+
+                let commits: Vec<Value> = page
+                    .items
+                    .into_iter()
+                    .map(|c| {
+                        json!({
+                            "sha": c.sha,
+                            "message": c.commit.message,
+                            "author": c.commit.author.as_ref().map(|a| a.name.as_str()),
+                            "url": c.html_url,
+                        })
+                    })
+                    .collect();
+
+                Ok(json!({ "commits": commits }))
+            }
+
+            // ── 15. get_commit ───────────────────────────────────────────────
+            "get_commit" => {
+                let owner = self.cfg.resolve_owner(&arguments)?;
+                let repo = arguments["repo"]
+                    .as_str()
+                    .ok_or_else(|| McpError::InvalidRequest("Missing 'repo'".to_string()))?;
+                let sha = arguments["sha"]
+                    .as_str()
+                    .ok_or_else(|| McpError::InvalidRequest("Missing 'sha'".to_string()))?;
+
+                let commit = self
+                    .client
+                    .commits(owner, repo)
+                    .get(sha)
+                    .await
+                    .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
+
+                let files: Vec<Value> = commit
+                    .files
+                    .as_deref()
+                    .unwrap_or(&[])
+                    .iter()
+                    .map(|f| {
+                        json!({
+                            "filename": f.filename,
+                            "status": format!("{:?}", f.status).to_lowercase(),
+                            "additions": f.additions,
+                            "deletions": f.deletions,
+                            "changes": f.changes,
+                        })
+                    })
+                    .collect();
+
+                Ok(json!({
+                    "sha": commit.sha,
+                    "message": commit.commit.message,
+                    "author": commit.commit.author.as_ref().map(|a| a.name.as_str()),
+                    "url": commit.html_url,
+                    "stats": commit.stats.as_ref().map(|s| json!({
+                        "additions": s.additions,
+                        "deletions": s.deletions,
+                        "total": s.total,
+                    })),
+                    "files": files,
+                }))
             }
 
             _ => Err(McpError::ToolNotFound(name.to_string())),
@@ -566,6 +814,184 @@ impl McpServer for GitHubServer {
                     "required": ["query"]
                 }
             }),
+            json!({
+                "name": "get_issue",
+                "description": "Fetch a single issue by number from a GitHub repository",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "owner": {
+                            "type": "string",
+                            "description": "Repository owner"
+                        },
+                        "repo": {
+                            "type": "string",
+                            "description": "Repository name"
+                        },
+                        "issue_number": {
+                            "type": "integer",
+                            "description": "The issue number"
+                        }
+                    },
+                    "required": ["repo", "issue_number"]
+                }
+            }),
+            json!({
+                "name": "comment_on_issue",
+                "description": "Post a comment on a GitHub issue",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "owner": {
+                            "type": "string",
+                            "description": "Repository owner"
+                        },
+                        "repo": {
+                            "type": "string",
+                            "description": "Repository name"
+                        },
+                        "issue_number": {
+                            "type": "integer",
+                            "description": "The issue number to comment on"
+                        },
+                        "body": {
+                            "type": "string",
+                            "description": "The comment text"
+                        }
+                    },
+                    "required": ["repo", "issue_number", "body"]
+                }
+            }),
+            json!({
+                "name": "close_issue",
+                "description": "Close or reopen a GitHub issue",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "owner": {
+                            "type": "string",
+                            "description": "Repository owner"
+                        },
+                        "repo": {
+                            "type": "string",
+                            "description": "Repository name"
+                        },
+                        "issue_number": {
+                            "type": "integer",
+                            "description": "The issue number"
+                        },
+                        "state": {
+                            "type": "string",
+                            "enum": ["closed", "open"],
+                            "description": "Target state: 'closed' to close, 'open' to reopen (default: closed)"
+                        }
+                    },
+                    "required": ["repo", "issue_number"]
+                }
+            }),
+            json!({
+                "name": "get_pr",
+                "description": "Fetch a single pull request by number from a GitHub repository",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "owner": {
+                            "type": "string",
+                            "description": "Repository owner"
+                        },
+                        "repo": {
+                            "type": "string",
+                            "description": "Repository name"
+                        },
+                        "pr_number": {
+                            "type": "integer",
+                            "description": "The pull request number"
+                        }
+                    },
+                    "required": ["repo", "pr_number"]
+                }
+            }),
+            json!({
+                "name": "merge_pr",
+                "description": "Merge a pull request in a GitHub repository",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "owner": {
+                            "type": "string",
+                            "description": "Repository owner"
+                        },
+                        "repo": {
+                            "type": "string",
+                            "description": "Repository name"
+                        },
+                        "pr_number": {
+                            "type": "integer",
+                            "description": "The pull request number to merge"
+                        },
+                        "merge_method": {
+                            "type": "string",
+                            "enum": ["merge", "squash", "rebase"],
+                            "description": "Merge strategy (default: merge)"
+                        },
+                        "commit_title": {
+                            "type": "string",
+                            "description": "Title for the automatic commit message (optional)"
+                        }
+                    },
+                    "required": ["repo", "pr_number"]
+                }
+            }),
+            json!({
+                "name": "list_commits",
+                "description": "List commits in a GitHub repository, optionally filtered by branch",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "owner": {
+                            "type": "string",
+                            "description": "Repository owner"
+                        },
+                        "repo": {
+                            "type": "string",
+                            "description": "Repository name"
+                        },
+                        "branch": {
+                            "type": "string",
+                            "description": "Branch or SHA to start listing commits from (defaults to default branch)"
+                        },
+                        "per_page": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100,
+                            "description": "Number of commits to return per page (default: 30, max: 100)"
+                        }
+                    },
+                    "required": ["repo"]
+                }
+            }),
+            json!({
+                "name": "get_commit",
+                "description": "Fetch a single commit by SHA with full diff stats from a GitHub repository",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "owner": {
+                            "type": "string",
+                            "description": "Repository owner"
+                        },
+                        "repo": {
+                            "type": "string",
+                            "description": "Repository name"
+                        },
+                        "sha": {
+                            "type": "string",
+                            "description": "The commit SHA"
+                        }
+                    },
+                    "required": ["repo", "sha"]
+                }
+            }),
         ])
     }
 }
@@ -580,6 +1006,31 @@ fn parse_state(state: &str) -> Result<octocrab::params::State> {
         "all" => Ok(octocrab::params::State::All),
         other => Err(McpError::InvalidRequest(format!(
             "Invalid state '{}': expected one of open, closed, all",
+            other
+        ))),
+    }
+}
+
+/// Map a state string to `octocrab::models::IssueState`.
+fn parse_issue_state(state: &str) -> Result<octocrab::models::IssueState> {
+    match state {
+        "open" => Ok(octocrab::models::IssueState::Open),
+        "closed" => Ok(octocrab::models::IssueState::Closed),
+        other => Err(McpError::InvalidRequest(format!(
+            "Invalid issue state '{}': expected one of open, closed",
+            other
+        ))),
+    }
+}
+
+/// Map a merge method string to `octocrab::params::pulls::MergeMethod`.
+fn parse_merge_method(method: &str) -> Result<octocrab::params::pulls::MergeMethod> {
+    match method {
+        "merge" => Ok(octocrab::params::pulls::MergeMethod::Merge),
+        "squash" => Ok(octocrab::params::pulls::MergeMethod::Squash),
+        "rebase" => Ok(octocrab::params::pulls::MergeMethod::Rebase),
+        other => Err(McpError::InvalidRequest(format!(
+            "Invalid merge method '{}': expected one of merge, squash, rebase",
             other
         ))),
     }
@@ -611,12 +1062,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_list_tools_returns_eight() {
+    async fn test_list_tools_returns_fifteen() {
         install_crypto_provider();
         let cfg = GitHubConfig::default();
         let server = GitHubServer::new(cfg).unwrap();
         let tools = server.list_tools().await.unwrap();
-        assert_eq!(tools.len(), 8);
+        assert_eq!(tools.len(), 15);
     }
 
     #[tokio::test]
@@ -666,7 +1117,7 @@ mod tests {
         });
         let names: std::collections::HashSet<&str> =
             tools.iter().filter_map(|t| t["name"].as_str()).collect();
-        assert_eq!(names.len(), 8, "all tool names must be unique");
+        assert_eq!(names.len(), 15, "all tool names must be unique");
     }
 
     #[test]
@@ -675,5 +1126,170 @@ mod tests {
         assert!(cfg.token.is_empty());
         assert!(cfg.default_owner.is_none());
         assert_eq!(cfg.timeout_secs, 30);
+    }
+
+    // ── New tool input-validation tests ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_get_issue_missing_repo_errors() {
+        install_crypto_provider();
+        let cfg = GitHubConfig {
+            token: "fake".to_string(),
+            default_owner: Some("octocat".to_string()),
+            ..Default::default()
+        };
+        let server = GitHubServer::new(cfg).unwrap();
+        let result = server
+            .call_tool("get_issue", serde_json::json!({ "issue_number": 1 }))
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_issue_missing_number_errors() {
+        install_crypto_provider();
+        let cfg = GitHubConfig {
+            token: "fake".to_string(),
+            default_owner: Some("octocat".to_string()),
+            ..Default::default()
+        };
+        let server = GitHubServer::new(cfg).unwrap();
+        let result = server
+            .call_tool("get_issue", serde_json::json!({ "repo": "hello-world" }))
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_comment_on_issue_missing_body_errors() {
+        install_crypto_provider();
+        let cfg = GitHubConfig {
+            token: "fake".to_string(),
+            default_owner: Some("octocat".to_string()),
+            ..Default::default()
+        };
+        let server = GitHubServer::new(cfg).unwrap();
+        let result = server
+            .call_tool(
+                "comment_on_issue",
+                serde_json::json!({ "repo": "hello-world", "issue_number": 1 }),
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_close_issue_invalid_state_errors() {
+        install_crypto_provider();
+        let cfg = GitHubConfig {
+            token: "fake".to_string(),
+            default_owner: Some("octocat".to_string()),
+            ..Default::default()
+        };
+        let server = GitHubServer::new(cfg).unwrap();
+        let result = server
+            .call_tool(
+                "close_issue",
+                serde_json::json!({
+                    "repo": "hello-world",
+                    "issue_number": 1,
+                    "state": "all"
+                }),
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_pr_missing_number_errors() {
+        install_crypto_provider();
+        let cfg = GitHubConfig {
+            token: "fake".to_string(),
+            default_owner: Some("octocat".to_string()),
+            ..Default::default()
+        };
+        let server = GitHubServer::new(cfg).unwrap();
+        let result = server
+            .call_tool("get_pr", serde_json::json!({ "repo": "hello-world" }))
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_merge_pr_invalid_method_errors() {
+        install_crypto_provider();
+        let cfg = GitHubConfig {
+            token: "fake".to_string(),
+            default_owner: Some("octocat".to_string()),
+            ..Default::default()
+        };
+        let server = GitHubServer::new(cfg).unwrap();
+        let result = server
+            .call_tool(
+                "merge_pr",
+                serde_json::json!({
+                    "repo": "hello-world",
+                    "pr_number": 1,
+                    "merge_method": "invalid"
+                }),
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_list_commits_missing_repo_errors() {
+        install_crypto_provider();
+        let cfg = GitHubConfig {
+            token: "fake".to_string(),
+            default_owner: Some("octocat".to_string()),
+            ..Default::default()
+        };
+        let server = GitHubServer::new(cfg).unwrap();
+        let result = server
+            .call_tool("list_commits", serde_json::json!({}))
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_commit_missing_sha_errors() {
+        install_crypto_provider();
+        let cfg = GitHubConfig {
+            token: "fake".to_string(),
+            default_owner: Some("octocat".to_string()),
+            ..Default::default()
+        };
+        let server = GitHubServer::new(cfg).unwrap();
+        let result = server
+            .call_tool("get_commit", serde_json::json!({ "repo": "hello-world" }))
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_issue_state_valid() {
+        assert!(parse_issue_state("open").is_ok());
+        assert!(parse_issue_state("closed").is_ok());
+    }
+
+    #[test]
+    fn test_parse_issue_state_invalid() {
+        assert!(parse_issue_state("all").is_err());
+        assert!(parse_issue_state("unknown").is_err());
+        assert!(parse_issue_state("").is_err());
+    }
+
+    #[test]
+    fn test_parse_merge_method_valid() {
+        assert!(parse_merge_method("merge").is_ok());
+        assert!(parse_merge_method("squash").is_ok());
+        assert!(parse_merge_method("rebase").is_ok());
+    }
+
+    #[test]
+    fn test_parse_merge_method_invalid() {
+        assert!(parse_merge_method("fast-forward").is_err());
+        assert!(parse_merge_method("").is_err());
     }
 }

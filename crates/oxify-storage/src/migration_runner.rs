@@ -309,7 +309,7 @@ impl MigrationRunner {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(sql.as_bytes());
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize())
     }
 
     /// Verify migration checksums match recorded values

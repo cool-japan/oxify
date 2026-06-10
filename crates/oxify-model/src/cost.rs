@@ -179,7 +179,18 @@ impl CostEstimator {
                 NodeKind::Retriever(_) => vector_total += node_cost.cost_usd,
                 NodeKind::Code(_) => code_total += node_cost.cost_usd,
                 NodeKind::Tool(_) => tool_total += node_cost.cost_usd,
-                _ => other_total += node_cost.cost_usd,
+                NodeKind::Custom(_) => code_total += node_cost.cost_usd,
+                NodeKind::Start
+                | NodeKind::End
+                | NodeKind::IfElse(_)
+                | NodeKind::Switch(_)
+                | NodeKind::Loop(_)
+                | NodeKind::TryCatch(_)
+                | NodeKind::SubWorkflow(_)
+                | NodeKind::Parallel(_)
+                | NodeKind::Approval(_)
+                | NodeKind::Form(_)
+                | NodeKind::Vision(_) => other_total += node_cost.cost_usd,
             }
 
             // Update token estimates
@@ -275,8 +286,29 @@ impl CostEstimator {
                 });
                 api_cost * expected_executions as f64
             }
-            _ => {
-                // Start, End, IfElse, etc. have no cost
+            NodeKind::Custom(_) => {
+                // Plugin execution cost is unknown — estimate similar to code nodes
+                let compute_cost = 0.0001; // $0.0001 per plugin execution
+                components.push(CostComponent {
+                    name: "plugin_execution".to_string(),
+                    cost_usd: compute_cost,
+                    quantity: 1.0,
+                    unit: "execution".to_string(),
+                });
+                compute_cost * expected_executions as f64
+            }
+            NodeKind::Start
+            | NodeKind::End
+            | NodeKind::IfElse(_)
+            | NodeKind::Switch(_)
+            | NodeKind::Loop(_)
+            | NodeKind::TryCatch(_)
+            | NodeKind::SubWorkflow(_)
+            | NodeKind::Parallel(_)
+            | NodeKind::Approval(_)
+            | NodeKind::Form(_)
+            | NodeKind::Vision(_) => {
+                // No direct API cost
                 0.0
             }
         };
@@ -299,6 +331,7 @@ impl CostEstimator {
                 NodeKind::Approval(_) => "Approval".to_string(),
                 NodeKind::Form(_) => "Form".to_string(),
                 NodeKind::Vision(_) => "Vision".to_string(),
+                NodeKind::Custom(_) => "Custom".to_string(),
             },
             cost_usd,
             expected_executions,

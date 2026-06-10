@@ -148,6 +148,10 @@ pub struct PluginCapabilities {
     /// Whether the plugin is sandboxed (WASM)
     #[serde(default)]
     pub sandboxed: bool,
+    /// Path to the `.wasm` module, relative to the plugin directory.
+    /// Defaults to `<plugin_name>.wasm` if absent.
+    #[serde(default)]
+    pub wasm_module: Option<String>,
     /// Resource requirements
     #[serde(default)]
     pub resource_requirements: ResourceRequirements,
@@ -911,6 +915,76 @@ mod tests {
         assert!(result.is_ok());
 
         manager.stop_hot_reload().await;
+    }
+
+    #[test]
+    fn test_wasm_module_field_default_is_none() {
+        let toml = r#"
+            [plugin]
+            name = "test-wasm"
+            version = "1.0.0"
+
+            [capabilities]
+            node_types = ["custom_node"]
+            sandboxed = true
+        "#;
+        let manifest = PluginManifest::from_toml(toml).unwrap();
+        assert!(
+            manifest.capabilities.wasm_module.is_none(),
+            "wasm_module should default to None when absent"
+        );
+    }
+
+    #[test]
+    fn test_wasm_module_field_parses_when_present() {
+        let toml = r#"
+            [plugin]
+            name = "test-wasm"
+            version = "1.0.0"
+
+            [capabilities]
+            node_types = ["custom_node"]
+            sandboxed = true
+            wasm_module = "custom.wasm"
+        "#;
+        let manifest = PluginManifest::from_toml(toml).unwrap();
+        assert_eq!(
+            manifest.capabilities.wasm_module,
+            Some("custom.wasm".to_string())
+        );
+    }
+
+    #[test]
+    fn test_wasm_module_toml_roundtrip() {
+        let manifest = PluginManifest {
+            plugin: PluginInfo {
+                name: "wasm-roundtrip".to_string(),
+                version: "1.0.0".to_string(),
+                description: None,
+                author: None,
+                license: None,
+                homepage: None,
+                repository: None,
+                keywords: vec![],
+                category: None,
+            },
+            capabilities: PluginCapabilities {
+                node_types: vec!["custom_node".to_string()],
+                sandboxed: true,
+                wasm_module: Some("plugin_core.wasm".to_string()),
+                ..Default::default()
+            },
+            config: Default::default(),
+            dependencies: Default::default(),
+            hooks: Default::default(),
+        };
+
+        let toml_str = manifest.to_toml().unwrap();
+        let parsed = PluginManifest::from_toml(&toml_str).unwrap();
+        assert_eq!(
+            parsed.capabilities.wasm_module,
+            Some("plugin_core.wasm".to_string())
+        );
     }
 
     #[test]

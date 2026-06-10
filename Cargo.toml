@@ -20,6 +20,7 @@ members = [
     "crates/oxify-storage",
     "crates/oxify-ui",
     "crates/oxify-vector",
+    "crates/oxify-celers",
 ]
 exclude = [
     "examples/*",
@@ -36,11 +37,14 @@ license = "Apache-2.0"
 repository = "https://github.com/cool-japan/oxify"
 
 [workspace.dependencies]
+# CeleRS — cross-workspace path dep (not published on crates.io)
+celers = { version = "0.2.0", path = "../celers/crates/celers", default-features = false }
+
 # Core dependencies
-tokio = { version = "1.50.0", features = ["full"] }
+tokio = { version = "1.52.3", features = ["full"] }
 async-trait = "0.1.89"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
+serde_json = "1.0.150"
 serde_yaml = "0.9"
 thiserror = "2.0.18"
 anyhow = "1.0.102"
@@ -48,59 +52,59 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "registry"] }
 
 # Web framework
-axum = { version = "0.8.8", features = ["macros", "ws"] }
+axum = { version = "0.8.9", features = ["macros", "ws"] }
 tower = "0.5.3"
-tower-http = { version = "0.6.8", features = ["cors", "trace"] }
-hyper = { version = "1.8", features = ["full"] }
+tower-http = { version = "0.6.11", features = ["cors", "trace"] }
+hyper = { version = "1.10", features = ["full"] }
 
 # GraphQL
 async-graphql = { version = "7.2", features = ["chrono"] }
 async-graphql-axum = "7.2"
 
 # LLM & Vector DB clients
-reqwest = { version = "0.13.2", features = ["json", "stream", "form", "query"] }
-qdrant-client = "1.17.0"
-sqlx = { version = "0.9.0-alpha.1", features = ["runtime-tokio", "sqlite", "chrono", "uuid"] }
+reqwest = { version = "0.13.4", features = ["json", "stream", "form", "query"] }
+qdrant-client = "1.18.0"
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "sqlite", "chrono", "uuid"] }
 
 # Utilities
-clap = { version = "4.6.0", features = ["derive"] }
-uuid = { version = "1.23.0", features = ["v4", "serde"] }
-chrono = { version = "0.4.44", features = ["serde"] }
+clap = { version = "4.6.1", features = ["derive"] }
+uuid = { version = "1.23.3", features = ["v4", "serde"] }
+chrono = { version = "0.4.45", features = ["serde"] }
 futures = "0.3"
 tokio-stream = "0.1"
 cron = "0.16"
 rand = "0.10"
-rayon = "1.11"
+rayon = "1.12"
 num_cpus = "1.17"
 toml = "1.1"
 dirs = "6.0"
 
 # Code execution
-rhai = { version = "1.24", features = ["sync"] }
+rhai = { version = "1.25", features = ["sync"] }
 wasmer = "7.1"
 
 # OpenTelemetry
-opentelemetry = { version = "0.31", features = ["trace", "metrics"] }
-opentelemetry_sdk = { version = "0.31", features = ["trace", "rt-tokio"] }
-opentelemetry-otlp = { version = "0.31", features = ["trace", "grpc-tonic"] }
-opentelemetry-semantic-conventions = "0.31"
-tracing-opentelemetry = "0.32"
+opentelemetry = { version = "0.32", features = ["trace", "metrics"] }
+opentelemetry_sdk = { version = "0.32", features = ["trace", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.32", features = ["trace", "grpc-tonic"] }
+opentelemetry-semantic-conventions = "0.32"
+tracing-opentelemetry = "0.33"
 
 # Event-driven / messaging
-async-nats = "0.38"
+async-nats = "0.49"
 rdkafka = { version = "0.39", default-features = false, features = ["tokio"] }
-lapin = "4.3.0"
+lapin = "4.10.0"
 
 # GitHub API
-octocrab = "0.49"
+octocrab = "0.53"
 
 # Cryptography (AWS SigV4, etc.)
-hmac = "0.12"
-sha2 = "0.10"
+hmac = "0.13"
+sha2 = "0.11"
 hex = "0.4"
 
 # JWT / auth tokens
-jsonwebtoken = "9.3"
+jsonwebtoken = "10.4"
 
 # Communications
 lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder"] }
@@ -109,16 +113,16 @@ lettre = { version = "0.11", default-features = false, features = ["tokio1-rustl
 mongodb = "3.7.0"
 
 # Object storage
-object_store = { version = "0.11", default-features = false, features = ["aws", "gcp", "azure"] }
-bytes = "1.10"
+object_store = { version = "0.13", default-features = false, features = ["aws", "gcp", "azure"] }
+bytes = "1.11"
 
 # Compression (Pure Rust, OxiARC ecosystem)
 oxiarc-deflate = "0.3.3"
 oxiarc-archive = "0.3.3"
 
 # TUI
-ratatui = "0.29"
-crossterm = "0.28"
+ratatui = "0.30"
+crossterm = "0.29"
 
 # Testing & Benchmarking
 criterion = { version = "0.8", features = ["html_reports"] }

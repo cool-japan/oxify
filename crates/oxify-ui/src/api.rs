@@ -298,6 +298,30 @@ impl ApiClient {
         }
     }
 
+    /// Open the upstream execution SSE stream.
+    ///
+    /// Returns a stream of raw bytes (SSE frames) from the API.
+    /// The caller is responsible for parsing SSE framing from the byte stream.
+    pub async fn stream_execution(
+        &self,
+        id: Uuid,
+    ) -> Result<impl futures::Stream<Item = Result<bytes::Bytes, reqwest::Error>>, ApiError> {
+        let url = format!("{}/api/v1/executions/{}/stream", self.base_url, id);
+        let response = self
+            .client
+            .get(&url)
+            .header("Accept", "text/event-stream")
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            return Err(ApiError::Api {
+                status: response.status().as_u16(),
+                message: format!("SSE stream returned {}", response.status()),
+            });
+        }
+        Ok(response.bytes_stream())
+    }
+
     /// Get execution logs
     pub async fn get_execution_logs(
         &self,

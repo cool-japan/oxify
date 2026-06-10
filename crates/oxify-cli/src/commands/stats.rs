@@ -265,6 +265,7 @@ fn calculate_workflow_stats(workflow: &Workflow) -> WorkflowStats {
             NodeKind::Approval(_) => "Approval",
             NodeKind::Form(_) => "Form",
             NodeKind::Vision(_) => "Vision",
+            NodeKind::Custom(_) => "Custom",
         };
         *node_types.entry(type_name.to_string()).or_insert(0) += 1;
     }

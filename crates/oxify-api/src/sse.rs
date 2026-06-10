@@ -5,6 +5,7 @@
 //! - Reconnection handling with last-event-id
 //! - Heartbeat events to keep connection alive
 //! - Proper event typing
+//! - Real-time events sourced from the engine EventBus (no polling)
 
 use axum::{
     extract::{Path, Query, State},
@@ -12,13 +13,13 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
 };
 use futures::stream::{self, Stream};
-use oxify_model::ExecutionState;
+use oxify_engine::execution_events;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time;
-use tracing::{error, info};
+use tokio::sync::broadcast::error::RecvError;
+use tracing::info;
 use uuid::Uuid;
 
 use crate::handlers::AppState;
@@ -48,6 +49,31 @@ impl SseEventType {
             SseEventType::Error => "error",
             SseEventType::Heartbeat => "heartbeat",
         }
+    }
+}
+
+/// Map an engine event type string to an SSE event type.
+///
+/// Returns `None` for event types that should be silently skipped
+/// (e.g. `node.started`, `level.*`, `checkpoint.*`).
+fn map_event_type(event_type: &str) -> Option<SseEventType> {
+    if event_type == execution_events::WORKFLOW_STARTED
+        || event_type == execution_events::WORKFLOW_COMPLETED
+        || event_type == execution_events::WORKFLOW_PAUSED
+        || event_type == execution_events::WORKFLOW_RESUMED
+    {
+        Some(SseEventType::StateChange)
+    } else if event_type == execution_events::WORKFLOW_FAILED
+        || event_type == execution_events::NODE_FAILED
+    {
+        Some(SseEventType::Error)
+    } else if event_type == execution_events::NODE_COMPLETED {
+        Some(SseEventType::NodeComplete)
+    } else if event_type == execution_events::PROGRESS_UPDATE {
+        Some(SseEventType::Progress)
+    } else {
+        // node.started, level.*, checkpoint.*, variable.updated, etc. → skip
+        None
     }
 }
 
@@ -86,20 +112,19 @@ impl SseQuery {
     }
 }
 
-/// SSE stream state
+/// Internal state threaded through the `stream::unfold` combinator
 struct SseStreamState {
-    state: Arc<AppState>,
+    rx: tokio::sync::broadcast::Receiver<oxify_engine::WorkflowEvent>,
     exec_id: Uuid,
     query: SseQuery,
     last_event_id: u64,
     completed: bool,
-    last_heartbeat: time::Instant,
-    last_state: Option<ExecutionState>,
 }
 
 /// Stream execution updates via SSE
 ///
 /// Enhanced with event filtering, reconnection support, and heartbeats.
+/// Events are pushed in real-time from the engine's EventBus — no polling.
 ///
 /// Query parameters:
 /// - `events`: Filter events by type (comma-separated: state_change,node_complete,progress,error)
@@ -139,139 +164,107 @@ pub async fn stream_execution(
         id, last_event_id, query.events
     );
 
-    let stream_state = SseStreamState {
-        state: state.clone(),
+    // Subscribe to the event bus before checking the initial state so we
+    // cannot miss events that fire between the store read and subscription.
+    let rx = state.event_bus.subscribe();
+
+    // Seed: check whether the execution is already in a terminal state.
+    // If so we mark completed immediately and the stream will drain any
+    // buffered events then close.
+    let initial_completed = state
+        .execution_store
+        .get(&id)
+        .await
+        .ok()
+        .flatten()
+        .map(|ctx| {
+            matches!(
+                ctx.state,
+                oxify_model::ExecutionState::Completed
+                    | oxify_model::ExecutionState::Failed(_)
+                    | oxify_model::ExecutionState::Cancelled
+            )
+        })
+        .unwrap_or(false);
+
+    let sse_state = SseStreamState {
+        rx,
         exec_id: id,
         query,
         last_event_id,
-        completed: false,
-        last_heartbeat: time::Instant::now(),
-        last_state: None,
+        completed: initial_completed,
     };
 
-    let stream = stream::unfold(stream_state, |mut stream_state| async move {
-        // Poll every 500ms
-        time::sleep(Duration::from_millis(500)).await;
-
-        if stream_state.completed {
+    let stream = stream::unfold(sse_state, |mut s| async move {
+        if s.completed {
             return None;
         }
 
-        // Check if heartbeat is needed
-        let now = time::Instant::now();
-        let heartbeat_interval = Duration::from_secs(stream_state.query.heartbeat_interval);
+        let heartbeat_interval = Duration::from_secs(s.query.heartbeat_interval);
 
-        if stream_state.query.heartbeat
-            && stream_state.query.is_event_enabled(SseEventType::Heartbeat)
-            && now.duration_since(stream_state.last_heartbeat) >= heartbeat_interval
-        {
-            stream_state.last_heartbeat = now;
-            stream_state.last_event_id += 1;
+        loop {
+            let heartbeat_enabled =
+                s.query.heartbeat && s.query.is_event_enabled(SseEventType::Heartbeat);
 
-            let event = Event::default()
-                .event(SseEventType::Heartbeat.as_str())
-                .id(stream_state.last_event_id.to_string())
-                .data("ping");
+            tokio::select! {
+                recv_result = s.rx.recv() => {
+                    match recv_result {
+                        Ok(event) => {
+                            // Only forward events for our execution
+                            if event.execution_id != Some(s.exec_id) {
+                                continue;
+                            }
 
-            return Some((Ok(event), stream_state));
-        }
+                            let Some(sse_type) = map_event_type(&event.event_type) else {
+                                continue;
+                            };
 
-        // Fetch execution state
-        match stream_state
-            .state
-            .execution_store
-            .get(&stream_state.exec_id)
-            .await
-        {
-            Ok(Some(ctx)) => {
-                let current_state = ctx.state.clone();
-                let state_changed = stream_state.last_state.as_ref() != Some(&current_state);
+                            if !s.query.is_event_enabled(sse_type) {
+                                continue;
+                            }
 
-                // Only send event if state changed or it's a progress update
-                let should_send =
-                    state_changed || stream_state.query.is_event_enabled(SseEventType::Progress);
+                            s.last_event_id += 1;
 
-                if !should_send {
-                    return Some((Ok(Event::default().comment("no update")), stream_state));
+                            // Detect terminal events so we close the stream
+                            // after flushing this last event.
+                            if event.event_type == execution_events::WORKFLOW_COMPLETED
+                                || event.event_type == execution_events::WORKFLOW_FAILED
+                            {
+                                s.completed = true;
+                            }
+
+                            let sse_event = Event::default()
+                                .event(sse_type.as_str())
+                                .id(s.last_event_id.to_string())
+                                .json_data(&event.payload)
+                                .unwrap_or_else(|_| {
+                                    Event::default()
+                                        .event(SseEventType::Error.as_str())
+                                        .data("serialization_error")
+                                });
+
+                            return Some((Ok(sse_event), s));
+                        }
+                        Err(RecvError::Lagged(_)) => {
+                            // Slow consumer dropped some events — keep going
+                            continue;
+                        }
+                        Err(RecvError::Closed) => {
+                            // Bus shut down
+                            return None;
+                        }
+                    }
                 }
 
-                stream_state.last_event_id += 1;
-
-                // Determine event type
-                let event_type = if state_changed {
-                    SseEventType::StateChange
-                } else {
-                    SseEventType::Progress
-                };
-
-                // Check if event is enabled
-                if !stream_state.query.is_event_enabled(event_type) {
-                    return Some((Ok(Event::default().comment("filtered")), stream_state));
-                }
-
-                let event_data = serde_json::json!({
-                    "execution_id": stream_state.exec_id,
-                    "workflow_id": ctx.workflow_id,
-                    "state": current_state,
-                    "node_results_count": ctx.node_results.len(),
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                });
-
-                let event = Event::default()
-                    .event(event_type.as_str())
-                    .id(stream_state.last_event_id.to_string())
-                    .json_data(event_data)
-                    .unwrap_or_else(|e| {
-                        error!("Failed to serialize event data: {}", e);
-                        Event::default()
-                            .event(SseEventType::Error.as_str())
-                            .data("serialization_error")
-                    });
-
-                // Update last state
-                stream_state.last_state = Some(current_state.clone());
-
-                // Check if execution is completed
-                if matches!(
-                    current_state,
-                    ExecutionState::Completed
-                        | ExecutionState::Failed(_)
-                        | ExecutionState::Cancelled
-                ) {
-                    stream_state.completed = true;
-                }
-
-                Some((Ok(event), stream_state))
-            }
-            Ok(None) => {
-                // Execution not found, send error and stop
-                stream_state.last_event_id += 1;
-
-                if stream_state.query.is_event_enabled(SseEventType::Error) {
-                    let event = Event::default()
-                        .event(SseEventType::Error.as_str())
-                        .id(stream_state.last_event_id.to_string())
-                        .data(format!("Execution {} not found", stream_state.exec_id));
-                    stream_state.completed = true;
-                    Some((Ok(event), stream_state))
-                } else {
-                    None
-                }
-            }
-            Err(e) => {
-                // Storage error, send error and stop
-                error!("Failed to get execution {}: {}", stream_state.exec_id, e);
-                stream_state.last_event_id += 1;
-
-                if stream_state.query.is_event_enabled(SseEventType::Error) {
-                    let event = Event::default()
-                        .event(SseEventType::Error.as_str())
-                        .id(stream_state.last_event_id.to_string())
-                        .data(format!("Error fetching execution: {}", e));
-                    stream_state.completed = true;
-                    Some((Ok(event), stream_state))
-                } else {
-                    None
+                _ = tokio::time::sleep(heartbeat_interval), if heartbeat_enabled => {
+                    s.last_event_id += 1;
+                    return Some((
+                        Ok(Event::default()
+                            .event(SseEventType::Heartbeat.as_str())
+                            .id(s.last_event_id.to_string())
+                            .data("ping")),
+                        s,
+                    ));
                 }
             }
         }

@@ -1,0 +1,17 @@
+apiVersion: v2
+name: oxify
+description: OxiFY - LLM Workflow Orchestration Platform
+type: application
+version: 0.2.8
+appVersion: "0.2.8"
+keywords:
+  - llm
+  - workflow
+  - orchestration
+  - ai
+maintainers:
+  - name: OxiFY Contributors
+home: https://github.com/cool-japan/oxify
+sources:
+  - https://github.com/cool-japan/oxify
+icon: https://raw.githubusercontent.com/cool-japan/oxify/master/assets/logo.png

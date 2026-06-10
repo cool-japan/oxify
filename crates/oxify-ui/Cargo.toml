@@ -22,13 +22,13 @@ oxify-authn = { version = "0.2.0", path = "../oxify-authn" }
 oxify-authz = { version = "0.2.0", path = "../oxify-authz" }
 
 # Web framework
-axum = { workspace = true, features = ["macros"] }
+axum = { workspace = true, features = ["macros", "multipart"] }
 tower = { workspace = true }
 tower-http = { workspace = true, features = ["cors", "trace", "fs", "compression-gzip"] }
 tokio = { workspace = true }
 
 # Templating
-askama = "0.15"
+askama = "0.16"
 
 # Serialization
 serde = { workspace = true }
@@ -40,7 +40,8 @@ futures = { workspace = true }
 tokio-stream = { workspace = true }
 
 # HTTP client
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["json", "stream"] }
+bytes = { workspace = true }
 
 # Utilities
 uuid = { workspace = true }

@@ -219,6 +219,11 @@ impl TimePredictor {
                 // Vision/OCR processing time
                 (500, 3000, 15000) // 0.5s to 15s depending on image size
             }
+
+            NodeKind::Custom(_) => {
+                // Plugin execution time is unknown — use generic compute estimate
+                (100, 500, 5000)
+            }
         };
 
         let expected_executions = Self::estimate_executions(node);
@@ -347,6 +352,9 @@ impl TimePredictor {
 
                 // Medium confidence for vision/OCR
                 NodeKind::Vision(_) => 0.6,
+
+                // Low confidence for custom plugins — behavior is unknown
+                NodeKind::Custom(_) => 0.3,
             };
 
             total_confidence += node_confidence;
@@ -373,6 +381,7 @@ impl TimePredictor {
             NodeKind::Approval(_) => "Approval".to_string(),
             NodeKind::Form(_) => "Form".to_string(),
             NodeKind::Vision(_) => "Vision".to_string(),
+            NodeKind::Custom(_) => "Custom".to_string(),
         }
     }
 }

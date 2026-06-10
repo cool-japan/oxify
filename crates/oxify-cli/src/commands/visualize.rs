@@ -66,6 +66,7 @@ fn generate_dot(workflow: &Workflow) -> String {
             NodeKind::Approval(_) => ("box", "mistyrose"),
             NodeKind::Form(_) => ("box", "honeydew"),
             NodeKind::Vision(_) => ("box", "lightseagreen"),
+            NodeKind::Custom(_) => ("box", "mediumpurple"),
         };
 
         let label = node.name.replace("\"", "\\\"");
@@ -150,6 +151,7 @@ fn render_node_tree(
         NodeKind::Approval(_) => "[APPROVAL]",
         NodeKind::Form(_) => "[FORM]",
         NodeKind::Vision(_) => "[VISION]",
+        NodeKind::Custom(_) => "[CUSTOM]",
     };
 
     output.push_str(&format!(

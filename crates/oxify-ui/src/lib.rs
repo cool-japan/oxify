@@ -25,7 +25,9 @@ pub mod handlers;
 pub mod mock;
 pub mod routes;
 pub mod state;
+pub mod svg;
 pub mod templates;
+pub mod validation;
 
 pub use api::ApiClient;
 pub use error::UiError;
@@ -42,6 +44,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .precompressed_br();
 
     Router::new()
+        .merge(routes::health_routes())
         .merge(routes::ui_routes())
         .merge(routes::api_routes())
         .nest_service("/static", static_service)

@@ -94,6 +94,9 @@ pub enum ValidationError {
 
     #[error("SubWorkflow node {0} has empty workflow path")]
     SubWorkflowEmptyPath(NodeId),
+
+    #[error("Custom node {0} requires a non-empty plugin_id")]
+    CustomNodeEmptyPluginId(NodeId),
 }
 
 /// Comprehensive workflow validator
@@ -381,8 +384,22 @@ impl WorkflowValidator {
                 }
                 NodeKind::SubWorkflow(_) => {}
 
+                // Validate Custom plugin nodes
+                NodeKind::Custom(config) => {
+                    if config.plugin_id.trim().is_empty() {
+                        errors.push(ValidationError::CustomNodeEmptyPluginId(node.id));
+                    }
+                }
+
                 // Other node types don't need advanced validation here
-                _ => {}
+                NodeKind::Start
+                | NodeKind::End
+                | NodeKind::LLM(_)
+                | NodeKind::Retriever(_)
+                | NodeKind::Code(_)
+                | NodeKind::IfElse(_)
+                | NodeKind::Tool(_)
+                | NodeKind::Vision(_) => {}
             }
         }
 
@@ -616,6 +633,7 @@ impl WorkflowValidator {
                 NodeKind::Approval(_) => "Approval",
                 NodeKind::Form(_) => "Form",
                 NodeKind::Vision(_) => "Vision",
+                NodeKind::Custom(_) => "Custom",
             };
             *node_type_counts.entry(type_name.to_string()).or_insert(0) += 1;
         }

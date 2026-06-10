@@ -35,6 +35,6 @@ oxiarc-deflate = { workspace = true }
 oxiarc-archive = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
-rpassword = "7.4"
+rpassword = "7.5"
 ratatui = { workspace = true }
 crossterm = { workspace = true }

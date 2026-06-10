@@ -195,7 +195,8 @@ impl BatchAnalyzer {
             | NodeKind::Parallel(_)
             | NodeKind::Approval(_)
             | NodeKind::Form(_)
-            | NodeKind::Vision(_) => BatchGroup::None,
+            | NodeKind::Vision(_)
+            | NodeKind::Custom(_) => BatchGroup::None,
         }
     }
 

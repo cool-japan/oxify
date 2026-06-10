@@ -545,7 +545,20 @@ impl SecurityScanner {
                             );
                     }
                 }
-                _ => {}
+                NodeKind::Start
+                | NodeKind::End
+                | NodeKind::Retriever(_)
+                | NodeKind::IfElse(_)
+                | NodeKind::Tool(_)
+                | NodeKind::Loop(_)
+                | NodeKind::TryCatch(_)
+                | NodeKind::SubWorkflow(_)
+                | NodeKind::Switch(_)
+                | NodeKind::Parallel(_)
+                | NodeKind::Approval(_)
+                | NodeKind::Form(_)
+                | NodeKind::Vision(_)
+                | NodeKind::Custom(_) => {}
             }
         }
 
@@ -656,7 +669,20 @@ impl SecurityScanner {
             let search_text = match &node.kind {
                 NodeKind::LLM(cfg) => &cfg.prompt_template,
                 NodeKind::Code(cfg) => &cfg.code,
-                _ => continue,
+                NodeKind::Start
+                | NodeKind::End
+                | NodeKind::Retriever(_)
+                | NodeKind::IfElse(_)
+                | NodeKind::Tool(_)
+                | NodeKind::Loop(_)
+                | NodeKind::TryCatch(_)
+                | NodeKind::SubWorkflow(_)
+                | NodeKind::Switch(_)
+                | NodeKind::Parallel(_)
+                | NodeKind::Approval(_)
+                | NodeKind::Form(_)
+                | NodeKind::Vision(_)
+                | NodeKind::Custom(_) => continue,
             };
 
             for (pattern, secret_type) in &secret_patterns {

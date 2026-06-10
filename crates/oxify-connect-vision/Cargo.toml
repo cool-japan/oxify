@@ -21,7 +21,7 @@ futures = { workspace = true }
 
 # Image processing
 image = "0.25"
-imageproc = "0.26"
+imageproc = "0.27"
 ndarray = "0.17"
 
 # ONNX Runtime for Surya/PaddleOCR (Pure Rust — no C/C++ dependencies)

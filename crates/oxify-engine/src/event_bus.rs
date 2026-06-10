@@ -487,17 +487,37 @@ impl EventBus {
         self.triggers.read().await.values().cloned().collect()
     }
 
-    /// Check triggers and execute matching workflows
+    /// Check triggers and publish a "workflow.trigger.fired" event for each match.
+    ///
+    /// The [`EventBus`] is intentionally kept free of [`crate::Engine`]
+    /// dependencies to avoid a circular dependency.  Instead, when a trigger
+    /// matches, a secondary event of type `"workflow.trigger.fired"` is
+    /// published onto the same bus so that any component (e.g. an engine
+    /// subscribed to the bus) can react without this module needing to know
+    /// about engines.
     async fn check_triggers(&self, event: &WorkflowEvent) {
         let triggers = self.triggers.read().await;
+        let matching: Vec<WorkflowTrigger> = triggers
+            .values()
+            .filter(|t| t.enabled && t.matches(event))
+            .cloned()
+            .collect();
+        drop(triggers); // release read lock before publishing
 
-        for trigger in triggers.values() {
-            if trigger.matches(event) {
-                tracing::info!("Trigger {} matched event {}", trigger.id, event.id);
-
-                // In a real implementation, this would spawn workflow execution
-                // For now, we just log it
-            }
+        for trigger in matching {
+            tracing::info!("Trigger {} matched event {}", trigger.id, event.id);
+            let fired_event = WorkflowEvent::new(
+                "workflow.trigger.fired".to_string(),
+                trigger.workflow.metadata.id,
+                serde_json::json!({
+                    "trigger_id": trigger.id.to_string(),
+                    "workflow_id": trigger.workflow.metadata.id.to_string(),
+                    "source_event_id": event.id.to_string(),
+                    "source_event_type": event.event_type,
+                }),
+            );
+            // Publish on the same sender so all subscribers (including EventStore) capture it.
+            let _ = self.sender.send(fired_event);
         }
     }
 }

@@ -1,0 +1,207 @@
+---
+# OxiFY CI Pipeline
+# Runs on every push and pull_request (all branches).
+# Docker build+push runs only on pushes to main or semver tags.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  pull_request:
+    branches:
+      - "**"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/oxify-ui
+
+# Cancel in-progress runs for the same ref (saves CI minutes on fast-push)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================================
+  # Job: test — build + unit/integration tests + clippy
+  # ============================================================================
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libssl-dev \
+            build-essential
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Build workspace
+        run: cargo build --workspace 2>&1
+
+      - name: Run workspace tests
+        run: cargo test --workspace 2>&1
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # ============================================================================
+  # Job: test-features — targeted feature-flag combinations
+  # ============================================================================
+  test-features:
+    name: Feature Flag Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libssl-dev \
+            build-essential
+
+      - name: Test oxify-mcp (github + gitlab + jira + linear + github-actions)
+        run: >
+          cargo test
+          -p oxify-mcp
+          --features github,gitlab,jira,linear,github-actions
+          2>&1
+
+      - name: Test oxify-connect-storage (local feature)
+        run: >
+          cargo test
+          -p oxify-connect-storage
+          --features local
+          2>&1
+
+      - name: Test oxify-connect-data (all-providers)
+        run: >
+          cargo test
+          -p oxify-connect-data
+          --features all-providers
+          2>&1
+
+  # ============================================================================
+  # Job: security — cargo-audit for known vulnerabilities
+  # ============================================================================
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    # Run on every push/PR; allow failure to not block merges on advisory-only
+    # findings — adjust to `fail-fast: true` if you want strict enforcement.
+    continue-on-error: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo-audit binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}-v0.21
+
+      - name: Install cargo-audit
+        run: |
+          if ! command -v cargo-audit &> /dev/null; then
+            cargo install cargo-audit --locked
+          fi
+
+      - name: Run security audit
+        run: cargo audit
+
+  # ============================================================================
+  # Job: docker — build and push container image
+  # Only runs on pushes to main branch or semver tag pushes.
+  # ============================================================================
+  docker:
+    name: Docker Build & Push
+    runs-on: ubuntu-latest
+    needs: [test, test-features, security]
+    if: >
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # Always tag with the short Git SHA
+            type=sha,prefix=sha-,format=short
+            # Tag with the branch name on branch pushes
+            type=ref,event=branch
+            # Tag with semver components on tag pushes (v1.2.3 → 1.2.3, 1.2, 1, latest)
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            # Tag as "latest" on main branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            OXIFY_LOG_LEVEL=info
+          platforms: linux/amd64,linux/arm64

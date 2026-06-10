@@ -221,6 +221,8 @@ impl BatchAnalyzer {
             NodeKind::Approval(_) => 60000,
             NodeKind::Form(_) => 120000,
             NodeKind::Vision(_) => 3000,
+            // Plugin execution time is unknown — use generic compute estimate
+            NodeKind::Custom(_) => 1000,
         }
     }
 
@@ -228,7 +230,10 @@ impl BatchAnalyzer {
     fn is_parallelizable(node: &Node) -> bool {
         // Most nodes can be parallelized if they don't have data dependencies
         // Exceptions: nodes that require sequential execution or have side effects
-        !matches!(node.kind, NodeKind::Approval(_) | NodeKind::Form(_))
+        !matches!(
+            node.kind,
+            NodeKind::Approval(_) | NodeKind::Form(_) | NodeKind::Custom(_)
+        )
     }
 
     /// Calculate batch statistics

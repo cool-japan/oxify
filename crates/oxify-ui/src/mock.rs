@@ -389,3 +389,163 @@ pub struct MockExecutionDetail {
     pub node_results: Vec<(String, String, u32)>, // (node_name, status, progress)
     pub variables: serde_json::Value,
 }
+
+// ============================================================================
+// Template Gallery Mock Data
+// ============================================================================
+
+/// Mock representation of a workflow template parameter
+#[derive(Debug, Clone)]
+pub struct MockParameterInfo {
+    pub name: String,
+    pub description: String,
+    pub param_type: String, // "string", "integer", "float", "boolean", "array", "object"
+    pub required: bool,
+    pub default_value: Option<String>,
+}
+
+/// Mock representation of a workflow template for UI display
+#[derive(Debug, Clone)]
+pub struct MockTemplateInfo {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub category: String,
+    pub parameters: Vec<MockParameterInfo>,
+}
+
+/// Generate the built-in template gallery mock data
+pub fn mock_templates() -> Vec<MockTemplateInfo> {
+    vec![
+        MockTemplateInfo {
+            id: "llm-pipeline".to_string(),
+            name: "LLM Pipeline".to_string(),
+            description:
+                "A standard LLM processing pipeline with input validation and output formatting"
+                    .to_string(),
+            category: "Language".to_string(),
+            parameters: vec![
+                MockParameterInfo {
+                    name: "model".to_string(),
+                    description: "LLM model to use".to_string(),
+                    param_type: "string".to_string(),
+                    required: true,
+                    default_value: None,
+                },
+                MockParameterInfo {
+                    name: "temperature".to_string(),
+                    description: "Sampling temperature (0.0-2.0)".to_string(),
+                    param_type: "float".to_string(),
+                    required: false,
+                    default_value: Some("0.7".to_string()),
+                },
+                MockParameterInfo {
+                    name: "system_prompt".to_string(),
+                    description: "System prompt for the LLM".to_string(),
+                    param_type: "string".to_string(),
+                    required: false,
+                    default_value: Some("You are a helpful assistant.".to_string()),
+                },
+            ],
+        },
+        MockTemplateInfo {
+            id: "rag-pipeline".to_string(),
+            name: "RAG Pipeline".to_string(),
+            description:
+                "Retrieval-Augmented Generation: fetch context from vector DB then generate"
+                    .to_string(),
+            category: "Retrieval".to_string(),
+            parameters: vec![
+                MockParameterInfo {
+                    name: "collection".to_string(),
+                    description: "Vector DB collection name".to_string(),
+                    param_type: "string".to_string(),
+                    required: true,
+                    default_value: None,
+                },
+                MockParameterInfo {
+                    name: "top_k".to_string(),
+                    description: "Number of documents to retrieve".to_string(),
+                    param_type: "integer".to_string(),
+                    required: false,
+                    default_value: Some("5".to_string()),
+                },
+                MockParameterInfo {
+                    name: "model".to_string(),
+                    description: "LLM model for generation".to_string(),
+                    param_type: "string".to_string(),
+                    required: true,
+                    default_value: None,
+                },
+            ],
+        },
+        MockTemplateInfo {
+            id: "data-extract".to_string(),
+            name: "Data Extraction".to_string(),
+            description: "Extract structured data from unstructured text using LLMs".to_string(),
+            category: "Data".to_string(),
+            parameters: vec![
+                MockParameterInfo {
+                    name: "schema".to_string(),
+                    description: "JSON schema for extracted data".to_string(),
+                    param_type: "object".to_string(),
+                    required: true,
+                    default_value: None,
+                },
+                MockParameterInfo {
+                    name: "model".to_string(),
+                    description: "LLM model to use".to_string(),
+                    param_type: "string".to_string(),
+                    required: true,
+                    default_value: None,
+                },
+            ],
+        },
+        MockTemplateInfo {
+            id: "webhook-trigger".to_string(),
+            name: "Webhook Triggered".to_string(),
+            description:
+                "Workflow triggered by an incoming webhook with configurable payload processing"
+                    .to_string(),
+            category: "Integration".to_string(),
+            parameters: vec![
+                MockParameterInfo {
+                    name: "secret".to_string(),
+                    description: "HMAC secret for webhook verification".to_string(),
+                    param_type: "string".to_string(),
+                    required: false,
+                    default_value: None,
+                },
+                MockParameterInfo {
+                    name: "payload_path".to_string(),
+                    description: "JSON path to extract from payload".to_string(),
+                    param_type: "string".to_string(),
+                    required: false,
+                    default_value: Some("$.data".to_string()),
+                },
+            ],
+        },
+        MockTemplateInfo {
+            id: "vision-ocr".to_string(),
+            name: "Vision OCR".to_string(),
+            description: "Extract text from images using vision models".to_string(),
+            category: "Vision".to_string(),
+            parameters: vec![
+                MockParameterInfo {
+                    name: "provider".to_string(),
+                    description: "Vision provider (openai, anthropic, aws)".to_string(),
+                    param_type: "string".to_string(),
+                    required: true,
+                    default_value: Some("openai".to_string()),
+                },
+                MockParameterInfo {
+                    name: "image_url".to_string(),
+                    description: "URL or base64 of the image".to_string(),
+                    param_type: "string".to_string(),
+                    required: true,
+                    default_value: None,
+                },
+            ],
+        },
+    ]
+}

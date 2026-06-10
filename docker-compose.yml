@@ -1,0 +1,137 @@
+---
+# OxiFY full-stack development / staging compose file.
+# Production deployments should use Helm (see helm/).
+
+version: "3.9"
+
+networks:
+  oxify-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  qdrant-data:
+  oxify-storage:
+
+services:
+  # ---------------------------------------------------------------------------
+  # OxiFY UI Server
+  # ---------------------------------------------------------------------------
+  oxify-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        OXIFY_LOG_LEVEL: "${OXIFY_LOG_LEVEL:-info}"
+    image: oxify-ui:latest
+    container_name: oxify-ui
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      RUST_LOG: "${OXIFY_LOG_LEVEL:-info}"
+      OXIFY_UI_HOST: "0.0.0.0"
+      OXIFY_UI_PORT: "3000"
+      OXIFY_UI_USE_MOCK: "false"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-oxify}:${POSTGRES_PASSWORD:-oxify_secret}@postgres:5432/${POSTGRES_DB:-oxify}"
+      REDIS_URL: "redis://redis:6379"
+      QDRANT_URL: "http://qdrant:6333"
+      OXIFY_API_BASE_URL: "${OXIFY_API_BASE_URL:-http://localhost:8080}"
+      # Optional secrets — supply via .env file or environment
+      JWT_SECRET: "${JWT_SECRET:-change_me_in_production}"
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+    volumes:
+      - oxify-storage:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    networks:
+      - oxify-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 16
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: oxify-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-oxify}"
+      POSTGRES_USER: "${POSTGRES_USER:-oxify}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-oxify_secret}"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    networks:
+      - oxify-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oxify} -d ${POSTGRES_DB:-oxify}"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Redis 7
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: oxify-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    networks:
+      - oxify-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Qdrant Vector Database
+  # ---------------------------------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: oxify-qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"   # REST API
+      - "127.0.0.1:6334:6334"   # gRPC API
+    volumes:
+      - qdrant-data:/qdrant/storage
+    networks:
+      - oxify-net
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: "6333"
+      QDRANT__SERVICE__GRPC_PORT: "6334"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5

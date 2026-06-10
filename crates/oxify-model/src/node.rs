@@ -179,6 +179,24 @@ pub enum NodeKind {
 
     /// Vision/OCR node for image text extraction
     Vision(VisionConfig),
+
+    /// Custom plugin node — dispatches to a registered NodePlugin
+    Custom(CustomConfig),
+}
+
+/// Configuration for custom plugin nodes
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct CustomConfig {
+    /// Plugin identifier — must match a registered NodePlugin::name()
+    pub plugin_id: String,
+
+    /// Optional minimum version constraint (semver)
+    pub plugin_version: Option<String>,
+
+    /// Plugin-specific configuration passed to execute()
+    #[serde(default)]
+    pub config: serde_json::Value,
 }
 
 /// Configuration for LLM nodes

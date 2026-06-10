@@ -8,7 +8,7 @@ use axum::{
     http::StatusCode,
     Extension, Json,
 };
-use oxify_engine::Engine;
+use oxify_engine::{Engine, EngineBuilder, EventBus, ExecutionConfig};
 use oxify_model::{ExecutionContext, ExecutionState, WorkflowId};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -23,6 +23,7 @@ pub struct AppState {
     pub user_store: UserStoreBackend,
     pub auth: AuthState,
     pub engine: Arc<Engine>,
+    pub event_bus: Arc<EventBus>,
     // Disabled modules for SQLite migration
     // pub secret_store: Option<Arc<oxify_storage::SecretStore>>,
     pub version_store: Option<Arc<oxify_storage::WorkflowVersionStore>>,
@@ -38,12 +39,19 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
+        let event_bus = Arc::new(EventBus::new(1024));
+        let engine = Arc::new(
+            EngineBuilder::new()
+                .with_event_bus(event_bus.clone())
+                .build(),
+        );
         Self {
             workflow_store: WorkflowStoreBackend::new_in_memory(),
             execution_store: ExecutionStoreBackend::new_in_memory(),
             user_store: UserStoreBackend::new_in_memory(),
             auth: AuthState::new(),
-            engine: Arc::new(Engine::new()),
+            engine,
+            event_bus,
             // Disabled for SQLite migration
             // secret_store: None,
             version_store: None,
@@ -78,12 +86,20 @@ impl AppState {
         // Initialize vector store registry
         let vector_registry = Some(Arc::new(crate::vector_handlers::VectorStoreRegistry::new()));
 
+        let event_bus = Arc::new(EventBus::new(1024));
+        let engine = Arc::new(
+            EngineBuilder::new()
+                .with_event_bus(event_bus.clone())
+                .build(),
+        );
+
         Ok(Self {
             workflow_store: WorkflowStoreBackend::new_database(pool.clone()),
             execution_store: ExecutionStoreBackend::new_database(pool.clone()),
             user_store: UserStoreBackend::new_database(pool.clone()),
             auth: AuthState::new(),
-            engine: Arc::new(Engine::new()),
+            engine,
+            event_bus,
             // Disabled modules for SQLite migration
             // secret_store: None,
             version_store,
@@ -418,62 +434,67 @@ pub async fn execute_workflow(
         }
     };
 
-    // Create execution context with initial variables
+    // One execution_id, used everywhere end-to-end
     let mut ctx = ExecutionContext::new(workflow.metadata.id);
     for (key, value) in req.variables {
         ctx.set_variable(key, value);
     }
+    // Single source of truth — both storage and SSE use this id
+    let execution_id = ctx.execution_id;
 
-    // Execute workflow asynchronously
+    // Store initial Running context BEFORE spawning, so SSE subscribers
+    // arriving immediately after the 202 response can always find the row
+    state
+        .execution_store
+        .create(ctx.clone())
+        .await
+        .map_err(|e| {
+            error!("Failed to create execution: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "StorageError".to_string(),
+                    message: format!("Failed to create execution: {}", e),
+                }),
+            )
+        })?;
+
+    // Increment active executions counter
+    state.http_metrics.inc_active_execution();
+
     let engine = state.engine.clone();
     let execution_store = state.execution_store.clone();
-    let execution_id = Uuid::new_v4();
-    let exec_id_clone = execution_id;
     let metrics = state.http_metrics.clone();
 
     tokio::spawn(async move {
-        match engine.execute(&workflow).await {
+        let result = engine
+            .execute_with_context(&workflow, ctx, ExecutionConfig::new().with_events())
+            .await;
+        // Decrement active executions regardless of outcome
+        metrics.dec_active_execution();
+        match result {
             Ok(result_ctx) => {
-                // Decrement active executions on completion
-                metrics.dec_active_execution();
-
-                match execution_store.update(&exec_id_clone, result_ctx).await {
+                // result_ctx.execution_id == execution_id (preserved) — update succeeds
+                match execution_store.update(&execution_id, result_ctx).await {
                     Ok(Some(_)) => {
-                        info!("Execution {} completed successfully", exec_id_clone);
+                        info!("Execution {} completed successfully", execution_id);
                     }
                     Ok(None) => {
                         error!(
                             "Failed to update execution {}: execution not found",
-                            exec_id_clone
+                            execution_id
                         );
                     }
                     Err(e) => {
-                        error!("Failed to update execution {}: {}", exec_id_clone, e);
+                        error!("Failed to update execution {}: {}", execution_id, e);
                     }
                 }
             }
             Err(e) => {
-                // Decrement active executions on failure
-                metrics.dec_active_execution();
-                error!("Workflow execution failed: {}", e);
+                error!("Workflow execution {} failed: {}", execution_id, e);
             }
         }
     });
-
-    // Store initial execution context
-    state.execution_store.create(ctx).await.map_err(|e| {
-        error!("Failed to create execution: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: "StorageError".to_string(),
-                message: format!("Failed to create execution: {}", e),
-            }),
-        )
-    })?;
-
-    // Increment active executions counter
-    state.http_metrics.inc_active_execution();
 
     Ok((
         StatusCode::ACCEPTED,
@@ -2933,4 +2954,166 @@ pub async fn get_metrics(State(state): State<Arc<AppState>>) -> Result<String, S
     ));
 
     Ok(metrics)
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxify_engine::execution_events;
+    use oxify_model::{Edge, Node, NodeKind, Workflow, WorkflowMetadata};
+
+    /// Build a minimal Start → End workflow for testing.
+    fn build_test_workflow() -> Workflow {
+        let mut workflow = Workflow::new("Test Workflow".to_string());
+        let start = Node::new("Start".to_string(), NodeKind::Start);
+        let end = Node::new("End".to_string(), NodeKind::End);
+        let start_id = start.id;
+        let end_id = end.id;
+        workflow.add_node(start);
+        workflow.add_node(end);
+        workflow.add_edge(Edge::new(start_id, end_id));
+        workflow
+    }
+
+    /// Verify that the execution_id returned by `execute_workflow` logic is
+    /// the same id used as the storage key, so `execution_store.get(returned_id)`
+    /// reliably finds the row immediately after creation.
+    #[tokio::test]
+    async fn test_execute_workflow_execution_id_consistency() {
+        let state = AppState::new();
+
+        // Store a workflow so we can retrieve it
+        let workflow = build_test_workflow();
+        let workflow_id = state
+            .workflow_store
+            .create(workflow.clone())
+            .await
+            .expect("workflow create");
+
+        // Simulate the fixed handler logic directly:
+        let mut ctx = ExecutionContext::new(workflow_id);
+        let execution_id = ctx.execution_id;
+
+        // Set a test variable (mirrors the handler loop)
+        ctx.set_variable("test_key".to_string(), serde_json::Value::from("test_val"));
+
+        // Store BEFORE spawning
+        let stored_id = state
+            .execution_store
+            .create(ctx.clone())
+            .await
+            .expect("execution create");
+
+        // The stored key must equal execution_id (not a random new UUID)
+        assert_eq!(
+            stored_id, execution_id,
+            "storage key must equal ctx.execution_id"
+        );
+
+        // The row must be retrievable immediately using execution_id
+        let found = state
+            .execution_store
+            .get(&execution_id)
+            .await
+            .expect("get ok")
+            .expect("row must exist");
+
+        assert_eq!(found.execution_id, execution_id);
+    }
+
+    /// Verify that execute_with_context preserves the caller's execution_id
+    /// and emits events carrying that same id on the event bus.
+    #[tokio::test]
+    async fn test_execute_with_context_emits_bus_events_with_correct_id() {
+        let state = AppState::new();
+
+        // Subscribe to the shared bus before execution starts
+        let mut rx = state.event_bus.subscribe();
+
+        let workflow = build_test_workflow();
+        let workflow_id = state
+            .workflow_store
+            .create(workflow.clone())
+            .await
+            .expect("workflow create");
+
+        let ctx = ExecutionContext::new(workflow_id);
+        let execution_id = ctx.execution_id;
+
+        // Run synchronously — mirrors what the spawned task does
+        let result = state
+            .engine
+            .execute_with_context(
+                &workflow,
+                ctx,
+                oxify_engine::ExecutionConfig::new().with_events(),
+            )
+            .await
+            .expect("execution should succeed");
+
+        // execution_id must be preserved end-to-end
+        assert_eq!(result.execution_id, execution_id);
+
+        // All events on the bus must carry the same execution_id
+        let mut saw_started = false;
+        let mut saw_completed = false;
+        while let Ok(ev) = rx.try_recv() {
+            if ev.execution_id != Some(execution_id) {
+                continue; // events from other tests — ignore
+            }
+            match ev.event_type.as_str() {
+                s if s == execution_events::WORKFLOW_STARTED => saw_started = true,
+                s if s == execution_events::WORKFLOW_COMPLETED => saw_completed = true,
+                _ => {}
+            }
+        }
+        assert!(saw_started, "expected workflow.started event on the bus");
+        assert!(
+            saw_completed,
+            "expected workflow.completed event on the bus"
+        );
+    }
+
+    /// Verify the in-memory ExecutionStore uses ctx.execution_id as the key,
+    /// making update() reliable after create().
+    #[tokio::test]
+    async fn test_in_memory_store_create_uses_execution_id() {
+        use crate::storage::ExecutionStoreBackend;
+
+        let store = ExecutionStoreBackend::new_in_memory();
+        let workflow_id = WorkflowMetadata::new("w".to_string()).id;
+
+        let ctx = ExecutionContext::new(workflow_id);
+        let expected_id = ctx.execution_id;
+
+        let returned_id = store.create(ctx.clone()).await.expect("create ok");
+
+        assert_eq!(
+            returned_id, expected_id,
+            "create must return ctx.execution_id as the storage key"
+        );
+
+        // get() with the same id must succeed
+        let found = store.get(&expected_id).await.expect("get ok");
+        assert!(
+            found.is_some(),
+            "row must be retrievable by ctx.execution_id"
+        );
+
+        // update() must also succeed since key now matches
+        let mut updated_ctx = ctx;
+        updated_ctx.state = oxify_model::ExecutionState::Completed;
+        let update_result = store
+            .update(&expected_id, updated_ctx)
+            .await
+            .expect("update ok");
+        assert!(
+            update_result.is_some(),
+            "update must find the row by the same id"
+        );
+    }
 }

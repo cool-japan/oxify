@@ -1,3 +1,10 @@
-<div class="w-full h-full flex items-center justify-center">
+{% if !svg_content.is_empty() %}
+<div class="workflow-preview rounded overflow-hidden border border-gray-200 dark:border-gray-700"
+     aria-label="Workflow diagram preview" role="img">
   {{ svg_content|safe }}
 </div>
+{% else %}
+<div class="workflow-preview-empty flex items-center justify-center h-24 bg-gray-50 dark:bg-gray-800 rounded border border-dashed border-gray-300 dark:border-gray-600">
+  <span class="text-xs text-gray-400 dark:text-gray-500">No preview available</span>
+</div>
+{% endif %}

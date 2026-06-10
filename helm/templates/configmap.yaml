@@ -1,0 +1,26 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oxify.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oxify.labels" . | nindent 4 }}
+data:
+  {{- range $key, $value := .Values.env }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+  # Derive service URLs from sub-chart release names when those charts are enabled
+  {{- if .Values.postgresql.enabled }}
+  DATABASE_HOST: {{ printf "%s-postgresql" .Release.Name | quote }}
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: {{ .Values.postgresql.auth.database | quote }}
+  DATABASE_USER: {{ .Values.postgresql.auth.username | quote }}
+  {{- end }}
+  {{- if .Values.redis.enabled }}
+  REDIS_HOST: {{ printf "%s-redis-master" .Release.Name | quote }}
+  REDIS_PORT: "6379"
+  {{- end }}
+  {{- if .Values.qdrant.enabled }}
+  QDRANT_URL: {{ printf "http://%s-qdrant:%d" .Release.Name (.Values.qdrant.service.httpPort | int) | quote }}
+  {{- end }}

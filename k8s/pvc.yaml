@@ -1,0 +1,21 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: oxify-storage
+  namespace: oxify-system
+  labels:
+    app.kubernetes.io/name: oxify
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  # Use your cluster's default storage class or specify one explicitly.
+  # Examples:
+  #   storageClassName: standard        (GKE / Minikube default)
+  #   storageClassName: gp3             (AWS EKS)
+  #   storageClassName: managed-premium (AKS)
+  # storageClassName: standard

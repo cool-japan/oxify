@@ -96,6 +96,22 @@ pub struct NodeFormPartial {
 }
 
 // ============================================================================
+// Template Gallery Partials
+// ============================================================================
+
+#[derive(Template)]
+#[template(path = "partials/template_list.html")]
+pub struct TemplateListPartial {
+    pub templates: Vec<crate::mock::MockTemplateInfo>,
+}
+
+#[derive(Template)]
+#[template(path = "partials/template_detail.html")]
+pub struct TemplateDetailPartial {
+    pub template: crate::mock::MockTemplateInfo,
+}
+
+// ============================================================================
 // UI Components
 // ============================================================================
 

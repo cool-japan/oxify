@@ -505,7 +505,20 @@ impl WorkflowOptimizer {
                         },
                     });
                 }
-                _ => {}
+                NodeKind::Custom(_)
+                | NodeKind::Code(_)
+                | NodeKind::Start
+                | NodeKind::End
+                | NodeKind::IfElse(_)
+                | NodeKind::Tool(_)
+                | NodeKind::Loop(_)
+                | NodeKind::TryCatch(_)
+                | NodeKind::SubWorkflow(_)
+                | NodeKind::Switch(_)
+                | NodeKind::Parallel(_)
+                | NodeKind::Approval(_)
+                | NodeKind::Form(_)
+                | NodeKind::Vision(_) => {}
             }
         }
 
@@ -531,7 +544,11 @@ impl WorkflowOptimizer {
         for node in &workflow.nodes {
             if matches!(
                 node.kind,
-                NodeKind::LLM(_) | NodeKind::Retriever(_) | NodeKind::Code(_) | NodeKind::Tool(_)
+                NodeKind::LLM(_)
+                    | NodeKind::Retriever(_)
+                    | NodeKind::Code(_)
+                    | NodeKind::Tool(_)
+                    | NodeKind::Custom(_)
             ) {
                 // Check if node is wrapped in try-catch
                 let has_error_handling = node.retry_config.is_some()

@@ -26,7 +26,7 @@ use crate::{
         AnalyticsPeriod, ExecutionStats, PerformanceMetrics, PeriodType, WorkflowAnalytics,
     },
     execution::{ExecutionContext, ExecutionResult, NodeExecutionResult, NodeMetrics, TokenUsage},
-    node::{LlmConfig, LoopConfig, Node, NodeKind},
+    node::{CustomConfig, LlmConfig, LoopConfig, Node, NodeKind},
     workflow::{Workflow, WorkflowMetadata},
     Edge, WorkflowBuilder,
 };
@@ -306,6 +306,31 @@ pub fn create_test_llm_node(name: &str, prompt: &str) -> Node {
     }
 }
 
+/// Create a test custom plugin node for testing plugin dispatch
+///
+/// # Example
+///
+/// ```
+/// use oxify_model::test_utils::create_test_custom_node;
+///
+/// let node = create_test_custom_node("my_plugin_node", "my_plugin");
+/// assert_eq!(node.name, "my_plugin_node");
+/// ```
+pub fn create_test_custom_node(name: &str, plugin_id: &str) -> Node {
+    Node {
+        id: uuid::Uuid::new_v4(),
+        name: name.to_string(),
+        kind: NodeKind::Custom(CustomConfig {
+            plugin_id: plugin_id.to_string(),
+            plugin_version: None,
+            config: serde_json::Value::Null,
+        }),
+        position: None,
+        retry_config: None,
+        timeout_config: None,
+    }
+}
+
 /// Create a test edge connecting two nodes
 ///
 /// # Example
@@ -463,6 +488,19 @@ mod tests {
                 assert_eq!(config.prompt_template, "prompt");
             }
             _ => panic!("Expected LLM node"),
+        }
+    }
+
+    #[test]
+    fn test_create_test_custom_node() {
+        let node = create_test_custom_node("plugin_node", "my.plugin");
+        assert_eq!(node.name, "plugin_node");
+        match node.kind {
+            NodeKind::Custom(config) => {
+                assert_eq!(config.plugin_id, "my.plugin");
+                assert!(config.plugin_version.is_none());
+            }
+            _ => panic!("Expected Custom node"),
         }
     }
 

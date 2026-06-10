@@ -78,10 +78,10 @@ pub use linter::{
 };
 pub use metrics_export::{ExportFormat, MetricsError, MetricsExporter};
 pub use node::{
-    ApprovalConfig, Condition, FormConfig, FormField, FormFieldType, LlmConfig, LoopConfig,
-    LoopType, McpConfig, Node, NodeId, NodeKind, ParallelConfig, ParallelStrategy, ParallelTask,
-    RetryConfig, ScriptConfig, SubWorkflowConfig, SwitchCase, SwitchConfig, TimeoutAction,
-    TimeoutConfig, TryCatchConfig, VectorConfig, VisionConfig,
+    ApprovalConfig, Condition, CustomConfig, FormConfig, FormField, FormFieldType, LlmConfig,
+    LoopConfig, LoopType, McpConfig, Node, NodeId, NodeKind, ParallelConfig, ParallelStrategy,
+    ParallelTask, RetryConfig, ScriptConfig, SubWorkflowConfig, SwitchCase, SwitchConfig,
+    TimeoutAction, TimeoutConfig, TryCatchConfig, VectorConfig, VisionConfig,
 };
 pub use optimizer::{
     Benefit, ComplexityMetrics, ImprovementSummary, IssueType, OptimizationReport,

@@ -1,0 +1,42 @@
+---
+# ClusterIP service — routes external traffic (via Ingress) to oxify-ui pods
+apiVersion: v1
+kind: Service
+metadata:
+  name: oxify-ui
+  namespace: oxify-system
+  labels:
+    app.kubernetes.io/name: oxify
+    app.kubernetes.io/component: ui
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: oxify
+    app.kubernetes.io/component: ui
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 3000
+
+---
+# Headless service — enables direct pod DNS resolution for service mesh / gRPC
+apiVersion: v1
+kind: Service
+metadata:
+  name: oxify-ui-headless
+  namespace: oxify-system
+  labels:
+    app.kubernetes.io/name: oxify
+    app.kubernetes.io/component: ui
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: oxify
+    app.kubernetes.io/component: ui
+  ports:
+    - name: http
+      protocol: TCP
+      port: 3000
+      targetPort: 3000

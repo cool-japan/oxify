@@ -69,7 +69,7 @@ impl ExecutionStore {
     }
 
     pub async fn create(&self, execution: ExecutionContext) -> Uuid {
-        let id = Uuid::new_v4();
+        let id = execution.execution_id;
         self.executions.write().await.insert(id, execution);
         id
     }

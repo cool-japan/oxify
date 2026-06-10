@@ -439,7 +439,7 @@ async fn verify_checksum(path: &Path, expected: &str) -> Result<bool> {
     let mut hasher = Sha256::new();
     hasher.update(&data);
     let hash = hasher.finalize();
-    let hash_hex = format!("{:x}", hash);
+    let hash_hex = hex::encode(hash);
 
     Ok(hash_hex.eq_ignore_ascii_case(expected))
 }
@@ -455,7 +455,7 @@ pub async fn compute_checksum(path: &Path) -> Result<String> {
     hasher.update(&data);
     let hash = hasher.finalize();
 
-    Ok(format!("{:x}", hash))
+    Ok(hex::encode(hash))
 }
 
 #[cfg(test)]

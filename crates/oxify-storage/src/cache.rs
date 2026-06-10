@@ -91,10 +91,11 @@ struct CacheEntry<T> {
     expires_at: DateTime<Utc>,
     access_count: u64,
     last_accessed: DateTime<Utc>,
+    seq: u64,
 }
 
 impl<T: Clone> CacheEntry<T> {
-    fn new(value: T, ttl: std::time::Duration) -> Self {
+    fn new(value: T, ttl: std::time::Duration, seq: u64) -> Self {
         let now = Utc::now();
         let ttl_duration = Duration::from_std(ttl).unwrap_or(Duration::seconds(300));
         Self {
@@ -102,6 +103,7 @@ impl<T: Clone> CacheEntry<T> {
             expires_at: now + ttl_duration,
             access_count: 0,
             last_accessed: now,
+            seq,
         }
     }
 
@@ -109,9 +111,10 @@ impl<T: Clone> CacheEntry<T> {
         Utc::now() > self.expires_at
     }
 
-    fn access(&mut self) -> T {
+    fn access(&mut self, new_seq: u64) -> T {
         self.access_count += 1;
         self.last_accessed = Utc::now();
+        self.seq = new_seq;
         self.value.clone()
     }
 }
@@ -120,6 +123,7 @@ impl<T: Clone> CacheEntry<T> {
 struct LruCache<K: std::hash::Hash + Eq, V: Clone> {
     entries: HashMap<K, CacheEntry<V>>,
     max_size: usize,
+    next_seq: u64,
 }
 
 impl<K: std::hash::Hash + Eq + Clone, V: Clone> LruCache<K, V> {
@@ -127,6 +131,7 @@ impl<K: std::hash::Hash + Eq + Clone, V: Clone> LruCache<K, V> {
         Self {
             entries: HashMap::with_capacity(max_size),
             max_size,
+            next_seq: 0,
         }
     }
 
@@ -136,7 +141,9 @@ impl<K: std::hash::Hash + Eq + Clone, V: Clone> LruCache<K, V> {
                 self.entries.remove(key);
                 return None;
             }
-            Some(entry.access())
+            let seq = self.next_seq;
+            self.next_seq += 1;
+            Some(entry.access(seq))
         } else {
             None
         }
@@ -151,7 +158,9 @@ impl<K: std::hash::Hash + Eq + Clone, V: Clone> LruCache<K, V> {
             self.evict_lru();
         }
 
-        self.entries.insert(key, CacheEntry::new(value, ttl));
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        self.entries.insert(key, CacheEntry::new(value, ttl, seq));
     }
 
     fn invalidate(&mut self, key: &K) {
@@ -176,7 +185,7 @@ impl<K: std::hash::Hash + Eq + Clone, V: Clone> LruCache<K, V> {
         if let Some(lru_key) = self
             .entries
             .iter()
-            .min_by_key(|(_, entry)| entry.last_accessed)
+            .min_by_key(|(_, entry)| entry.seq)
             .map(|(key, _)| key.clone())
         {
             self.entries.remove(&lru_key);
@@ -721,5 +730,63 @@ mod tests {
         assert_eq!(metrics.workflow_hit_rate(), 0.8);
         assert_eq!(metrics.user_quota_hit_rate(), 0.9);
         assert_eq!(metrics.overall_hit_rate(), 0.85);
+    }
+
+    #[test]
+    fn test_lru_eviction_deterministic() {
+        // max_size=3, very long TTL so expiry never fires during the test
+        let mut cache: LruCache<&str, u64> = LruCache::new(3);
+        let ttl = std::time::Duration::from_secs(300);
+
+        // Insert A (seq=0), B (seq=1), C (seq=2) — fills cache
+        cache.put("A", 1, ttl);
+        cache.put("B", 2, ttl);
+        cache.put("C", 3, ttl);
+
+        // Access A — bumps A's seq to 3 (next_seq was 3 after the three inserts)
+        let val = cache.get(&"A");
+        assert!(val.is_some());
+
+        // Insert D — cache is full (3 entries); B has seq=1 (lowest), so B is evicted
+        cache.put("D", 4, ttl);
+
+        // D must be present
+        assert!(cache.get(&"D").is_some());
+        // A must still be present (its seq was bumped above B's)
+        assert!(cache.get(&"A").is_some());
+        // C must still be present (seq=2, not the lowest after A was accessed)
+        assert!(cache.get(&"C").is_some());
+        // B must have been evicted (had seq=1, the lowest)
+        assert!(cache.get(&"B").is_none());
+    }
+
+    #[test]
+    fn test_lru_eviction_stress() {
+        let max_size = 10usize;
+        let mut cache: LruCache<usize, usize> = LruCache::new(max_size);
+        let ttl = std::time::Duration::from_secs(300);
+
+        for iteration in 0..1000usize {
+            // Insert 10 entries (or overwrite existing ones on first iteration)
+            for j in 0..10usize {
+                let key = iteration * 10 + j;
+                cache.put(key, key, ttl);
+            }
+
+            // Access entry 0 of the current batch (bumps its seq to highest)
+            let access_key = iteration * 10;
+            let _ = cache.get(&access_key);
+
+            // Insert one more entry, triggering an eviction
+            let overflow_key = iteration * 10 + 10;
+            cache.put(overflow_key, overflow_key, ttl);
+
+            // Cache must never exceed max_size
+            assert!(
+                cache.size() <= max_size,
+                "iteration {iteration}: cache size {} exceeded max_size {max_size}",
+                cache.size()
+            );
+        }
     }
 }

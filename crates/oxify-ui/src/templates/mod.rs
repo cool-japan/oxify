@@ -139,6 +139,17 @@ pub struct NodeResultData {
 }
 
 // ============================================================================
+// Templates Gallery
+// ============================================================================
+
+#[derive(Template)]
+#[template(path = "pages/templates_page.html")]
+pub struct TemplatesPageTemplate {
+    pub title: String,
+    pub templates: Vec<crate::mock::MockTemplateInfo>,
+}
+
+// ============================================================================
 // Settings
 // ============================================================================
 
@@ -148,4 +159,19 @@ pub struct SettingsTemplate {
     pub title: String,
     pub dark_mode: bool,
     pub api_url: String,
+}
+
+// ============================================================================
+// Error Pages
+// ============================================================================
+
+#[derive(Template)]
+#[template(path = "pages/error_404.html")]
+pub struct NotFoundPage;
+
+#[derive(Template)]
+#[template(path = "pages/error_500.html")]
+pub struct InternalErrorPage {
+    pub error_id: String,
+    pub request_path: String,
 }

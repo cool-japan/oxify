@@ -299,7 +299,7 @@ pub fn deskew_image(image: DynamicImage) -> Result<DynamicImage> {
         &rgb_image,
         angle.to_radians(),
         Interpolation::Bilinear,
-        Rgb([255u8, 255u8, 255u8]),
+        imageproc::geometric_transformations::Border::Constant(Rgb([255u8, 255u8, 255u8])),
     );
 
     Ok(DynamicImage::ImageRgb8(rotated))

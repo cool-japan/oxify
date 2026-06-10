@@ -198,7 +198,7 @@ impl VectorCache {
         }
         hasher.update([params.metric as u8]);
 
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize())
     }
 
     /// Get cached search results

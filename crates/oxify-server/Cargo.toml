@@ -33,7 +33,7 @@ futures = { workspace = true }
 # Security crates
 oxify-authn = { version = "0.2.0", path = "../oxify-authn" }
 oxify-authz = { version = "0.2.0", path = "../oxify-authz" }
-jsonwebtoken = { version = "10.3", features = ["rust_crypto"] }
+jsonwebtoken = { version = "10.4", features = ["rust_crypto"] }
 
 # Observability
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
@@ -48,7 +48,7 @@ opentelemetry-semantic-conventions = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 
 # OpenAPI/Swagger
-utoipa = { version = "5.4", features = ["axum_extras", "chrono", "uuid"] }
+utoipa = { version = "5.5", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-swagger-ui = { version = "9.0", features = ["axum"] }
 
 # GraphQL

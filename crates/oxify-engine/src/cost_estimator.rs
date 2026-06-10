@@ -227,7 +227,17 @@ impl CostEstimator {
             NodeKind::Tool(_) => self.estimate_tool_node(node),
             NodeKind::SubWorkflow(_) => self.estimate_subworkflow_node(node),
             NodeKind::Code(_) => self.estimate_code_node(node),
-            _ => NodeCost {
+            NodeKind::Custom(_) => self.estimate_custom_node(node),
+            NodeKind::Start
+            | NodeKind::End
+            | NodeKind::IfElse(_)
+            | NodeKind::Loop(_)
+            | NodeKind::TryCatch(_)
+            | NodeKind::Switch(_)
+            | NodeKind::Parallel(_)
+            | NodeKind::Approval(_)
+            | NodeKind::Form(_)
+            | NodeKind::Vision(_) => NodeCost {
                 node_id: node.id,
                 node_name: node.name.clone(),
                 estimated_input_tokens: 0,
@@ -320,6 +330,27 @@ impl CostEstimator {
             cost_usd: cost,
             operations: vec![CostOperation {
                 operation_type: "code_execution".to_string(),
+                description: node.name.clone(),
+                cost_usd: cost,
+                quantity: 1,
+            }],
+        }
+    }
+
+    /// Estimate cost for a custom plugin node
+    fn estimate_custom_node(&self, node: &Node) -> NodeCost {
+        // Plugin execution cost is unknown without calling the plugin;
+        // treat conservatively at the same level as a tool call.
+        let cost = 0.0001;
+
+        NodeCost {
+            node_id: node.id,
+            node_name: node.name.clone(),
+            estimated_input_tokens: 0,
+            estimated_output_tokens: 0,
+            cost_usd: cost,
+            operations: vec![CostOperation {
+                operation_type: "plugin_execution".to_string(),
                 description: node.name.clone(),
                 cost_usd: cost,
                 quantity: 1,

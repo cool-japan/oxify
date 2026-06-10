@@ -30,6 +30,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -172,6 +173,7 @@ impl EmbeddingProvider for OpenAIEmbeddingProvider {
 struct CacheEntry {
     embedding: Vec<f32>,
     created_at: SystemTime,
+    seq: u64,
 }
 
 /// Embedding cache with TTL
@@ -180,6 +182,7 @@ pub struct EmbeddingCache {
     cache: Arc<Mutex<HashMap<String, CacheEntry>>>,
     ttl: Duration,
     max_entries: usize,
+    next_seq: Arc<AtomicU64>,
 }
 
 impl EmbeddingCache {
@@ -188,6 +191,7 @@ impl EmbeddingCache {
             cache: Arc::new(Mutex::new(HashMap::new())),
             ttl,
             max_entries,
+            next_seq: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -215,11 +219,13 @@ impl EmbeddingCache {
             self.evict_oldest(&mut cache);
         }
 
+        let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
         cache.insert(
             text,
             CacheEntry {
                 embedding,
                 created_at: SystemTime::now(),
+                seq,
             },
         );
     }
@@ -241,10 +247,10 @@ impl EmbeddingCache {
             return;
         }
 
-        // Find oldest entry
+        // Find entry with lowest seq (oldest insertion order)
         let oldest_key = cache
             .iter()
-            .min_by_key(|(_, entry)| entry.created_at)
+            .min_by_key(|(_, entry)| entry.seq)
             .map(|(key, _)| key.clone());
 
         if let Some(key) = oldest_key {
@@ -527,5 +533,41 @@ mod tests {
 
         cached_provider.clear_cache();
         assert_eq!(cached_provider.cache_size(), 0);
+    }
+
+    #[test]
+    fn test_embedding_cache_eviction_order() {
+        // max_entries=3, very long TTL so expiry never fires
+        let cache = EmbeddingCache::new(Duration::from_secs(3600), 3);
+
+        // Insert "a" (seq=0), "b" (seq=1), "c" (seq=2)
+        cache.put("a".to_string(), vec![0.1]);
+        cache.put("b".to_string(), vec![0.2]);
+        cache.put("c".to_string(), vec![0.3]);
+
+        // Insert "d" — cache full; "a" has seq=0 (lowest) and must be evicted
+        cache.put("d".to_string(), vec![0.4]);
+
+        assert_eq!(cache.size(), 3);
+        assert!(cache.get("a").is_none(), "\"a\" should have been evicted");
+        assert!(cache.get("b").is_some(), "\"b\" should still be present");
+        assert!(cache.get("c").is_some(), "\"c\" should still be present");
+        assert!(cache.get("d").is_some(), "\"d\" should be present");
+    }
+
+    #[test]
+    fn test_embedding_cache_eviction_stress() {
+        let max_entries = 5usize;
+        let cache = EmbeddingCache::new(Duration::from_secs(3600), max_entries);
+
+        for i in 0..1000usize {
+            cache.put(format!("key_{i}"), vec![i as f32]);
+            // Cache must never exceed max_entries
+            assert!(
+                cache.size() <= max_entries,
+                "after inserting key_{i}: cache size {} exceeded max_entries {max_entries}",
+                cache.size()
+            );
+        }
     }
 }

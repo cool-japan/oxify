@@ -1,0 +1,276 @@
+---
+# Default values for the oxify Helm chart.
+# Override these in a values override file or via --set flags.
+
+# ------------------------------------------------------------------------------
+# Replica count (HPA will override this when autoscaling.enabled = true)
+# ------------------------------------------------------------------------------
+replicaCount: 2
+
+# ------------------------------------------------------------------------------
+# Container image
+# ------------------------------------------------------------------------------
+image:
+  repository: ghcr.io/cool-japan/oxify-ui
+  tag: "0.2.8"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# ------------------------------------------------------------------------------
+# Service account
+# ------------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# ------------------------------------------------------------------------------
+# Service
+# ------------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+  annotations: {}
+
+# ------------------------------------------------------------------------------
+# Ingress
+# ------------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/enable-gzip: "true"
+  host: oxify.example.com
+  tls:
+    enabled: true
+    secretName: oxify-tls
+
+# ------------------------------------------------------------------------------
+# Resource requests and limits
+# ------------------------------------------------------------------------------
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+# ------------------------------------------------------------------------------
+# Horizontal Pod Autoscaler
+# ------------------------------------------------------------------------------
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# ------------------------------------------------------------------------------
+# Health probes
+# ------------------------------------------------------------------------------
+livenessProbe:
+  path: /health
+  port: http
+  initialDelaySeconds: 30
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  path: /readyz
+  port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# ------------------------------------------------------------------------------
+# Application environment variables (non-secret)
+# These become a ConfigMap and are injected via envFrom.
+# ------------------------------------------------------------------------------
+env:
+  RUST_LOG: "info,oxify_ui=info,tower_http=info"
+  OXIFY_UI_HOST: "0.0.0.0"
+  OXIFY_UI_PORT: "3000"
+  OXIFY_UI_USE_MOCK: "false"
+  DB_MAX_CONNECTIONS: "10"
+  DB_MIN_CONNECTIONS: "2"
+  DB_CONNECT_TIMEOUT_SECS: "30"
+  OXIFY_WORKER_THREADS: "4"
+  OXIFY_MAX_WORKFLOW_CONCURRENCY: "64"
+  OXIFY_EXECUTION_TIMEOUT_SECS: "3600"
+  OTEL_SERVICE_NAME: "oxify-ui"
+  OTEL_RESOURCE_ATTRIBUTES: "service.version=0.2.8,deployment.environment=production"
+
+# ------------------------------------------------------------------------------
+# Secrets (base64 encoded values — use sealed-secrets or external-secrets)
+# ------------------------------------------------------------------------------
+secret:
+  # Each entry is stored in a Kubernetes Secret and injected via envFrom.
+  # Set values here for testing only; prefer an external secrets operator in prod.
+  DATABASE_URL: ""       # postgres://oxify:CHANGE_ME@postgres:5432/oxify
+  REDIS_URL: ""          # redis://:CHANGE_ME@redis:6379
+  JWT_SECRET: ""         # 32+ char random string
+  GITHUB_TOKEN: ""       # ghp_...
+  OPENAI_API_KEY: ""     # sk-...
+  ANTHROPIC_API_KEY: ""  # sk-ant-...
+
+# ------------------------------------------------------------------------------
+# PostgreSQL (Bitnami sub-chart, enabled by default)
+# Set postgresql.enabled = false and provide DATABASE_URL in secret if using
+# an external managed database.
+# ------------------------------------------------------------------------------
+postgresql:
+  enabled: true
+  auth:
+    database: oxify
+    username: oxify
+    # Use postgresPassword to set the postgres superuser password.
+    # existingSecret: oxify-postgres-secret
+    password: "CHANGE_ME"
+    postgresPassword: "CHANGE_ME_SUPER"
+  primary:
+    persistence:
+      enabled: true
+      size: 20Gi
+      # storageClass: standard
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+# ------------------------------------------------------------------------------
+# Redis (Bitnami sub-chart)
+# ------------------------------------------------------------------------------
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: true
+    password: "CHANGE_ME"
+  master:
+    persistence:
+      enabled: true
+      size: 4Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: "500m"
+        memory: 512Mi
+
+# ------------------------------------------------------------------------------
+# Qdrant Vector Database (community sub-chart or standalone deploy)
+# ------------------------------------------------------------------------------
+qdrant:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: qdrant/qdrant
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    httpPort: 6333
+    grpcPort: 6334
+  persistence:
+    enabled: true
+    size: 20Gi
+    # storageClass: standard
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+
+# ------------------------------------------------------------------------------
+# Persistent storage for oxify application data
+# ------------------------------------------------------------------------------
+persistence:
+  enabled: false
+  size: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  # storageClass: standard
+
+# ------------------------------------------------------------------------------
+# Pod-level security context
+# ------------------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# ------------------------------------------------------------------------------
+# Container-level security context
+# ------------------------------------------------------------------------------
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# ------------------------------------------------------------------------------
+# Topology / scheduling
+# ------------------------------------------------------------------------------
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: oxify
+              app.kubernetes.io/component: ui
+          topologyKey: kubernetes.io/hostname
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: oxify
+
+# ------------------------------------------------------------------------------
+# Extra volumes and mounts (e.g. for ConfigMap-backed configuration files)
+# ------------------------------------------------------------------------------
+extraVolumes: []
+extraVolumeMounts: []
+
+# ------------------------------------------------------------------------------
+# Pod annotations and labels
+# ------------------------------------------------------------------------------
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "3000"
+  prometheus.io/path: "/metrics"
+
+podLabels: {}
+
+# ------------------------------------------------------------------------------
+# Termination grace period (seconds)
+# ------------------------------------------------------------------------------
+terminationGracePeriodSeconds: 60

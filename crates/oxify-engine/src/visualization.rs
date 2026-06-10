@@ -146,6 +146,7 @@ impl WorkflowVisualizer {
         output.push_str("  classDef code fill:#F0E68C,stroke:#8B8000;\n");
         output.push_str("  classDef tool fill:#FFA07A,stroke:#8B0000;\n");
         output.push_str("  classDef control fill:#FFE4B5,stroke:#8B4500;\n");
+        output.push_str("  classDef custom fill:#8B5CF6,stroke:#6D28D9,stroke-width:2px;\n");
 
         output
     }
@@ -206,6 +207,7 @@ impl WorkflowVisualizer {
             NodeKind::Approval(_) => ("hexagon", "#FF69B4", "filled"),
             NodeKind::Form(_) => ("note", "#FFC0CB", "filled"),
             NodeKind::Vision(_) => ("box", "#98FB98", "filled,rounded"),
+            NodeKind::Custom(_) => ("box", "#8B5CF6", "filled,rounded"),
         }
     }
 
@@ -216,7 +218,17 @@ impl WorkflowVisualizer {
             NodeKind::End => ("([", "])"),
             NodeKind::IfElse(_) | NodeKind::Switch(_) => ("{", "}"),
             NodeKind::Parallel(_) => ("[/", "/]"),
-            _ => ("[", "]"),
+            NodeKind::LLM(_)
+            | NodeKind::Retriever(_)
+            | NodeKind::Code(_)
+            | NodeKind::Tool(_)
+            | NodeKind::Loop(_)
+            | NodeKind::TryCatch(_)
+            | NodeKind::SubWorkflow(_)
+            | NodeKind::Approval(_)
+            | NodeKind::Form(_)
+            | NodeKind::Vision(_)
+            | NodeKind::Custom(_) => ("[", "]"),
         }
     }
 
@@ -230,7 +242,13 @@ impl WorkflowVisualizer {
             NodeKind::Code(_) => "code",
             NodeKind::Tool(_) => "tool",
             NodeKind::IfElse(_) | NodeKind::Switch(_) | NodeKind::Loop(_) => "control",
-            _ => "control",
+            NodeKind::TryCatch(_)
+            | NodeKind::SubWorkflow(_)
+            | NodeKind::Parallel(_)
+            | NodeKind::Approval(_)
+            | NodeKind::Form(_)
+            | NodeKind::Vision(_) => "control",
+            NodeKind::Custom(_) => "custom",
         }
     }
 
@@ -262,6 +280,7 @@ impl WorkflowVisualizer {
             NodeKind::Approval(_) => "Approval".to_string(),
             NodeKind::Form(_) => "Form".to_string(),
             NodeKind::Vision(cfg) => format!("Vision: {}", cfg.provider),
+            NodeKind::Custom(cfg) => format!("Plugin: {}", cfg.plugin_id),
         }
     }
 

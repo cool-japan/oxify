@@ -276,6 +276,107 @@ impl WasmPlugin {
     }
 }
 
+// ── WasmNodePlugin adapter ──────────────────────────────────────────────────
+//
+// Bridges wasmer's synchronous WasmPlugin::execute(&mut Store, ...) to the
+// async NodePlugin trait.  Interior mutability is provided by a std::sync::Mutex
+// so the whole adapter is Send + Sync without any unsafe code.
+// (wasmer::Store is Send+Sync in wasmer 7.x; Mutex<T: Send> is Send+Sync.)
+
+/// Interior state protected by a mutex.
+#[cfg(feature = "wasm")]
+struct WasmContext {
+    store: wasmer::Store,
+    plugin: WasmPlugin,
+}
+
+/// A loaded WASM plugin exposed as a live [`crate::plugin::NodePlugin`].
+///
+/// The adapter bridges wasmer's synchronous `execute(&mut Store, ...)` to the
+/// `async fn execute(&self, ...)` trait method via a `std::sync::Mutex`.
+/// No `.await` occurs while the guard is held, so the future stays `Send`.
+#[cfg(feature = "wasm")]
+pub struct WasmNodePlugin {
+    name: String,
+    version: String,
+    node_types: Vec<String>,
+    ctx: std::sync::Mutex<WasmContext>,
+}
+
+#[cfg(feature = "wasm")]
+impl WasmNodePlugin {
+    /// Load a WASM file and capture manifest metadata.
+    ///
+    /// `name` MUST equal the manifest's `plugin.name` (and thus
+    /// `CustomConfig.plugin_id`) so the engine registry can dispatch correctly.
+    pub fn from_wasm_file(
+        config: WasmPluginConfig,
+        wasm_path: &Path,
+        name: String,
+        version: String,
+        node_types: Vec<String>,
+    ) -> Result<Self, WasmError> {
+        let mut loader = WasmPluginLoader::new(config);
+        let plugin = loader.load_from_file(wasm_path)?;
+        // Access private fields within the same file — no unsafe required.
+        let WasmPluginLoader { store, .. } = loader;
+        Ok(Self {
+            name,
+            version,
+            node_types,
+            ctx: std::sync::Mutex::new(WasmContext { store, plugin }),
+        })
+    }
+}
+
+#[cfg(feature = "wasm")]
+#[async_trait::async_trait]
+impl crate::plugin::NodePlugin for WasmNodePlugin {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn version(&self) -> &str {
+        &self.version
+    }
+
+    fn supported_node_types(&self) -> Vec<String> {
+        self.node_types.clone()
+    }
+
+    fn validate(&self, _node: &oxify_model::Node) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn metadata(&self) -> crate::plugin::PluginMetadata {
+        crate::plugin::PluginMetadata {
+            name: self.name.clone(),
+            version: self.version.clone(),
+            description: Some("WASM sandboxed plugin".to_string()),
+            author: None,
+            homepage: None,
+        }
+    }
+
+    async fn execute(
+        &self,
+        node: &oxify_model::Node,
+        context: &oxify_model::ExecutionContext,
+    ) -> Result<oxify_model::ExecutionResult, String> {
+        // Lock the mutex, run the fully synchronous wasmer call, release.
+        // No .await occurs while the guard is held — the future never yields
+        // with the mutex locked, so this is safe to use in async contexts.
+        let guard = &mut *self
+            .ctx
+            .lock()
+            .map_err(|_| "WASM plugin mutex poisoned".to_string())?;
+        let WasmContext { store, plugin } = guard;
+        plugin
+            .execute(store, node, context)
+            .map_err(|e| e.to_string())
+    }
+}
+
 /// WASM plugin statistics
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct WasmPluginStats {
@@ -386,5 +487,16 @@ mod tests {
 
         let result = loader.load_from_bytes(&[]);
         assert!(matches!(result, Err(WasmError::FeatureNotEnabled)));
+    }
+
+    // Compile-time proof that WasmNodePlugin is Send + Sync.
+    // The `#[test]` attribute ensures the function is called so there is no
+    // dead_code lint while also serving as a compile-time trait-bound check:
+    // the compiler errors if WasmNodePlugin is not Send+Sync.
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn test_wasm_node_plugin_is_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<super::WasmNodePlugin>();
     }
 }

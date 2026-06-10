@@ -194,7 +194,16 @@ impl<'a> WorkflowVisualizer<'a> {
             NodeKind::Switch(_) => ("{", "}"),
             NodeKind::Parallel(_) => ("[[", "]]"),
             NodeKind::Loop(_) => ("{{", "}}"),
-            _ => ("(", ")"),
+            NodeKind::Custom(_) => ("(", ")"),
+            NodeKind::LLM(_)
+            | NodeKind::Retriever(_)
+            | NodeKind::Code(_)
+            | NodeKind::Tool(_)
+            | NodeKind::TryCatch(_)
+            | NodeKind::SubWorkflow(_)
+            | NodeKind::Approval(_)
+            | NodeKind::Form(_)
+            | NodeKind::Vision(_) => ("(", ")"),
         };
 
         format!("{}{}\"{}\"{}", node_id, open, label, close)
@@ -227,6 +236,7 @@ impl<'a> WorkflowVisualizer<'a> {
         styling.push_str("    classDef parallel fill:#F0E68C,stroke:#BDB76B,stroke-width:2px\n");
 
         // Apply classes to nodes
+        styling.push_str("    classDef custom fill:#8B5CF6,stroke:#6D28D9,stroke-width:2px\n");
         for node in &self.workflow.nodes {
             let node_id = self.sanitize_id(&node.id.to_string());
             let class_name = match node.kind {
@@ -236,7 +246,14 @@ impl<'a> WorkflowVisualizer<'a> {
                 NodeKind::IfElse(_) | NodeKind::Switch(_) => "decision",
                 NodeKind::Loop(_) => "loop",
                 NodeKind::Parallel(_) => "parallel",
-                _ => continue,
+                NodeKind::Custom(_) => "custom",
+                NodeKind::Retriever(_)
+                | NodeKind::Tool(_)
+                | NodeKind::TryCatch(_)
+                | NodeKind::SubWorkflow(_)
+                | NodeKind::Approval(_)
+                | NodeKind::Form(_)
+                | NodeKind::Vision(_) => continue,
             };
             styling.push_str(&format!("    class {} {}\n", node_id, class_name));
         }
@@ -297,7 +314,14 @@ impl<'a> WorkflowVisualizer<'a> {
             NodeKind::IfElse(_) | NodeKind::Switch(_) => ("diamond", "#FFD700"),
             NodeKind::Loop(_) => ("hexagon", "#DDA0DD"),
             NodeKind::Parallel(_) => ("parallelogram", "#F0E68C"),
-            _ => ("box", "#E0E0E0"),
+            NodeKind::Custom(_) => ("box", "#8B5CF6"),
+            NodeKind::Retriever(_)
+            | NodeKind::Tool(_)
+            | NodeKind::TryCatch(_)
+            | NodeKind::SubWorkflow(_)
+            | NodeKind::Approval(_)
+            | NodeKind::Form(_)
+            | NodeKind::Vision(_) => ("box", "#E0E0E0"),
         };
 
         if self.style.use_colors {
@@ -371,7 +395,17 @@ impl<'a> WorkflowVisualizer<'a> {
             NodeKind::IfElse(_) => format!("if ({}) then (yes)\n  :proceed;\nelse (no)\n  :alternative;\nendif", label),
             NodeKind::Switch(_) => format!("switch ({})\ncase (option 1)\n  :handle option 1;\ncase (option 2)\n  :handle option 2;\nendswitch", label),
             NodeKind::Loop(_) => format!("while ({})\n  :process;\nendwhile", label),
-            _ => format!(":{};", label),
+            NodeKind::Custom(ref cfg) => format!(":Custom Plugin: {}\\n[plugin: {}];", label, cfg.plugin_id),
+            NodeKind::LLM(_)
+            | NodeKind::Retriever(_)
+            | NodeKind::Code(_)
+            | NodeKind::Tool(_)
+            | NodeKind::TryCatch(_)
+            | NodeKind::SubWorkflow(_)
+            | NodeKind::Parallel(_)
+            | NodeKind::Approval(_)
+            | NodeKind::Form(_)
+            | NodeKind::Vision(_) => format!(":{};", label),
         }
     }
 
