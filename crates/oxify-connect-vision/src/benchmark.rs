@@ -175,9 +175,11 @@ impl ComparisonReport {
 
     /// Get the fastest provider.
     pub fn fastest_provider(&self) -> Option<&BenchmarkResult> {
-        self.results
-            .iter()
-            .min_by(|a, b| a.mean_ms.partial_cmp(&b.mean_ms).unwrap_or(std::cmp::Ordering::Equal))
+        self.results.iter().min_by(|a, b| {
+            a.mean_ms
+                .partial_cmp(&b.mean_ms)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
     }
 
     /// Save report as JSON.

@@ -60,7 +60,11 @@ impl VectorSearchIndex {
         // Store embeddings
         self.embeddings = embeddings.clone();
         self.entity_ids = embeddings.keys().cloned().collect();
-        self.dimensions = embeddings.values().next().expect("invariant: embeddings non-empty").len();
+        self.dimensions = embeddings
+            .values()
+            .next()
+            .expect("invariant: embeddings non-empty")
+            .len();
 
         // Build embedding matrix for efficient search
         let mut matrix = Vec::new();
@@ -108,7 +112,10 @@ impl VectorSearchIndex {
 
     /// Exact brute-force search
     fn exact_search(&self, query: &[f32], k: usize) -> Result<Vec<SearchResult>> {
-        let matrix = self.embedding_matrix.as_ref().expect("invariant: embedding_matrix built during index build");
+        let matrix = self
+            .embedding_matrix
+            .as_ref()
+            .expect("invariant: embedding_matrix built during index build");
 
         // Compute distances/similarities to all entities
         let scores: Vec<(usize, f32)> = if self.config.parallel {
@@ -317,7 +324,10 @@ impl VectorSearchIndex {
             Self::normalize_vector(&mut normalized_query);
         }
 
-        let matrix = self.embedding_matrix.as_ref().expect("invariant: embedding_matrix built during index build");
+        let matrix = self
+            .embedding_matrix
+            .as_ref()
+            .expect("invariant: embedding_matrix built during index build");
 
         // Pre-filter: only compute distances for matching entities
         let matching_indices: Vec<usize> = (0..self.entity_ids.len())
@@ -444,7 +454,11 @@ impl VectorSearchIndex {
 
         // If this is the first batch, set dimensions
         if !self.is_built {
-            self.dimensions = embeddings.values().next().expect("invariant: embeddings non-empty").len();
+            self.dimensions = embeddings
+                .values()
+                .next()
+                .expect("invariant: embeddings non-empty")
+                .len();
         }
 
         // Add all vectors

@@ -578,8 +578,16 @@ async fn diff_workflows(file1: &str, file2: &str, verbose: bool) -> Result<()> {
         let mut modified = Vec::new();
 
         for id in common_ids {
-            let node1 = workflow1.nodes.iter().find(|n| &n.id == id).expect("invariant: id from intersection of both node sets");
-            let node2 = workflow2.nodes.iter().find(|n| &n.id == id).expect("invariant: id from intersection of both node sets");
+            let node1 = workflow1
+                .nodes
+                .iter()
+                .find(|n| &n.id == id)
+                .expect("invariant: id from intersection of both node sets");
+            let node2 = workflow2
+                .nodes
+                .iter()
+                .find(|n| &n.id == id)
+                .expect("invariant: id from intersection of both node sets");
 
             if node1.name != node2.name
                 || format!("{:?}", node1.kind) != format!("{:?}", node2.kind)

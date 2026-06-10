@@ -218,7 +218,10 @@ impl DependencyGraph {
                     self.dfs_detect_cycle(dep_name, visited, rec_stack, path)?;
                 } else if rec_stack.contains(dep_name) {
                     // Found a cycle
-                    let cycle_start = path.iter().position(|p| p == dep_name).expect("invariant: dep_name in path when rec_stack contains it");
+                    let cycle_start = path
+                        .iter()
+                        .position(|p| p == dep_name)
+                        .expect("invariant: dep_name in path when rec_stack contains it");
                     let cycle_path: Vec<_> = path[cycle_start..].to_vec();
                     return Err(DependencyError::CircularDependency(cycle_path.join(" -> ")));
                 }

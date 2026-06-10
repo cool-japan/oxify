@@ -207,7 +207,12 @@ impl<P: LlmProvider + 'static> QueueWorker<P> {
             }
 
             // Acquire worker permit
-            let permit = self.semaphore.clone().acquire_owned().await.expect("semaphore should not be closed");
+            let permit = self
+                .semaphore
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("semaphore should not be closed");
 
             // Dequeue request
             let priority_req = {

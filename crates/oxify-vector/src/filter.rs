@@ -152,7 +152,10 @@ impl Filter {
             .into_iter()
             .map(|f| {
                 if f.conditions.len() == 1 {
-                    f.conditions.into_iter().next().expect("invariant: conditions.len() == 1 guard passed")
+                    f.conditions
+                        .into_iter()
+                        .next()
+                        .expect("invariant: conditions.len() == 1 guard passed")
                 } else {
                     FilterCondition::All(f.conditions)
                 }

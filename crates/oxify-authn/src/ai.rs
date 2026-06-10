@@ -386,7 +386,10 @@ impl AiSecurityEngine {
 
         let trust_level = TrustLevel::from_score(adjusted_trust);
 
-        let last_event = behavior.events.back().expect("invariant: events non-empty after processing");
+        let last_event = behavior
+            .events
+            .back()
+            .expect("invariant: events non-empty after processing");
 
         Ok(BehaviorProfile {
             user_id: user_id.to_string(),

@@ -150,7 +150,10 @@ impl ColbertIndex {
         }
 
         // Determine dimension from first token
-        let first_doc_tokens = doc_tokens.values().next().expect("invariant: doc_tokens non-empty from guard");
+        let first_doc_tokens = doc_tokens
+            .values()
+            .next()
+            .expect("invariant: doc_tokens non-empty from guard");
         if first_doc_tokens.is_empty() {
             anyhow::bail!("Document has no token embeddings");
         }
@@ -241,7 +244,11 @@ impl ColbertIndex {
 
         // Sort by score (descending) and return top-k
         let mut sorted_results = results;
-        sorted_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        sorted_results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         Ok(sorted_results.into_iter().take(k).collect())
     }

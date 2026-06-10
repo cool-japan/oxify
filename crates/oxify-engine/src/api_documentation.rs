@@ -436,7 +436,11 @@ impl ApiDocGenerator {
                 }
             });
         }
-        if !responses.as_object().expect("invariant: responses initialized as json!({})").is_empty() {
+        if !responses
+            .as_object()
+            .expect("invariant: responses initialized as json!({})")
+            .is_empty()
+        {
             operation["responses"] = responses;
         } else {
             // Default response

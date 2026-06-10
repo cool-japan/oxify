@@ -285,7 +285,11 @@ impl<P: VectorProvider> ColBERTProvider<P> {
         }
 
         // Sort by score descending
-        scored_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        scored_results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Take top k
         scored_results.truncate(top_k);

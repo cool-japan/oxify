@@ -136,7 +136,11 @@ impl ConsistentHash {
         // Find the first shard with hash >= key hash (clockwise on ring)
         match self.ring.range(hash..).next() {
             Some((&_, &shard_id)) => shard_id,
-            None => *self.ring.values().next().expect("invariant: ring non-empty (checked at start of function)"), // Wrap around to first shard
+            None => *self
+                .ring
+                .values()
+                .next()
+                .expect("invariant: ring non-empty (checked at start of function)"), // Wrap around to first shard
         }
     }
 

@@ -207,7 +207,8 @@ impl Metric {
         let mut output = String::new();
 
         // Type and help
-        writeln!(&mut output, "# HELP {} {}", self.name, self.help).expect("writeln! to String is infallible");
+        writeln!(&mut output, "# HELP {} {}", self.name, self.help)
+            .expect("writeln! to String is infallible");
         writeln!(
             &mut output,
             "# TYPE {} {}",
@@ -218,7 +219,8 @@ impl Metric {
 
         // Metric value with labels
         if self.labels.is_empty() {
-            writeln!(&mut output, "{} {}", self.name, self.value).expect("writeln! to String is infallible");
+            writeln!(&mut output, "{} {}", self.name, self.value)
+                .expect("writeln! to String is infallible");
         } else {
             let labels: Vec<String> = self
                 .labels
@@ -506,7 +508,8 @@ impl MetricsExporter {
             MetricsFormat::Flat => {
                 let mut output = String::new();
                 for metric in metrics {
-                    writeln!(&mut output, "{}: {}", metric.name, metric.value).expect("writeln! to String is infallible");
+                    writeln!(&mut output, "{}: {}", metric.name, metric.value)
+                        .expect("writeln! to String is infallible");
                 }
                 output
             }

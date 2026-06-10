@@ -471,7 +471,10 @@ impl AuthzEngine {
         }
 
         if cache_misses.is_empty() {
-            return Ok(results.into_iter().map(|r| r.expect("invariant: all results populated before return")).collect());
+            return Ok(results
+                .into_iter()
+                .map(|r| r.expect("invariant: all results populated before return"))
+                .collect());
         }
 
         // Phase 2: Use Bloom filter to filter out definitely non-existent tuples
@@ -491,7 +494,10 @@ impl AuthzEngine {
         }
 
         if bloom_positives.is_empty() {
-            return Ok(results.into_iter().map(|r| r.expect("invariant: all results populated before return")).collect());
+            return Ok(results
+                .into_iter()
+                .map(|r| r.expect("invariant: all results populated before return"))
+                .collect());
         }
 
         // Phase 3: Batch query PostgreSQL using ANY() for direct checks
@@ -524,7 +530,10 @@ impl AuthzEngine {
             });
         }
 
-        Ok(results.into_iter().map(|r| r.expect("invariant: all results populated before return")).collect())
+        Ok(results
+            .into_iter()
+            .map(|r| r.expect("invariant: all results populated before return"))
+            .collect())
     }
 
     /// Batch check direct tuples (SQLite version uses individual queries)

@@ -430,7 +430,8 @@ pub async fn cache_middleware(cache: Arc<ResponseCache>, req: Request, next: Nex
         for (key, value) in &entry.headers {
             if let Ok(header_value) = HeaderValue::from_str(value) {
                 response.headers_mut().insert(
-                    axum::http::HeaderName::from_bytes(key.as_bytes()).expect("cached header name should be valid bytes"),
+                    axum::http::HeaderName::from_bytes(key.as_bytes())
+                        .expect("cached header name should be valid bytes"),
                     header_value,
                 );
             }
