@@ -2210,7 +2210,7 @@ impl Engine {
             .map_err(|e| EngineError::TemplateError(e.to_string()))?;
 
         for cap in re.captures_iter(template) {
-            let var_name = cap.get(1).unwrap().as_str().trim();
+            let var_name = cap.get(1).expect("invariant: capture group 1 present in regex").as_str().trim();
 
             // Check in context variables
             if let Some(value) = ctx.variables.get(var_name) {
@@ -2245,8 +2245,8 @@ impl Engine {
 
         // Build adjacency list and in-degree
         for edge in &workflow.edges {
-            adj_list.get_mut(&edge.from).unwrap().push(edge.to);
-            *in_degree.get_mut(&edge.to).unwrap() += 1;
+            adj_list.get_mut(&edge.from).expect("invariant: edge.from populated from workflow.nodes").push(edge.to);
+            *in_degree.get_mut(&edge.to).expect("invariant: edge.to populated from workflow.nodes") += 1;
         }
 
         // Kahn's algorithm
@@ -2263,7 +2263,7 @@ impl Engine {
 
             if let Some(neighbors) = adj_list.get(&node_id) {
                 for &neighbor in neighbors {
-                    let deg = in_degree.get_mut(&neighbor).unwrap();
+                    let deg = in_degree.get_mut(&neighbor).expect("invariant: neighbor populated from workflow.nodes");
                     *deg -= 1;
                     if *deg == 0 {
                         queue.push(neighbor);
@@ -2302,8 +2302,8 @@ impl Engine {
 
         // Build adjacency list and in-degree
         for edge in &workflow.edges {
-            adj_list.get_mut(&edge.from).unwrap().push(edge.to);
-            *in_degree.get_mut(&edge.to).unwrap() += 1;
+            adj_list.get_mut(&edge.from).expect("invariant: edge.from populated from workflow.nodes").push(edge.to);
+            *in_degree.get_mut(&edge.to).expect("invariant: edge.to populated from workflow.nodes") += 1;
         }
 
         // BFS with level tracking
@@ -2328,7 +2328,7 @@ impl Engine {
             for node_id in current_level {
                 if let Some(neighbors) = adj_list.get(&node_id) {
                     for &neighbor in neighbors {
-                        let deg = in_degree.get_mut(&neighbor).unwrap();
+                        let deg = in_degree.get_mut(&neighbor).expect("invariant: neighbor populated from workflow.nodes");
                         *deg -= 1;
                         if *deg == 0 {
                             next_queue.push(neighbor);

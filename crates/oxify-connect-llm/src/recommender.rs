@@ -308,7 +308,7 @@ impl ModelRecommender {
             .collect();
 
         // Sort by score (highest first)
-        candidates.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
+        candidates.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
         // Get the best recommendation
         let best = candidates.first()?;

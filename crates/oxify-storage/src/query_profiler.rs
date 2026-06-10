@@ -405,26 +405,26 @@ impl QueryProfiler {
 
         // Replace string literals
         fingerprint = regex::Regex::new(r"'[^']*'")
-            .unwrap()
+            .expect("invariant: valid regex literal")
             .replace_all(&fingerprint, "'?'")
             .to_string();
 
         // Replace numeric literals
         fingerprint = regex::Regex::new(r"\b\d+\b")
-            .unwrap()
+            .expect("invariant: valid regex literal")
             .replace_all(&fingerprint, "?")
             .to_string();
 
         // Replace UUIDs
         fingerprint =
             regex::Regex::new(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
-                .unwrap()
+                .expect("invariant: valid regex literal")
                 .replace_all(&fingerprint, "?")
                 .to_string();
 
         // Normalize whitespace
         fingerprint = regex::Regex::new(r"\s+")
-            .unwrap()
+            .expect("invariant: valid regex literal")
             .replace_all(&fingerprint, " ")
             .trim()
             .to_string();

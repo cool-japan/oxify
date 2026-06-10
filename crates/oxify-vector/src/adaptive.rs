@@ -146,7 +146,7 @@ impl AdaptiveIndex {
         }
 
         self.num_vectors = embeddings.len();
-        self.dimensions = embeddings.values().next().unwrap().len();
+        self.dimensions = embeddings.values().next().expect("invariant: embeddings non-empty from guard").len();
         self.embeddings_cache = embeddings.clone();
 
         info!(

@@ -243,11 +243,11 @@ impl CodeExecutor {
         if value.is_unit() {
             Ok(Value::Null)
         } else if value.is::<bool>() {
-            Ok(Value::Bool(value.as_bool().unwrap()))
+            Ok(Value::Bool(value.as_bool().expect("invariant: is::<bool>() guard passed")))
         } else if value.is::<i64>() {
-            Ok(serde_json::json!(value.as_int().unwrap()))
+            Ok(serde_json::json!(value.as_int().expect("invariant: is::<i64>() guard passed")))
         } else if value.is::<f64>() {
-            Ok(serde_json::json!(value.as_float().unwrap()))
+            Ok(serde_json::json!(value.as_float().expect("invariant: is::<f64>() guard passed")))
         } else if value.is::<rhai::ImmutableString>() {
             Ok(Value::String(value.to_string()))
         } else if value.is::<rhai::Array>() {

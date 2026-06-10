@@ -371,7 +371,7 @@ impl RegistryClient {
             .post(&create_url)
             .header(
                 "Authorization",
-                format!("Bearer {}", self.config.api_key.as_ref().unwrap()),
+                format!("Bearer {}", self.config.api_key.as_ref().expect("api_key required for marketplace operations")),
             )
             .header("Content-Type", "application/json")
             .body(manifest_json);
@@ -406,7 +406,7 @@ impl RegistryClient {
             .put(&upload_url)
             .header(
                 "Authorization",
-                format!("Bearer {}", self.config.api_key.as_ref().unwrap()),
+                format!("Bearer {}", self.config.api_key.as_ref().expect("api_key required for marketplace operations")),
             )
             .header("Content-Type", "application/gzip")
             .body(package_bytes);

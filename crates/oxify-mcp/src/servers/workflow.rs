@@ -271,7 +271,7 @@ fn extract_template_variables(text: &str) -> Vec<String> {
                         break;
                     }
                 } else {
-                    var_name.push(chars.next().unwrap());
+                    var_name.push(chars.next().expect("invariant: peek() confirmed Some"));
                 }
             }
         }

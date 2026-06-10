@@ -174,7 +174,7 @@ impl SoftDeleteBuilder {
         }
 
         let update_clause = updates.join(", ");
-        let where_clause = self.where_clause.as_ref().unwrap();
+        let where_clause = self.where_clause.as_ref().expect("invariant: where_clause checked non-None above");
 
         Ok(format!(
             "UPDATE {} SET {} WHERE {} AND {} IS NULL",
@@ -333,7 +333,7 @@ impl SoftDeleteRestorer {
         }
 
         let update_clause = updates.join(", ");
-        let where_clause = self.where_clause.as_ref().unwrap();
+        let where_clause = self.where_clause.as_ref().expect("invariant: where_clause checked non-None above");
 
         Ok(format!(
             "UPDATE {} SET {} WHERE {} AND {} IS NOT NULL",

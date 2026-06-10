@@ -69,7 +69,7 @@ impl ConditionalEvaluator {
             .map_err(|e| EngineError::TemplateError(e.to_string()))?;
 
         for cap in re.captures_iter(expression) {
-            let path_expr = cap.get(1).unwrap().as_str();
+            let path_expr = cap.get(1).expect("invariant: capture group 1 present in regex").as_str();
             let parts: Vec<&str> = path_expr.split('.').collect();
 
             if parts.is_empty() {
@@ -83,7 +83,7 @@ impl ConditionalEvaluator {
             // First try to get from node results
             let json_value = if var_name.starts_with("node_") {
                 // Extract UUID from variable name (e.g., "node_a1b2c3d4_..." -> UUID)
-                let uuid_str = var_name.strip_prefix("node_").unwrap().replace('_', "-");
+                let uuid_str = var_name.strip_prefix("node_").expect("invariant: starts_with('node_') guard passed").replace('_', "-");
                 if let Ok(node_id) = uuid::Uuid::parse_str(&uuid_str) {
                     if let Some(node_result) = self.exec_ctx.node_results.get(&node_id) {
                         if let oxify_model::ExecutionResult::Success(output) = &node_result.result {

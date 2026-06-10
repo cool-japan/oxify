@@ -129,7 +129,7 @@ impl ReplicateProvider {
     /// - `"owner/name"` → `None`
     fn extract_version(&self) -> Option<String> {
         if self.has_version() {
-            let idx = self.model.find(':').unwrap();
+            let idx = self.model.find(':').expect("invariant: has_version() confirmed ':' present");
             Some(self.model[idx + 1..].to_string())
         } else {
             None

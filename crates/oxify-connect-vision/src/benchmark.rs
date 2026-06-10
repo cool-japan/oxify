@@ -42,7 +42,7 @@ impl BenchmarkResult {
             return Self::empty(provider);
         }
 
-        timings.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        timings.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let iterations = timings.len();
         let min_ms = timings[0];
@@ -177,7 +177,7 @@ impl ComparisonReport {
     pub fn fastest_provider(&self) -> Option<&BenchmarkResult> {
         self.results
             .iter()
-            .min_by(|a, b| a.mean_ms.partial_cmp(&b.mean_ms).unwrap())
+            .min_by(|a, b| a.mean_ms.partial_cmp(&b.mean_ms).unwrap_or(std::cmp::Ordering::Equal))
     }
 
     /// Save report as JSON.

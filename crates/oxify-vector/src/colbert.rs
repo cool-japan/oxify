@@ -150,7 +150,7 @@ impl ColbertIndex {
         }
 
         // Determine dimension from first token
-        let first_doc_tokens = doc_tokens.values().next().unwrap();
+        let first_doc_tokens = doc_tokens.values().next().expect("invariant: doc_tokens non-empty from guard");
         if first_doc_tokens.is_empty() {
             anyhow::bail!("Document has no token embeddings");
         }
@@ -187,7 +187,7 @@ impl ColbertIndex {
         }
 
         // Verify all tokens have correct dimension
-        let dim = self.dim.unwrap();
+        let dim = self.dim.expect("invariant: dim set above if was None");
         for token in &token_embeddings {
             if token.len() != dim {
                 anyhow::bail!(
@@ -241,7 +241,7 @@ impl ColbertIndex {
 
         // Sort by score (descending) and return top-k
         let mut sorted_results = results;
-        sorted_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+        sorted_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
         Ok(sorted_results.into_iter().take(k).collect())
     }

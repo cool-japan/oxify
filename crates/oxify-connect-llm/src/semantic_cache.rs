@@ -159,7 +159,9 @@ impl SemanticCache {
             model: None,
         };
         let response = self.embedding_provider.embed(request).await?;
-        Ok(response.embeddings.into_iter().next().unwrap())
+        response.embeddings.into_iter().next().ok_or_else(|| {
+            crate::LlmError::ApiError("embedding provider returned empty embeddings".to_string())
+        })
     }
 
     /// Calculate cosine similarity between two embeddings
@@ -264,7 +266,7 @@ impl SemanticCache {
                 .enumerate()
                 .min_by_key(|(_, e)| e.access_count)
                 .map(|(idx, _)| idx)
-                .unwrap();
+                .expect("invariant: entries non-empty when len > max_size");
             entries.remove(min_idx);
         }
     }

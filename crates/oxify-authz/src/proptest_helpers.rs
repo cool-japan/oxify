@@ -25,12 +25,12 @@ use proptest::prelude::*;
 
 /// Strategy for generating valid namespace names
 pub fn namespace_strategy() -> impl Strategy<Value = String> {
-    prop::string::string_regex("[a-z][a-z0-9_]{2,20}").unwrap()
+    prop::string::string_regex("[a-z][a-z0-9_]{2,20}").expect("invariant: valid regex literal")
 }
 
 /// Strategy for generating valid object IDs
 pub fn object_id_strategy() -> impl Strategy<Value = String> {
-    prop::string::string_regex("[a-zA-Z0-9_-]{1,50}").unwrap()
+    prop::string::string_regex("[a-zA-Z0-9_-]{1,50}").expect("invariant: valid regex literal")
 }
 
 /// Strategy for generating valid relation names
@@ -46,7 +46,7 @@ pub fn relation_strategy() -> impl Strategy<Value = String> {
 
 /// Strategy for generating user IDs
 pub fn user_id_strategy() -> impl Strategy<Value = String> {
-    prop::string::string_regex("user:[a-z0-9_]{3,20}").unwrap()
+    prop::string::string_regex("user:[a-z0-9_]{3,20}").expect("invariant: valid regex literal")
 }
 
 /// Strategy for generating Subject variants

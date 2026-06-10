@@ -362,7 +362,7 @@ impl EncryptionProvider {
         let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("system time before Unix epoch")
             .as_nanos();
 
         use sha2::{Digest, Sha256};
@@ -381,7 +381,7 @@ impl EncryptionProvider {
         let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("system time before Unix epoch")
             .as_nanos();
 
         use sha2::{Digest, Sha256};

@@ -179,7 +179,7 @@ pub async fn assert_can(
             context: None,
         })
         .await
-        .unwrap();
+        .expect("permission check call should not fail");
 
     assert!(
         result.allowed,
@@ -205,7 +205,7 @@ pub async fn assert_cannot(
             context: None,
         })
         .await
-        .unwrap();
+        .expect("permission check call should not fail");
 
     assert!(
         !result.allowed,

@@ -168,11 +168,11 @@ fn sanitize_path(path: &str) -> String {
 
     // Replace UUID-like patterns
     let uuid_pattern =
-        regex::Regex::new(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").unwrap();
+        regex::Regex::new(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").expect("invariant: valid regex literal");
     sanitized = uuid_pattern.replace_all(&sanitized, ":id").to_string();
 
     // Replace numeric IDs
-    let id_pattern = regex::Regex::new(r"/\d+(/|$)").unwrap();
+    let id_pattern = regex::Regex::new(r"/\d+(/|$)").expect("invariant: valid regex literal");
     sanitized = id_pattern.replace_all(&sanitized, "/:id$1").to_string();
 
     sanitized

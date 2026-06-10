@@ -112,7 +112,7 @@ where
     pub async fn check_now(&mut self) -> &HealthCheckResult {
         let result = default_health_check(&self.provider).await;
         self.last_result = Some(result);
-        self.last_result.as_ref().unwrap()
+        self.last_result.as_ref().expect("invariant: check_now() sets last_result before returning it")
     }
 
     /// Get reference to the provider

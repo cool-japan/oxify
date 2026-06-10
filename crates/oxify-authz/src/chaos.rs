@@ -227,7 +227,7 @@ impl ChaosExecutor {
             0.0
         } else {
             let mut sorted = latencies.clone();
-            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             let p99_idx = (sorted.len() as f64 * 0.99) as usize;
             sorted[p99_idx.min(sorted.len() - 1)]
         };

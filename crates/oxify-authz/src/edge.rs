@@ -120,7 +120,7 @@ impl CrdtTuple {
     fn current_timestamp() -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("system time before Unix epoch")
             .as_micros() as u64
     }
 }

@@ -269,7 +269,7 @@ impl HnswIndex {
         self.max_level = 0;
 
         // Store vectors
-        self.dimensions = embeddings.values().next().unwrap().len();
+        self.dimensions = embeddings.values().next().expect("invariant: embeddings non-empty").len();
 
         for (entity_id, vec) in embeddings {
             let mut v = vec.clone();
@@ -308,7 +308,7 @@ impl HnswIndex {
             return Ok(());
         }
 
-        let entry_point = self.entry_point.unwrap();
+        let entry_point = self.entry_point.expect("invariant: entry_point.is_none() guard checked above");
 
         // Search from top layer down to node's level + 1
         let mut current_nearest = entry_point;

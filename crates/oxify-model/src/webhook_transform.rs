@@ -636,7 +636,7 @@ fn apply_string_transform(
 
 /// Render a template with {{path}} placeholders
 fn render_template(template: &str, input: &Value) -> String {
-    let re = regex::Regex::new(r"\{\{([^}]+)\}\}").unwrap();
+    let re = regex::Regex::new(r"\{\{([^}]+)\}\}").expect("invariant: valid regex literal");
     re.replace_all(template, |caps: &regex::Captures| {
         let path = &caps[1];
         get_value_by_path(input, path)

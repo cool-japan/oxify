@@ -258,7 +258,7 @@ impl IvfPqIndex {
         }
 
         // Get dimension from first vector
-        let dim = vectors.values().next().unwrap().len();
+        let dim = vectors.values().next().expect("invariant: vectors non-empty from guard").len();
         self.dim = Some(dim);
 
         let vec_list: Vec<Vec<f32>> = vectors.values().cloned().collect();
@@ -293,7 +293,7 @@ impl IvfPqIndex {
             let cluster_id = self.assign_to_cluster(vector);
 
             // Quantize vector with PQ
-            let codes = self.pq.as_ref().unwrap().encode(vector);
+            let codes = self.pq.as_ref().expect("invariant: pq initialized during build").encode(vector);
 
             // Add to inverted list
             self.inverted_lists[cluster_id].push((entity_id.clone(), codes));
@@ -339,7 +339,7 @@ impl IvfPqIndex {
             .map(|(idx, centroid)| (idx, compute_distance(&self.config.metric, query, centroid)))
             .collect();
 
-        cluster_distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        cluster_distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let probe_clusters: Vec<usize> = cluster_distances
             .iter()
@@ -348,7 +348,7 @@ impl IvfPqIndex {
             .collect();
 
         // Step 2: Search within probed clusters using asymmetric distance
-        let pq = self.pq.as_ref().unwrap();
+        let pq = self.pq.as_ref().expect("invariant: pq initialized during build");
         let mut candidates = Vec::new();
 
         for cluster_id in probe_clusters {
@@ -364,7 +364,7 @@ impl IvfPqIndex {
         }
 
         // Step 3: Sort and return top-k
-        candidates.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap());
+        candidates.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal));
 
         let results: Vec<SearchResult> = candidates
             .into_iter()
@@ -422,7 +422,7 @@ impl IvfPqIndex {
             return 0.0;
         }
 
-        let original_size = self.size * self.dim.unwrap() * 4; // f32 = 4 bytes
+        let original_size = self.size * self.dim.expect("invariant: dim.is_none() guard checked above") * 4; // f32 = 4 bytes
         let compressed_size = self.estimate_memory();
 
         original_size as f32 / compressed_size as f32
@@ -495,8 +495,8 @@ fn kmeans(vectors: &[Vec<f32>], k: usize, max_iterations: usize) -> Result<Vec<V
                     .iter()
                     .enumerate()
                     .map(|(idx, c)| (idx, euclidean_distance(v, c)))
-                    .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-                    .unwrap()
+                    .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                    .expect("invariant: centroids non-empty")
                     .0
             })
             .collect();

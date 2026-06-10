@@ -256,7 +256,7 @@ pub fn sse_error_response(status: StatusCode, message: &str) -> Response {
         .status(status)
         .header(header::CONTENT_TYPE, "text/plain")
         .body(Body::from(message.to_string()))
-        .unwrap()
+        .expect("Response builder with valid status should not fail")
 }
 
 #[cfg(test)]

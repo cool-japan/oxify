@@ -141,7 +141,7 @@ impl AuditEvent {
             id: Uuid::new_v4().to_string(),
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("system time before Unix epoch")
                 .as_millis() as i64,
             tenant_id: None,
             event_type,

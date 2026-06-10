@@ -80,7 +80,7 @@ impl SubWorkflowExecutor {
             .map_err(|e| EngineError::TemplateError(e.to_string()))?;
 
         if let Some(cap) = re.captures(template) {
-            let var_name = cap.get(1).unwrap().as_str().trim();
+            let var_name = cap.get(1).expect("invariant: capture group 1 present in regex").as_str().trim();
             return ctx
                 .variables
                 .get(var_name)
@@ -94,7 +94,7 @@ impl SubWorkflowExecutor {
             .map_err(|e| EngineError::TemplateError(e.to_string()))?;
 
         for cap in re.captures_iter(template) {
-            let var_name = cap.get(1).unwrap().as_str().trim();
+            let var_name = cap.get(1).expect("invariant: capture group 1 present in regex").as_str().trim();
 
             if let Some(value) = ctx.variables.get(var_name) {
                 let value_str = match value {

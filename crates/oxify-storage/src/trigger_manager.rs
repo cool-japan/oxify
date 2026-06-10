@@ -214,7 +214,7 @@ impl TriggerBuilder {
 
         let mut sql = format!("CREATE TRIGGER {}", self.name);
 
-        sql.push_str(&format!(" {}", self.timing.unwrap().as_str()));
+        sql.push_str(&format!(" {}", self.timing.expect("invariant: timing checked non-None above").as_str()));
 
         let events_str = self
             .events
@@ -232,7 +232,7 @@ impl TriggerBuilder {
         sql.push_str(&format!(
             " {} ON {}",
             events_str,
-            self.table_name.as_ref().unwrap()
+            self.table_name.as_ref().expect("invariant: table_name checked non-None above")
         ));
 
         match self.level {
@@ -246,7 +246,7 @@ impl TriggerBuilder {
 
         sql.push_str(&format!(
             " EXECUTE FUNCTION {}()",
-            self.function_name.as_ref().unwrap()
+            self.function_name.as_ref().expect("invariant: function_name checked non-None above")
         ));
 
         Ok(sql)

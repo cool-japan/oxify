@@ -231,7 +231,7 @@ impl LshIndex {
         info!("Building LSH index for {} entities", embeddings.len());
 
         // Get dimensions from first vector
-        self.dimensions = embeddings.values().next().unwrap().len();
+        self.dimensions = embeddings.values().next().expect("invariant: embeddings non-empty from guard").len();
 
         // Validate all vectors have same dimension
         for (id, vec) in embeddings {

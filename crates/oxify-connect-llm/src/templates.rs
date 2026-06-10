@@ -76,8 +76,8 @@ impl PromptTemplate {
 
         // Check for any remaining unreplaced variables (strict mode)
         if result.contains("{{") && result.contains("}}") {
-            let start = result.find("{{").unwrap();
-            let end = result[start..].find("}}").unwrap() + start + 2;
+            let start = result.find("{{").expect("invariant: contains('{{') guard passed");
+            let end = result[start..].find("}}").expect("invariant: contains('}}') guard passed") + start + 2;
             let var_name = &result[start + 2..end - 2];
             return Err(TemplateError::MissingVariable(var_name.to_string()));
         }

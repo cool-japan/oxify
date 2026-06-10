@@ -380,7 +380,7 @@ impl CostEstimate {
     /// Get the most expensive nodes
     pub fn top_expensive_nodes(&self, limit: usize) -> Vec<&NodeCost> {
         let mut costs: Vec<&NodeCost> = self.node_costs.values().collect();
-        costs.sort_by(|a, b| b.cost_usd.partial_cmp(&a.cost_usd).unwrap());
+        costs.sort_by(|a, b| b.cost_usd.partial_cmp(&a.cost_usd).unwrap_or(std::cmp::Ordering::Equal));
         costs.into_iter().take(limit).collect()
     }
 }

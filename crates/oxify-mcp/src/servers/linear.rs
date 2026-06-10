@@ -109,18 +109,18 @@ impl LinearServer {
 
         // GraphQL can return HTTP 200 with logical errors — surface them explicitly
         if let Some(errors) = result.get("errors") {
-            if errors.is_array() && !errors.as_array().unwrap().is_empty() {
-                let msg = errors
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .filter_map(|e| e["message"].as_str())
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                return Err(McpError::ToolExecutionError(format!(
-                    "Linear GraphQL error: {}",
-                    msg
-                )));
+            if let Some(error_array) = errors.as_array() {
+                if !error_array.is_empty() {
+                    let msg = error_array
+                        .iter()
+                        .filter_map(|e| e["message"].as_str())
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    return Err(McpError::ToolExecutionError(format!(
+                        "Linear GraphQL error: {}",
+                        msg
+                    )));
+                }
             }
         }
 

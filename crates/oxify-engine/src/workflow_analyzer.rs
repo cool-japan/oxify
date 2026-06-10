@@ -411,8 +411,9 @@ impl WorkflowAnalyzer {
 
         // BFS to calculate levels
         let mut levels: HashMap<NodeId, usize> = HashMap::new();
-        let mut queue = vec![(start_node.unwrap().id, 0)];
-        levels.insert(start_node.unwrap().id, 0);
+        let start_node = start_node.expect("invariant: is_none guard checked above");
+        let mut queue = vec![(start_node.id, 0)];
+        levels.insert(start_node.id, 0);
 
         let mut max_level = 0;
         while let Some((node_id, level)) = queue.pop() {

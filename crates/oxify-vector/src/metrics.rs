@@ -209,8 +209,8 @@ impl SearchMetrics {
         let avg_latency = Duration::from_micros(avg_micros as u64);
 
         // Calculate min and max
-        let min_latency = *sorted_latencies.first().unwrap();
-        let max_latency = *sorted_latencies.last().unwrap();
+        let min_latency = *sorted_latencies.first().expect("invariant: sorted_latencies non-empty from guard");
+        let max_latency = *sorted_latencies.last().expect("invariant: sorted_latencies non-empty from guard");
 
         // Calculate QPS
         let elapsed = self.start_time.elapsed().as_secs_f64();

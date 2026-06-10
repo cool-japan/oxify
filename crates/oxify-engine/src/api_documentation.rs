@@ -342,14 +342,14 @@ impl ApiDocGenerator {
         for endpoint in self.endpoints.values() {
             let path_obj = paths
                 .as_object_mut()
-                .unwrap()
+                .expect("invariant: paths initialized as json!({})")
                 .entry(&endpoint.path)
                 .or_insert_with(|| json!({}));
 
             let operation = self.build_operation(endpoint);
             path_obj
                 .as_object_mut()
-                .unwrap()
+                .expect("invariant: path_obj initialized as json!({})")
                 .insert(endpoint.method.to_lowercase(), operation);
         }
 
@@ -436,7 +436,7 @@ impl ApiDocGenerator {
                 }
             });
         }
-        if !responses.as_object().unwrap().is_empty() {
+        if !responses.as_object().expect("invariant: responses initialized as json!({})").is_empty() {
             operation["responses"] = responses;
         } else {
             // Default response

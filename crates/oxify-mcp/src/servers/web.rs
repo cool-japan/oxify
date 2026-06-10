@@ -19,7 +19,7 @@ impl WebServer {
                 .user_agent("OxiFY-MCP/0.1.0")
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
-                .unwrap(),
+                .expect("reqwest::Client::builder() with default settings should not fail"),
             max_response_size: 10 * 1024 * 1024, // 10MB
         }
     }

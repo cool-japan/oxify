@@ -230,7 +230,7 @@ impl SpanContext {
         let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("system time before Unix epoch")
             .as_nanos();
         format!("{:032x}", timestamp ^ (counter as u128))
     }
@@ -325,7 +325,7 @@ impl SpanEvent {
             name: name.into(),
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .expect("system time before Unix epoch")
                 .as_nanos() as u64,
             attributes: SpanAttributes::new(),
         }
@@ -569,7 +569,7 @@ impl TracingProvider {
 
         let start_ns = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("system time before Unix epoch")
             .as_nanos() as u64;
 
         let duration = span.duration();

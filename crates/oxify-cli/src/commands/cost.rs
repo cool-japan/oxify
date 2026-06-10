@@ -213,8 +213,8 @@ pub async fn handle_cost_compare_command(workflow_files: Vec<String>) -> Result<
 
     // Cost difference analysis
     if estimates.len() >= 2 {
-        let cheapest = &estimates.last().unwrap();
-        let most_expensive = &estimates.first().unwrap();
+        let cheapest = &estimates.last().expect("invariant: estimates.len() >= 2");
+        let most_expensive = &estimates.first().expect("invariant: estimates.len() >= 2");
 
         let difference = most_expensive.1.total_cost_usd - cheapest.1.total_cost_usd;
         let ratio = most_expensive.1.total_cost_usd / cheapest.1.total_cost_usd;

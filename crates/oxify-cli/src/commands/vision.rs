@@ -452,8 +452,8 @@ async fn benchmark_providers(image_path: &str, providers_str: &str, iterations: 
             continue;
         }
 
-        let min = *times.iter().min().unwrap();
-        let max = *times.iter().max().unwrap();
+        let min = *times.iter().min().expect("invariant: times non-empty after guard");
+        let max = *times.iter().max().expect("invariant: times non-empty after guard");
         let avg: u64 = times.iter().sum::<u64>() / times.len() as u64;
 
         println!(

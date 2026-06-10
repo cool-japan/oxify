@@ -160,11 +160,11 @@ async fn compare_workflows(files: Vec<String>) -> Result<()> {
     let (most_complex_name, most_complex) = all_stats
         .iter()
         .max_by_key(|(_, s)| s.complexity_score)
-        .unwrap();
+        .expect("invariant: all_stats non-empty");
     let (least_complex_name, least_complex) = all_stats
         .iter()
         .min_by_key(|(_, s)| s.complexity_score)
-        .unwrap();
+        .expect("invariant: all_stats non-empty");
 
     println!("📊 Summary:");
     println!(

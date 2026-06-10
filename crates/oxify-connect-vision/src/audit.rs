@@ -277,7 +277,7 @@ fn generate_event_id() -> String {
 fn current_timestamp_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .expect("system time before Unix epoch")
         .as_millis() as u64
 }
 

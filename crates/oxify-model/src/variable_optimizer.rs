@@ -176,8 +176,8 @@ impl VariableOptimizer {
         // Create flows for each variable
         for (var_name, consumer_nodes) in variables_seen {
             if !consumer_nodes.is_empty() {
-                let source_node = consumer_nodes.first().unwrap().clone();
-                let last_usage = consumer_nodes.last().unwrap().clone();
+                let source_node = consumer_nodes.first().expect("invariant: consumer_nodes non-empty from guard").clone();
+                let last_usage = consumer_nodes.last().expect("invariant: consumer_nodes non-empty from guard").clone();
 
                 flows.push(VariableFlow {
                     variable_name: var_name.clone(),

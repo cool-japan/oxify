@@ -180,7 +180,7 @@ impl McpExecutor {
             info!("Initialized MCP HTTP client for {}", server_id);
         }
 
-        let client = clients.get_mut(server_id).unwrap();
+        let client = clients.get_mut(server_id).expect("invariant: server_id inserted into clients above");
 
         // Invoke the tool
         let request = McpRequest {
@@ -298,7 +298,7 @@ impl McpExecutor {
                 clients.insert(server_id.to_string(), client);
             }
 
-            let client = clients.get_mut(server_id).unwrap();
+            let client = clients.get_mut(server_id).expect("invariant: server_id inserted into clients above");
             let tools = client.list_tools(server_id).await?;
 
             return Ok(tools

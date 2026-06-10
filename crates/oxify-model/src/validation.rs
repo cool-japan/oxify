@@ -157,7 +157,7 @@ impl WorkflowValidator {
         }
 
         if !errors.is_empty() {
-            return Err(errors.into_iter().next().unwrap());
+            return Err(errors.into_iter().next().expect("invariant: errors non-empty from guard"));
         }
 
         // Calculate stats
@@ -402,8 +402,8 @@ impl WorkflowValidator {
 
         // Build adjacency list
         for edge in &workflow.edges {
-            adj_list.get_mut(&edge.from).unwrap().push(edge.to);
-            *in_degree.get_mut(&edge.to).unwrap() += 1;
+            adj_list.get_mut(&edge.from).expect("invariant: edge.from populated from workflow.nodes").push(edge.to);
+            *in_degree.get_mut(&edge.to).expect("invariant: edge.to populated from workflow.nodes") += 1;
         }
 
         // Kahn's algorithm
@@ -420,7 +420,7 @@ impl WorkflowValidator {
 
             if let Some(neighbors) = adj_list.get(&node_id) {
                 for &neighbor in neighbors {
-                    let deg = in_degree.get_mut(&neighbor).unwrap();
+                    let deg = in_degree.get_mut(&neighbor).expect("invariant: neighbor populated from workflow.nodes");
                     *deg -= 1;
                     if *deg == 0 {
                         queue.push_back(neighbor);
@@ -448,7 +448,7 @@ impl WorkflowValidator {
             return Ok(()); // Already caught by start/end validation
         }
 
-        let start_id = start_node.unwrap().id;
+        let start_id = start_node.expect("invariant: is_none guard checked above").id;
 
         // Build adjacency list
         let mut adj_list: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
@@ -456,7 +456,7 @@ impl WorkflowValidator {
             adj_list.insert(node.id, Vec::new());
         }
         for edge in &workflow.edges {
-            adj_list.get_mut(&edge.from).unwrap().push(edge.to);
+            adj_list.get_mut(&edge.from).expect("invariant: edge.from populated from workflow.nodes").push(edge.to);
         }
 
         // BFS from start
@@ -500,7 +500,7 @@ impl WorkflowValidator {
             return Ok(()); // Already caught by start/end validation
         }
 
-        let end_id = end_node.unwrap().id;
+        let end_id = end_node.expect("invariant: is_none guard checked above").id;
 
         // Build reverse adjacency list
         let mut reverse_adj: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
@@ -508,7 +508,7 @@ impl WorkflowValidator {
             reverse_adj.insert(node.id, Vec::new());
         }
         for edge in &workflow.edges {
-            reverse_adj.get_mut(&edge.to).unwrap().push(edge.from);
+            reverse_adj.get_mut(&edge.to).expect("invariant: edge.to populated from workflow.nodes").push(edge.from);
         }
 
         // BFS from end (backwards)
@@ -622,7 +622,7 @@ impl WorkflowValidator {
             return 0;
         }
 
-        let start_id = start_node.unwrap().id;
+        let start_id = start_node.expect("invariant: is_none guard checked above").id;
 
         // Build adjacency list
         let mut adj_list: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
@@ -630,7 +630,7 @@ impl WorkflowValidator {
             adj_list.insert(node.id, Vec::new());
         }
         for edge in &workflow.edges {
-            adj_list.get_mut(&edge.from).unwrap().push(edge.to);
+            adj_list.get_mut(&edge.from).expect("invariant: edge.from populated from workflow.nodes").push(edge.to);
         }
 
         // BFS to calculate depth
@@ -643,7 +643,7 @@ impl WorkflowValidator {
         let mut max_depth = 0;
 
         while let Some(node_id) = queue.pop_front() {
-            let depth = *depths.get(&node_id).unwrap();
+            let depth = *depths.get(&node_id).expect("invariant: node_id inserted into depths before enqueue");
             max_depth = max_depth.max(depth);
 
             if let Some(neighbors) = adj_list.get(&node_id) {

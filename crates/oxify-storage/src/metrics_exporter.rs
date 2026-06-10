@@ -207,18 +207,18 @@ impl Metric {
         let mut output = String::new();
 
         // Type and help
-        writeln!(&mut output, "# HELP {} {}", self.name, self.help).unwrap();
+        writeln!(&mut output, "# HELP {} {}", self.name, self.help).expect("writeln! to String is infallible");
         writeln!(
             &mut output,
             "# TYPE {} {}",
             self.name,
             self.metric_type.as_str()
         )
-        .unwrap();
+        .expect("writeln! to String is infallible");
 
         // Metric value with labels
         if self.labels.is_empty() {
-            writeln!(&mut output, "{} {}", self.name, self.value).unwrap();
+            writeln!(&mut output, "{} {}", self.name, self.value).expect("writeln! to String is infallible");
         } else {
             let labels: Vec<String> = self
                 .labels
@@ -232,7 +232,7 @@ impl Metric {
                 labels.join(","),
                 self.value
             )
-            .unwrap();
+            .expect("writeln! to String is infallible");
         }
 
         output
@@ -501,12 +501,12 @@ impl MetricsExporter {
                         })
                     })
                     .collect();
-                serde_json::to_string_pretty(&json).unwrap()
+                serde_json::to_string_pretty(&json).expect("serializing Vec<Value> should not fail")
             }
             MetricsFormat::Flat => {
                 let mut output = String::new();
                 for metric in metrics {
-                    writeln!(&mut output, "{}: {}", metric.name, metric.value).unwrap();
+                    writeln!(&mut output, "{}: {}", metric.name, metric.value).expect("writeln! to String is infallible");
                 }
                 output
             }

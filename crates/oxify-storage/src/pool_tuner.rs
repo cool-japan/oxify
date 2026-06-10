@@ -265,7 +265,7 @@ impl PoolTuner {
         // Check if we're in cooldown period
         if let Some(last_adjustment) = self.stats.last_adjustment {
             let elapsed = Utc::now().signed_duration_since(last_adjustment);
-            if elapsed < chrono::Duration::from_std(self.config.cooldown_period).unwrap() {
+            if elapsed < chrono::Duration::from_std(self.config.cooldown_period).expect("cooldown_period fits in chrono::Duration") {
                 return TuningDecision::NoChange;
             }
         }
@@ -280,7 +280,7 @@ impl PoolTuner {
             // Check if sustained long enough
             if let Some(since) = self.sustained_high_util_since {
                 let elapsed = Utc::now().signed_duration_since(since);
-                if elapsed >= chrono::Duration::from_std(self.config.sustained_period).unwrap() {
+                if elapsed >= chrono::Duration::from_std(self.config.sustained_period).expect("sustained_period fits in chrono::Duration") {
                     // Scale up
                     let target_size = (current_size as f64 * 1.5) as u32;
                     let increase = (target_size - current_size).min(self.config.max_adjustment);
@@ -302,7 +302,7 @@ impl PoolTuner {
             // Check if sustained long enough
             if let Some(since) = self.sustained_low_util_since {
                 let elapsed = Utc::now().signed_duration_since(since);
-                if elapsed >= chrono::Duration::from_std(self.config.sustained_period).unwrap() {
+                if elapsed >= chrono::Duration::from_std(self.config.sustained_period).expect("sustained_period fits in chrono::Duration") {
                     // Scale down
                     let target_size = (current_size as f64 * 0.7) as u32;
                     let decrease = (current_size - target_size).min(self.config.max_adjustment);
