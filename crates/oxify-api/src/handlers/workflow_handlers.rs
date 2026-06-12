@@ -2,16 +2,17 @@
 //!
 //! 🤖 Generated with [SplitRS](https://github.com/cool-japan/splitrs)
 
+use crate::types::*;
 use axum::{
     extract::{Path, State},
-    http::StatusCode, Json,
+    http::StatusCode,
+    Json,
 };
 use oxify_engine::ExecutionConfig;
 use oxify_model::{ExecutionContext, ExecutionState, WorkflowId};
 use std::sync::Arc;
 use tracing::{error, info};
 use uuid::Uuid;
-use crate::types::*;
 
 use super::template_vector_handlers::AppState;
 
@@ -32,10 +33,7 @@ use super::template_vector_handlers::AppState;
 pub async fn create_workflow(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateWorkflowRequest>,
-) -> Result<
-    (StatusCode, Json<CreateWorkflowResponse>),
-    (StatusCode, Json<ErrorResponse>),
-> {
+) -> Result<(StatusCode, Json<CreateWorkflowResponse>), (StatusCode, Json<ErrorResponse>)> {
     info!("Creating workflow: {}", req.workflow.metadata.name);
     if let Err(e) = req.workflow.validate() {
         error!("Workflow validation failed: {}", e);
@@ -86,24 +84,20 @@ pub async fn get_workflow(
     info!("Getting workflow: {}", id);
     match state.workflow_store.get(&id).await {
         Ok(Some(workflow)) => Ok(Json(GetWorkflowResponse { workflow })),
-        Ok(None) => {
-            Err((
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "NotFound".to_string(),
-                    message: format!("Workflow {} not found", id),
-                }),
-            ))
-        }
-        Err(e) => {
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "StorageError".to_string(),
-                    message: format!("Failed to get workflow: {}", e),
-                }),
-            ))
-        }
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "NotFound".to_string(),
+                message: format!("Workflow {} not found", id),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "StorageError".to_string(),
+                message: format!("Failed to get workflow: {}", e),
+            }),
+        )),
     }
 }
 /// List all workflows
@@ -118,27 +112,18 @@ pub async fn list_workflows(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ListWorkflowsResponse>, (StatusCode, Json<ErrorResponse>)> {
     info!("Listing workflows");
-    let workflows = state
-        .workflow_store
-        .list()
-        .await
-        .map_err(|e| {
-            error!("Failed to list workflows: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "StorageError".to_string(),
-                    message: format!("Failed to list workflows: {}", e),
-                }),
-            )
-        })?;
+    let workflows = state.workflow_store.list().await.map_err(|e| {
+        error!("Failed to list workflows: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "StorageError".to_string(),
+                message: format!("Failed to list workflows: {}", e),
+            }),
+        )
+    })?;
     let total = workflows.len();
-    Ok(
-        Json(ListWorkflowsResponse {
-            workflows,
-            total,
-        }),
-    )
+    Ok(Json(ListWorkflowsResponse { workflows, total }))
 }
 /// Update a workflow
 #[utoipa::path(
@@ -173,31 +158,23 @@ pub async fn update_workflow(
         ));
     }
     match state.workflow_store.update(&id, req.workflow).await {
-        Ok(Some(_)) => {
-            Ok(
-                Json(UpdateWorkflowResponse {
-                    message: "Workflow updated successfully".to_string(),
-                }),
-            )
-        }
-        Ok(None) => {
-            Err((
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "NotFound".to_string(),
-                    message: format!("Workflow {} not found", id),
-                }),
-            ))
-        }
-        Err(e) => {
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "StorageError".to_string(),
-                    message: format!("Failed to update workflow: {}", e),
-                }),
-            ))
-        }
+        Ok(Some(_)) => Ok(Json(UpdateWorkflowResponse {
+            message: "Workflow updated successfully".to_string(),
+        })),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "NotFound".to_string(),
+                message: format!("Workflow {} not found", id),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "StorageError".to_string(),
+                message: format!("Failed to update workflow: {}", e),
+            }),
+        )),
     }
 }
 /// Delete a workflow
@@ -220,31 +197,23 @@ pub async fn delete_workflow(
 ) -> Result<Json<DeleteWorkflowResponse>, (StatusCode, Json<ErrorResponse>)> {
     info!("Deleting workflow: {}", id);
     match state.workflow_store.delete(&id).await {
-        Ok(true) => {
-            Ok(
-                Json(DeleteWorkflowResponse {
-                    message: "Workflow deleted successfully".to_string(),
-                }),
-            )
-        }
-        Ok(false) => {
-            Err((
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "NotFound".to_string(),
-                    message: format!("Workflow {} not found", id),
-                }),
-            ))
-        }
-        Err(e) => {
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "StorageError".to_string(),
-                    message: format!("Failed to delete workflow: {}", e),
-                }),
-            ))
-        }
+        Ok(true) => Ok(Json(DeleteWorkflowResponse {
+            message: "Workflow deleted successfully".to_string(),
+        })),
+        Ok(false) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "NotFound".to_string(),
+                message: format!("Workflow {} not found", id),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "StorageError".to_string(),
+                message: format!("Failed to delete workflow: {}", e),
+            }),
+        )),
     }
 }
 /// Execute a workflow
@@ -267,10 +236,7 @@ pub async fn execute_workflow(
     State(state): State<Arc<AppState>>,
     Path(id): Path<WorkflowId>,
     Json(req): Json<ExecuteWorkflowRequest>,
-) -> Result<
-    (StatusCode, Json<ExecuteWorkflowResponse>),
-    (StatusCode, Json<ErrorResponse>),
-> {
+) -> Result<(StatusCode, Json<ExecuteWorkflowResponse>), (StatusCode, Json<ErrorResponse>)> {
     info!("Executing workflow: {}", id);
     let workflow = match state.workflow_store.get(&id).await {
         Ok(Some(w)) => w,
@@ -322,22 +288,20 @@ pub async fn execute_workflow(
             .await;
         metrics.dec_active_execution();
         match result {
-            Ok(result_ctx) => {
-                match execution_store.update(&execution_id, result_ctx).await {
-                    Ok(Some(_)) => {
-                        info!("Execution {} completed successfully", execution_id);
-                    }
-                    Ok(None) => {
-                        error!(
-                            "Failed to update execution {}: execution not found",
-                            execution_id
-                        );
-                    }
-                    Err(e) => {
-                        error!("Failed to update execution {}: {}", execution_id, e);
-                    }
+            Ok(result_ctx) => match execution_store.update(&execution_id, result_ctx).await {
+                Ok(Some(_)) => {
+                    info!("Execution {} completed successfully", execution_id);
                 }
-            }
+                Ok(None) => {
+                    error!(
+                        "Failed to update execution {}: execution not found",
+                        execution_id
+                    );
+                }
+                Err(e) => {
+                    error!("Failed to update execution {}: {}", execution_id, e);
+                }
+            },
             Err(e) => {
                 error!("Workflow execution {} failed: {}", execution_id, e);
             }
@@ -373,38 +337,30 @@ pub async fn get_execution(
                 .values()
                 .map(|r| serde_json::to_value(r).unwrap_or(serde_json::Value::Null))
                 .collect();
-            let variables: serde_json::Map<String, serde_json::Value> = ctx
-                .variables
-                .into_iter()
-                .collect();
-            Ok(
-                Json(GetExecutionResponse {
-                    execution_id: id,
-                    workflow_id: ctx.workflow_id,
-                    state: ctx.state,
-                    variables,
-                    node_results,
-                }),
-            )
+            let variables: serde_json::Map<String, serde_json::Value> =
+                ctx.variables.into_iter().collect();
+            Ok(Json(GetExecutionResponse {
+                execution_id: id,
+                workflow_id: ctx.workflow_id,
+                state: ctx.state,
+                variables,
+                node_results,
+            }))
         }
-        Ok(None) => {
-            Err((
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "NotFound".to_string(),
-                    message: format!("Execution {} not found", id),
-                }),
-            ))
-        }
-        Err(e) => {
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "StorageError".to_string(),
-                    message: format!("Failed to get execution: {}", e),
-                }),
-            ))
-        }
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "NotFound".to_string(),
+                message: format!("Execution {} not found", id),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "StorageError".to_string(),
+                message: format!("Failed to get execution: {}", e),
+            }),
+        )),
     }
 }
 /// List all executions
@@ -419,20 +375,16 @@ pub async fn list_executions(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ListExecutionsResponse>, (StatusCode, Json<ErrorResponse>)> {
     info!("Listing executions");
-    let executions = state
-        .execution_store
-        .list()
-        .await
-        .map_err(|e| {
-            error!("Failed to list executions: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "StorageError".to_string(),
-                    message: format!("Failed to list executions: {}", e),
-                }),
-            )
-        })?;
+    let executions = state.execution_store.list().await.map_err(|e| {
+        error!("Failed to list executions: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "StorageError".to_string(),
+                message: format!("Failed to list executions: {}", e),
+            }),
+        )
+    })?;
     let total = executions.len();
     let executions = executions
         .into_iter()
@@ -444,12 +396,7 @@ pub async fn list_executions(
             completed_at: ctx.completed_at.map(|dt| dt.to_rfc3339()),
         })
         .collect();
-    Ok(
-        Json(ListExecutionsResponse {
-            executions,
-            total,
-        }),
-    )
+    Ok(Json(ListExecutionsResponse { executions, total }))
 }
 /// List executions for a specific workflow
 #[utoipa::path(
@@ -490,12 +437,7 @@ pub async fn list_workflow_executions(
             completed_at: ctx.completed_at.map(|dt| dt.to_rfc3339()),
         })
         .collect();
-    Ok(
-        Json(ListExecutionsResponse {
-            executions,
-            total,
-        }),
-    )
+    Ok(Json(ListExecutionsResponse { executions, total }))
 }
 /// Cancel a running execution
 #[utoipa::path(
@@ -560,40 +502,32 @@ pub async fn cancel_execution(
             info!("Successfully cancelled execution: {}", id);
             Ok((
                 StatusCode::OK,
-                Json(
-                    serde_json::json!(
-                        { "message" : "Execution cancelled successfully", "execution_id"
-                        : id, "state" : "Cancelled" }
-                    ),
-                ),
+                Json(serde_json::json!(
+                    { "message" : "Execution cancelled successfully", "execution_id"
+                    : id, "state" : "Cancelled" }
+                )),
             ))
         }
-        ExecutionState::Completed => {
-            Err((
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: "InvalidState".to_string(),
-                    message: "Cannot cancel completed execution".to_string(),
-                }),
-            ))
-        }
-        ExecutionState::Failed(_) => {
-            Err((
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: "InvalidState".to_string(),
-                    message: "Cannot cancel failed execution".to_string(),
-                }),
-            ))
-        }
-        ExecutionState::Cancelled => {
-            Err((
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: "InvalidState".to_string(),
-                    message: "Execution already cancelled".to_string(),
-                }),
-            ))
-        }
+        ExecutionState::Completed => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "InvalidState".to_string(),
+                message: "Cannot cancel completed execution".to_string(),
+            }),
+        )),
+        ExecutionState::Failed(_) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "InvalidState".to_string(),
+                message: "Cannot cancel failed execution".to_string(),
+            }),
+        )),
+        ExecutionState::Cancelled => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "InvalidState".to_string(),
+                message: "Execution already cancelled".to_string(),
+            }),
+        )),
     }
 }

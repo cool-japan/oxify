@@ -1,8 +1,8 @@
 //! Auto-generated test module (consolidated from inline `#[cfg(test)] mod` blocks)
 
 use crate::storage::ExecutionStoreBackend;
-use oxify_model::ExecutionContext;
 use crate::types::*;
+use oxify_model::ExecutionContext;
 
 use super::*;
 
@@ -43,7 +43,10 @@ mod tests_2 {
             .create(ctx.clone())
             .await
             .expect("execution create");
-        assert_eq!(stored_id, execution_id, "storage key must equal ctx.execution_id");
+        assert_eq!(
+            stored_id, execution_id,
+            "storage key must equal ctx.execution_id"
+        );
         let found = state
             .execution_store
             .get(&execution_id)
@@ -89,7 +92,10 @@ mod tests_2 {
             }
         }
         assert!(saw_started, "expected workflow.started event on the bus");
-        assert!(saw_completed, "expected workflow.completed event on the bus");
+        assert!(
+            saw_completed,
+            "expected workflow.completed event on the bus"
+        );
     }
     /// Verify the in-memory ExecutionStore uses ctx.execution_id as the key,
     /// making update() reliable after create().
@@ -106,13 +112,19 @@ mod tests_2 {
             "create must return ctx.execution_id as the storage key"
         );
         let found = store.get(&expected_id).await.expect("get ok");
-        assert!(found.is_some(), "row must be retrievable by ctx.execution_id");
+        assert!(
+            found.is_some(),
+            "row must be retrievable by ctx.execution_id"
+        );
         let mut updated_ctx = ctx;
         updated_ctx.state = oxify_model::ExecutionState::Completed;
         let update_result = store
             .update(&expected_id, updated_ctx)
             .await
             .expect("update ok");
-        assert!(update_result.is_some(), "update must find the row by the same id");
+        assert!(
+            update_result.is_some(),
+            "update must find the row by the same id"
+        );
     }
 }

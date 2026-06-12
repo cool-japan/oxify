@@ -4,9 +4,11 @@
 
 use crate::auth::AuthState;
 use crate::storage::{ExecutionStoreBackend, UserStoreBackend, WorkflowStoreBackend};
+use crate::types::*;
 use axum::{
     extract::{Path, State},
-    http::StatusCode, Json,
+    http::StatusCode,
+    Json,
 };
 use oxify_engine::{Engine, EngineBuilder, EventBus};
 use oxify_model::WorkflowId;
@@ -14,8 +16,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::{error, info};
 use uuid::Uuid;
-use crate::types::*;
-
 
 /// Application state
 #[derive(Clone)]
@@ -37,7 +37,9 @@ impl AppState {
     pub fn new() -> Self {
         let event_bus = Arc::new(EventBus::new(1024));
         let engine = Arc::new(
-            EngineBuilder::new().with_event_bus(event_bus.clone()).build(),
+            EngineBuilder::new()
+                .with_event_bus(event_bus.clone())
+                .build(),
         );
         Self {
             workflow_store: WorkflowStoreBackend::new_in_memory(),
@@ -48,12 +50,8 @@ impl AppState {
             event_bus,
             version_store: None,
             approval_store: Some(Arc::new(oxify_engine::ApprovalStore::new())),
-            vector_registry: Some(
-                Arc::new(crate::vector_handlers::VectorStoreRegistry::new()),
-            ),
-            mcp_registry: Arc::new(
-                tokio::sync::RwLock::new(oxify_mcp::McpRegistry::new()),
-            ),
+            vector_registry: Some(Arc::new(crate::vector_handlers::VectorStoreRegistry::new())),
+            mcp_registry: Arc::new(tokio::sync::RwLock::new(oxify_mcp::McpRegistry::new())),
             db_pool: None,
             http_metrics: Arc::new(crate::middleware::HttpMetrics::new()),
         }
@@ -64,16 +62,16 @@ impl AppState {
             .await
             .map_err(|e| e.to_string())?;
         pool.migrate().await.map_err(|e| e.to_string())?;
-        let version_store = Some(
-            Arc::new(oxify_storage::WorkflowVersionStore::new(pool.clone())),
-        );
+        let version_store = Some(Arc::new(oxify_storage::WorkflowVersionStore::new(
+            pool.clone(),
+        )));
         let approval_store = Some(Arc::new(oxify_engine::ApprovalStore::new()));
-        let vector_registry = Some(
-            Arc::new(crate::vector_handlers::VectorStoreRegistry::new()),
-        );
+        let vector_registry = Some(Arc::new(crate::vector_handlers::VectorStoreRegistry::new()));
         let event_bus = Arc::new(EventBus::new(1024));
         let engine = Arc::new(
-            EngineBuilder::new().with_event_bus(event_bus.clone()).build(),
+            EngineBuilder::new()
+                .with_event_bus(event_bus.clone())
+                .build(),
         );
         Ok(Self {
             workflow_store: WorkflowStoreBackend::new_database(pool.clone()),
@@ -85,9 +83,7 @@ impl AppState {
             version_store,
             approval_store,
             vector_registry,
-            mcp_registry: Arc::new(
-                tokio::sync::RwLock::new(oxify_mcp::McpRegistry::new()),
-            ),
+            mcp_registry: Arc::new(tokio::sync::RwLock::new(oxify_mcp::McpRegistry::new())),
             db_pool: Some(pool),
             http_metrics: Arc::new(crate::middleware::HttpMetrics::new()),
         })
@@ -620,17 +616,16 @@ pub async fn export_workflow(
     let format = query.format.as_deref().unwrap_or("json");
     match format {
         "json" => {
-            let json_str = serde_json::to_string_pretty(&workflow)
-                .map_err(|e| {
-                    error!("Failed to serialize workflow to JSON: {}", e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ErrorResponse {
-                            error: "SerializationError".to_string(),
-                            message: format!("Failed to serialize workflow: {}", e),
-                        }),
-                    )
-                })?;
+            let json_str = serde_json::to_string_pretty(&workflow).map_err(|e| {
+                error!("Failed to serialize workflow to JSON: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: "SerializationError".to_string(),
+                        message: format!("Failed to serialize workflow: {}", e),
+                    }),
+                )
+            })?;
             axum::response::Response::builder()
                 .status(StatusCode::OK)
                 .header("Content-Type", "application/json")
@@ -651,17 +646,16 @@ pub async fn export_workflow(
                 })
         }
         "yaml" => {
-            let yaml_str = oxify_model::workflow_to_yaml(&workflow)
-                .map_err(|e| {
-                    error!("Failed to serialize workflow to YAML: {}", e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ErrorResponse {
-                            error: "SerializationError".to_string(),
-                            message: format!("Failed to serialize workflow: {}", e),
-                        }),
-                    )
-                })?;
+            let yaml_str = oxify_model::workflow_to_yaml(&workflow).map_err(|e| {
+                error!("Failed to serialize workflow to YAML: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: "SerializationError".to_string(),
+                        message: format!("Failed to serialize workflow: {}", e),
+                    }),
+                )
+            })?;
             axum::response::Response::builder()
                 .status(StatusCode::OK)
                 .header("Content-Type", "application/x-yaml")
@@ -681,17 +675,13 @@ pub async fn export_workflow(
                     )
                 })
         }
-        _ => {
-            Err((
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: "InvalidFormat".to_string(),
-                    message: format!(
-                        "Invalid format '{}'. Supported formats: json, yaml", format
-                    ),
-                }),
-            ))
-        }
+        _ => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "InvalidFormat".to_string(),
+                message: format!("Invalid format '{}'. Supported formats: json, yaml", format),
+            }),
+        )),
     }
 }
 fn default_generate_id() -> bool {
@@ -719,45 +709,37 @@ fn default_generate_id() -> bool {
 pub async fn import_workflow(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ImportWorkflowRequest>,
-) -> Result<
-    (StatusCode, Json<ImportWorkflowResponse>),
-    (StatusCode, Json<ErrorResponse>),
-> {
+) -> Result<(StatusCode, Json<ImportWorkflowResponse>), (StatusCode, Json<ErrorResponse>)> {
     info!("Importing workflow from {}", req.format);
     let mut workflow = match req.format.as_str() {
-        "json" => {
-            serde_json::from_str::<oxify_model::Workflow>(&req.content)
-                .map_err(|e| {
-                    error!("Failed to parse JSON workflow: {}", e);
-                    (
-                        StatusCode::BAD_REQUEST,
-                        Json(ErrorResponse {
-                            error: "ParseError".to_string(),
-                            message: format!("Failed to parse JSON: {}", e),
-                        }),
-                    )
-                })?
-        }
-        "yaml" => {
-            oxify_model::workflow_from_yaml(&req.content)
-                .map_err(|e| {
-                    error!("Failed to parse YAML workflow: {}", e);
-                    (
-                        StatusCode::BAD_REQUEST,
-                        Json(ErrorResponse {
-                            error: "ParseError".to_string(),
-                            message: format!("Failed to parse YAML: {}", e),
-                        }),
-                    )
-                })?
-        }
+        "json" => serde_json::from_str::<oxify_model::Workflow>(&req.content).map_err(|e| {
+            error!("Failed to parse JSON workflow: {}", e);
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "ParseError".to_string(),
+                    message: format!("Failed to parse JSON: {}", e),
+                }),
+            )
+        })?,
+        "yaml" => oxify_model::workflow_from_yaml(&req.content).map_err(|e| {
+            error!("Failed to parse YAML workflow: {}", e);
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "ParseError".to_string(),
+                    message: format!("Failed to parse YAML: {}", e),
+                }),
+            )
+        })?,
         _ => {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse {
                     error: "InvalidFormat".to_string(),
                     message: format!(
-                        "Invalid format '{}'. Supported formats: json, yaml", req.format
+                        "Invalid format '{}'. Supported formats: json, yaml",
+                        req.format
                     ),
                 }),
             ));
@@ -811,20 +793,16 @@ pub async fn import_workflow(
     }
     let workflow_id = workflow.metadata.id;
     let workflow_name = workflow.metadata.name.clone();
-    state
-        .workflow_store
-        .create(workflow)
-        .await
-        .map_err(|e| {
-            error!("Failed to create workflow: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "StorageError".to_string(),
-                    message: format!("Failed to store workflow: {}", e),
-                }),
-            )
-        })?;
+    state.workflow_store.create(workflow).await.map_err(|e| {
+        error!("Failed to create workflow: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "StorageError".to_string(),
+                message: format!("Failed to store workflow: {}", e),
+            }),
+        )
+    })?;
     info!("Workflow imported successfully: {}", workflow_id);
     Ok((
         StatusCode::CREATED,
@@ -838,55 +816,134 @@ pub async fn import_workflow(
 /// Built-in templates for the marketplace
 fn get_builtin_templates() -> Vec<TemplateListItem> {
     vec![
-        TemplateListItem { id : "rag-basic".to_string(), name : "Basic RAG Pipeline"
-        .to_string(), description :
-        Some("A simple RAG pipeline with document retrieval and LLM generation"
-        .to_string(),), category : Some("RAG".to_string()), tags : vec!["rag"
-        .to_string(), "retrieval".to_string(), "generation".to_string(),], version :
-        "1.0.0".to_string(), author : Some("OxiFY Team".to_string()), usage_count : 1250,
-        is_public : true, }, TemplateListItem { id : "agent-react".to_string(), name :
-        "ReAct Agent".to_string(), description :
-        Some("Reasoning and Acting agent with tool use capabilities".to_string()),
-        category : Some("Agent".to_string()), tags : vec!["agent".to_string(), "react"
-        .to_string(), "tool-use".to_string(),], version : "1.0.0".to_string(), author :
-        Some("OxiFY Team".to_string()), usage_count : 890, is_public : true, },
-        TemplateListItem { id : "data-extraction".to_string(), name :
-        "Structured Data Extraction".to_string(), description :
-        Some("Extract structured data from unstructured text using LLMs".to_string(),),
-        category : Some("Data Processing".to_string()), tags : vec!["extraction"
-        .to_string(), "structured-output".to_string(), "parsing".to_string(),], version :
-        "1.0.0".to_string(), author : Some("OxiFY Team".to_string()), usage_count : 720,
-        is_public : true, }, TemplateListItem { id : "chatbot-simple".to_string(), name :
-        "Simple Chatbot".to_string(), description :
-        Some("A basic conversational chatbot with memory".to_string()), category :
-        Some("Chatbot".to_string()), tags : vec!["chatbot".to_string(), "conversation"
-        .to_string(), "memory".to_string(),], version : "1.0.0".to_string(), author :
-        Some("OxiFY Team".to_string()), usage_count : 2100, is_public : true, },
-        TemplateListItem { id : "summarization".to_string(), name :
-        "Document Summarization".to_string(), description :
-        Some("Summarize long documents using map-reduce or iterative refinement"
-        .to_string(),), category : Some("Data Processing".to_string()), tags :
-        vec!["summarization".to_string(), "documents".to_string(), "map-reduce"
-        .to_string(),], version : "1.0.0".to_string(), author : Some("OxiFY Team"
-        .to_string()), usage_count : 560, is_public : true, }, TemplateListItem { id :
-        "multi-agent".to_string(), name : "Multi-Agent Collaboration".to_string(),
-        description : Some("Multiple AI agents working together on complex tasks"
-        .to_string()), category : Some("Agent".to_string()), tags : vec!["multi-agent"
-        .to_string(), "collaboration".to_string(), "orchestration".to_string(),], version
-        : "1.0.0".to_string(), author : Some("OxiFY Team".to_string()), usage_count :
-        340, is_public : true, }, TemplateListItem { id : "code-review".to_string(), name
-        : "AI Code Review".to_string(), description :
-        Some("Automated code review with security and quality checks".to_string()),
-        category : Some("Developer Tools".to_string()), tags : vec!["code-review"
-        .to_string(), "security".to_string(), "quality".to_string(),], version : "1.0.0"
-        .to_string(), author : Some("OxiFY Team".to_string()), usage_count : 480,
-        is_public : true, }, TemplateListItem { id : "translation".to_string(), name :
-        "Multi-Language Translation".to_string(), description :
-        Some("Translate content between multiple languages with quality checks"
-        .to_string(),), category : Some("Data Processing".to_string()), tags :
-        vec!["translation".to_string(), "multilingual".to_string(), "localization"
-        .to_string(),], version : "1.0.0".to_string(), author : Some("OxiFY Team"
-        .to_string()), usage_count : 390, is_public : true, },
+        TemplateListItem {
+            id: "rag-basic".to_string(),
+            name: "Basic RAG Pipeline".to_string(),
+            description: Some(
+                "A simple RAG pipeline with document retrieval and LLM generation".to_string(),
+            ),
+            category: Some("RAG".to_string()),
+            tags: vec![
+                "rag".to_string(),
+                "retrieval".to_string(),
+                "generation".to_string(),
+            ],
+            version: "1.0.0".to_string(),
+            author: Some("OxiFY Team".to_string()),
+            usage_count: 1250,
+            is_public: true,
+        },
+        TemplateListItem {
+            id: "agent-react".to_string(),
+            name: "ReAct Agent".to_string(),
+            description: Some("Reasoning and Acting agent with tool use capabilities".to_string()),
+            category: Some("Agent".to_string()),
+            tags: vec![
+                "agent".to_string(),
+                "react".to_string(),
+                "tool-use".to_string(),
+            ],
+            version: "1.0.0".to_string(),
+            author: Some("OxiFY Team".to_string()),
+            usage_count: 890,
+            is_public: true,
+        },
+        TemplateListItem {
+            id: "data-extraction".to_string(),
+            name: "Structured Data Extraction".to_string(),
+            description: Some(
+                "Extract structured data from unstructured text using LLMs".to_string(),
+            ),
+            category: Some("Data Processing".to_string()),
+            tags: vec![
+                "extraction".to_string(),
+                "structured-output".to_string(),
+                "parsing".to_string(),
+            ],
+            version: "1.0.0".to_string(),
+            author: Some("OxiFY Team".to_string()),
+            usage_count: 720,
+            is_public: true,
+        },
+        TemplateListItem {
+            id: "chatbot-simple".to_string(),
+            name: "Simple Chatbot".to_string(),
+            description: Some("A basic conversational chatbot with memory".to_string()),
+            category: Some("Chatbot".to_string()),
+            tags: vec![
+                "chatbot".to_string(),
+                "conversation".to_string(),
+                "memory".to_string(),
+            ],
+            version: "1.0.0".to_string(),
+            author: Some("OxiFY Team".to_string()),
+            usage_count: 2100,
+            is_public: true,
+        },
+        TemplateListItem {
+            id: "summarization".to_string(),
+            name: "Document Summarization".to_string(),
+            description: Some(
+                "Summarize long documents using map-reduce or iterative refinement".to_string(),
+            ),
+            category: Some("Data Processing".to_string()),
+            tags: vec![
+                "summarization".to_string(),
+                "documents".to_string(),
+                "map-reduce".to_string(),
+            ],
+            version: "1.0.0".to_string(),
+            author: Some("OxiFY Team".to_string()),
+            usage_count: 560,
+            is_public: true,
+        },
+        TemplateListItem {
+            id: "multi-agent".to_string(),
+            name: "Multi-Agent Collaboration".to_string(),
+            description: Some("Multiple AI agents working together on complex tasks".to_string()),
+            category: Some("Agent".to_string()),
+            tags: vec![
+                "multi-agent".to_string(),
+                "collaboration".to_string(),
+                "orchestration".to_string(),
+            ],
+            version: "1.0.0".to_string(),
+            author: Some("OxiFY Team".to_string()),
+            usage_count: 340,
+            is_public: true,
+        },
+        TemplateListItem {
+            id: "code-review".to_string(),
+            name: "AI Code Review".to_string(),
+            description: Some("Automated code review with security and quality checks".to_string()),
+            category: Some("Developer Tools".to_string()),
+            tags: vec![
+                "code-review".to_string(),
+                "security".to_string(),
+                "quality".to_string(),
+            ],
+            version: "1.0.0".to_string(),
+            author: Some("OxiFY Team".to_string()),
+            usage_count: 480,
+            is_public: true,
+        },
+        TemplateListItem {
+            id: "translation".to_string(),
+            name: "Multi-Language Translation".to_string(),
+            description: Some(
+                "Translate content between multiple languages with quality checks".to_string(),
+            ),
+            category: Some("Data Processing".to_string()),
+            tags: vec![
+                "translation".to_string(),
+                "multilingual".to_string(),
+                "localization".to_string(),
+            ],
+            version: "1.0.0".to_string(),
+            author: Some("OxiFY Team".to_string()),
+            usage_count: 390,
+            is_public: true,
+        },
     ]
 }
 /// List available workflow templates (marketplace)
@@ -909,29 +966,28 @@ pub async fn list_templates(
     axum::extract::Query(query): axum::extract::Query<TemplateListQuery>,
 ) -> Json<Vec<TemplateListItem>> {
     info!(
-        "Listing templates: category={:?}, tag={:?}, search={:?}", query.category, query
-        .tag, query.search
+        "Listing templates: category={:?}, tag={:?}, search={:?}",
+        query.category, query.tag, query.search
     );
     let mut templates = get_builtin_templates();
     if let Some(ref category) = query.category {
-        templates
-            .retain(|t| {
-                t.category.as_ref().is_some_and(|c| c.eq_ignore_ascii_case(category))
-            });
+        templates.retain(|t| {
+            t.category
+                .as_ref()
+                .is_some_and(|c| c.eq_ignore_ascii_case(category))
+        });
     }
     if let Some(ref tag) = query.tag {
         templates.retain(|t| t.tags.iter().any(|t_tag| t_tag.eq_ignore_ascii_case(tag)));
     }
     if let Some(ref search) = query.search {
         let search_lower = search.to_lowercase();
-        templates
-            .retain(|t| {
-                t.name.to_lowercase().contains(&search_lower)
-                    || t
-                        .description
-                        .as_ref()
-                        .is_some_and(|d| d.to_lowercase().contains(&search_lower))
-            });
+        templates.retain(|t| {
+            t.name.to_lowercase().contains(&search_lower)
+                || t.description
+                    .as_ref()
+                    .is_some_and(|d| d.to_lowercase().contains(&search_lower))
+        });
     }
     let offset = query.offset.unwrap_or(0);
     let limit = query.limit.unwrap_or(50);
@@ -965,9 +1021,7 @@ pub async fn list_template_categories() -> Json<Vec<TemplateCategory>> {
             let description = match name.as_str() {
                 "RAG" => Some("Retrieval-Augmented Generation pipelines".to_string()),
                 "Agent" => Some("Autonomous AI agents with tool use".to_string()),
-                "Data Processing" => {
-                    Some("Transform and process data with LLMs".to_string())
-                }
+                "Data Processing" => Some("Transform and process data with LLMs".to_string()),
                 "Chatbot" => Some("Conversational AI interfaces".to_string()),
                 "Developer Tools" => Some("Tools for software development".to_string()),
                 _ => None,
@@ -997,92 +1051,125 @@ pub async fn get_template(
 ) -> Result<Json<TemplateDetail>, (StatusCode, Json<ErrorResponse>)> {
     info!("Getting template: {}", id);
     let templates = get_builtin_templates();
-    let template = templates
-        .into_iter()
-        .find(|t| t.id == id)
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "NotFound".to_string(),
-                    message: format!("Template '{}' not found", id),
-                }),
-            )
-        })?;
+    let template = templates.into_iter().find(|t| t.id == id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "NotFound".to_string(),
+                message: format!("Template '{}' not found", id),
+            }),
+        )
+    })?;
     let parameters = match id.as_str() {
         "rag-basic" => {
             vec![
-                TemplateParameter { name : "model".to_string(), param_type : "model"
-                .to_string(), description : Some("LLM model to use".to_string()),
-                required : true, default_value : Some("gpt-4".to_string()), },
-                TemplateParameter { name : "collection".to_string(), param_type :
-                "collection".to_string(), description :
-                Some("Vector collection for retrieval".to_string()), required : true,
-                default_value : None, }, TemplateParameter { name : "top_k".to_string(),
-                param_type : "integer".to_string(), description :
-                Some("Number of documents to retrieve".to_string()), required : false,
-                default_value : Some("5".to_string()), },
+                TemplateParameter {
+                    name: "model".to_string(),
+                    param_type: "model".to_string(),
+                    description: Some("LLM model to use".to_string()),
+                    required: true,
+                    default_value: Some("gpt-4".to_string()),
+                },
+                TemplateParameter {
+                    name: "collection".to_string(),
+                    param_type: "collection".to_string(),
+                    description: Some("Vector collection for retrieval".to_string()),
+                    required: true,
+                    default_value: None,
+                },
+                TemplateParameter {
+                    name: "top_k".to_string(),
+                    param_type: "integer".to_string(),
+                    description: Some("Number of documents to retrieve".to_string()),
+                    required: false,
+                    default_value: Some("5".to_string()),
+                },
             ]
         }
         "agent-react" => {
             vec![
-                TemplateParameter { name : "model".to_string(), param_type : "model"
-                .to_string(), description : Some("LLM model for agent reasoning"
-                .to_string()), required : true, default_value : Some("gpt-4"
-                .to_string()), }, TemplateParameter { name : "max_iterations"
-                .to_string(), param_type : "integer".to_string(), description :
-                Some("Maximum reasoning iterations".to_string()), required : false,
-                default_value : Some("10".to_string()), }, TemplateParameter { name :
-                "tools".to_string(), param_type : "string_array".to_string(), description
-                : Some("Tools available to the agent".to_string()), required : false,
-                default_value : Some("[\"search\", \"calculator\"]".to_string()), },
+                TemplateParameter {
+                    name: "model".to_string(),
+                    param_type: "model".to_string(),
+                    description: Some("LLM model for agent reasoning".to_string()),
+                    required: true,
+                    default_value: Some("gpt-4".to_string()),
+                },
+                TemplateParameter {
+                    name: "max_iterations".to_string(),
+                    param_type: "integer".to_string(),
+                    description: Some("Maximum reasoning iterations".to_string()),
+                    required: false,
+                    default_value: Some("10".to_string()),
+                },
+                TemplateParameter {
+                    name: "tools".to_string(),
+                    param_type: "string_array".to_string(),
+                    description: Some("Tools available to the agent".to_string()),
+                    required: false,
+                    default_value: Some("[\"search\", \"calculator\"]".to_string()),
+                },
             ]
         }
         _ => {
-            vec![
-                TemplateParameter { name : "model".to_string(), param_type : "model"
-                .to_string(), description : Some("LLM model to use".to_string()),
-                required : true, default_value : Some("gpt-4".to_string()), }
-            ]
+            vec![TemplateParameter {
+                name: "model".to_string(),
+                param_type: "model".to_string(),
+                description: Some("LLM model to use".to_string()),
+                required: true,
+                default_value: Some("gpt-4".to_string()),
+            }]
         }
     };
     let preview_nodes = match id.as_str() {
         "rag-basic" => {
             vec![
-                "Start".to_string(), "Query Embedding".to_string(), "Vector Search"
-                .to_string(), "Context Assembly".to_string(), "LLM Generation"
-                .to_string(), "End".to_string(),
+                "Start".to_string(),
+                "Query Embedding".to_string(),
+                "Vector Search".to_string(),
+                "Context Assembly".to_string(),
+                "LLM Generation".to_string(),
+                "End".to_string(),
             ]
         }
         "agent-react" => {
             vec![
-                "Start".to_string(), "Think".to_string(), "Act (Tool Call)".to_string(),
-                "Observe".to_string(), "Loop Check".to_string(), "End".to_string(),
+                "Start".to_string(),
+                "Think".to_string(),
+                "Act (Tool Call)".to_string(),
+                "Observe".to_string(),
+                "Loop Check".to_string(),
+                "End".to_string(),
             ]
         }
         "chatbot-simple" => {
             vec![
-                "Start".to_string(), "Load History".to_string(), "LLM Response"
-                .to_string(), "Save History".to_string(), "End".to_string(),
+                "Start".to_string(),
+                "Load History".to_string(),
+                "LLM Response".to_string(),
+                "Save History".to_string(),
+                "End".to_string(),
             ]
         }
-        _ => vec!["Start".to_string(), "Process".to_string(), "End".to_string(),],
+        _ => vec![
+            "Start".to_string(),
+            "Process".to_string(),
+            "End".to_string(),
+        ],
     };
-    Ok(
-        Json(TemplateDetail {
-            id: template.id,
-            name: template.name,
-            description: template.description,
-            category: template.category,
-            tags: template.tags,
-            version: template.version,
-            author: template.author,
-            usage_count: template.usage_count,
-            is_public: template.is_public,
-            parameters,
-            preview_nodes,
-        }),
-    )
+    Ok(Json(TemplateDetail {
+        id: template.id,
+        name: template.name,
+        description: template.description,
+        category: template.category,
+        tags: template.tags,
+        version: template.version,
+        author: template.author,
+        usage_count: template.usage_count,
+        is_public: template.is_public,
+        parameters,
+        preview_nodes,
+    }))
 }
 /// Instantiate a template to create a new workflow
 #[allow(dead_code)]
@@ -1105,24 +1192,18 @@ pub async fn instantiate_template(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(req): Json<InstantiateTemplateRequest>,
-) -> Result<
-    (StatusCode, Json<InstantiateTemplateResponse>),
-    (StatusCode, Json<ErrorResponse>),
-> {
+) -> Result<(StatusCode, Json<InstantiateTemplateResponse>), (StatusCode, Json<ErrorResponse>)> {
     info!("Instantiating template: {} as '{}'", id, req.name);
     let templates = get_builtin_templates();
-    let _template = templates
-        .iter()
-        .find(|t| t.id == id)
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "NotFound".to_string(),
-                    message: format!("Template '{}' not found", id),
-                }),
-            )
-        })?;
+    let _template = templates.iter().find(|t| t.id == id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "NotFound".to_string(),
+                message: format!("Template '{}' not found", id),
+            }),
+        )
+    })?;
     let workflow_id = Uuid::new_v4();
     let start_node = oxify_model::Node {
         id: Uuid::new_v4(),
@@ -1163,20 +1244,16 @@ pub async fn instantiate_template(
         nodes: vec![start_node, end_node],
         edges: vec![edge],
     };
-    state
-        .workflow_store
-        .create(workflow)
-        .await
-        .map_err(|e| {
-            error!("Failed to create workflow from template: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "StorageError".to_string(),
-                    message: format!("Failed to create workflow: {}", e),
-                }),
-            )
-        })?;
+    state.workflow_store.create(workflow).await.map_err(|e| {
+        error!("Failed to create workflow from template: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "StorageError".to_string(),
+                message: format!("Failed to create workflow: {}", e),
+            }),
+        )
+    })?;
     info!("Created workflow {} from template {}", workflow_id, id);
     Ok((
         StatusCode::CREATED,
@@ -1191,65 +1268,48 @@ pub async fn instantiate_template(
 ///
 /// Returns metrics in Prometheus text format for monitoring and observability.
 /// Includes HTTP request metrics, database connection pool metrics, cache statistics, and query performance.
-pub async fn get_metrics(
-    State(state): State<Arc<AppState>>,
-) -> Result<String, StatusCode> {
+pub async fn get_metrics(State(state): State<Arc<AppState>>) -> Result<String, StatusCode> {
     let mut metrics = String::new();
     metrics.push_str(&state.http_metrics.to_prometheus_format().await);
     metrics.push('\n');
     if let Some(pool) = &state.db_pool {
         let pool_metrics = pool.metrics();
         let stats = pool_metrics.stats;
-        metrics
-            .push_str(
-                &format!(
-                    "# HELP oxify_db_pool_size Current size of the database connection pool\n\
+        metrics.push_str(&format!(
+            "# HELP oxify_db_pool_size Current size of the database connection pool\n\
              # TYPE oxify_db_pool_size gauge\n\
              oxify_db_pool_size {}\n",
-                    stats.size
-                ),
-            );
-        metrics
-            .push_str(
-                &format!(
-                    "# HELP oxify_db_pool_idle Number of idle connections in the pool\n\
+            stats.size
+        ));
+        metrics.push_str(&format!(
+            "# HELP oxify_db_pool_idle Number of idle connections in the pool\n\
              # TYPE oxify_db_pool_idle gauge\n\
              oxify_db_pool_idle {}\n",
-                    stats.num_idle
-                ),
-            );
-        metrics
-            .push_str(
-                &format!(
-                    "# HELP oxify_db_pool_max Maximum number of connections in the pool\n\
+            stats.num_idle
+        ));
+        metrics.push_str(&format!(
+            "# HELP oxify_db_pool_max Maximum number of connections in the pool\n\
              # TYPE oxify_db_pool_max gauge\n\
              oxify_db_pool_max {}\n",
-                    stats.max_connections
-                ),
-            );
+            stats.max_connections
+        ));
         let utilization = if stats.max_connections > 0 {
             stats.size as f64 / stats.max_connections as f64
         } else {
             0.0
         };
-        metrics
-            .push_str(
-                &format!(
-                    "# HELP oxify_db_pool_utilization Database connection pool utilization (0-1)\n\
+        metrics.push_str(&format!(
+            "# HELP oxify_db_pool_utilization Database connection pool utilization (0-1)\n\
              # TYPE oxify_db_pool_utilization gauge\n\
              oxify_db_pool_utilization {:.3}\n",
-                    utilization
-                ),
-            );
+            utilization
+        ));
     }
-    metrics
-        .push_str(
-            &format!(
-                "# HELP oxify_api_info API version information\n\
+    metrics.push_str(&format!(
+        "# HELP oxify_api_info API version information\n\
          # TYPE oxify_api_info gauge\n\
          oxify_api_info{{version=\"{}\"}} 1\n",
-                env!("CARGO_PKG_VERSION")
-            ),
-        );
+        env!("CARGO_PKG_VERSION")
+    ));
     Ok(metrics)
 }

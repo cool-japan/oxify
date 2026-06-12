@@ -2,18 +2,18 @@
 //!
 //! 🤖 Generated with [SplitRS](https://github.com/cool-japan/splitrs)
 
+use crate::types::*;
 use axum::{
     extract::{Path, State},
-    http::StatusCode, Extension, Json,
+    http::StatusCode,
+    Extension, Json,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
-use crate::types::*;
 
 use super::template_vector_handlers::AppState;
-
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApprovalActionRequest {
@@ -177,18 +177,15 @@ pub async fn list_pending_approvals(
     Extension(_user): Extension<crate::user_types::ApiUser>,
 ) -> Result<Json<Vec<ApprovalRequestView>>, (StatusCode, Json<ErrorResponse>)> {
     info!("Listing all pending approvals");
-    let approval_store = state
-        .approval_store
-        .as_ref()
-        .ok_or_else(|| {
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(ErrorResponse {
-                    error: "ServiceUnavailable".to_string(),
-                    message: "Approval functionality is not enabled".to_string(),
-                }),
-            )
-        })?;
+    let approval_store = state.approval_store.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "ServiceUnavailable".to_string(),
+                message: "Approval functionality is not enabled".to_string(),
+            }),
+        )
+    })?;
     let approvals = approval_store.list_pending();
     let views: Vec<ApprovalRequestView> = approvals
         .into_iter()
@@ -217,18 +214,15 @@ pub async fn list_execution_approvals(
     Path(execution_id): Path<String>,
 ) -> Result<Json<Vec<ApprovalRequestView>>, (StatusCode, Json<ErrorResponse>)> {
     info!("Listing approvals for execution: {}", execution_id);
-    let approval_store = state
-        .approval_store
-        .as_ref()
-        .ok_or_else(|| {
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(ErrorResponse {
-                    error: "ServiceUnavailable".to_string(),
-                    message: "Approval functionality is not enabled".to_string(),
-                }),
-            )
-        })?;
+    let approval_store = state.approval_store.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "ServiceUnavailable".to_string(),
+                message: "Approval functionality is not enabled".to_string(),
+            }),
+        )
+    })?;
     let approvals = approval_store.list_pending_for_execution(&execution_id);
     let views: Vec<ApprovalRequestView> = approvals
         .into_iter()
@@ -257,46 +251,39 @@ pub async fn get_approval(
     Path(approval_id): Path<Uuid>,
 ) -> Result<Json<ApprovalRequestView>, (StatusCode, Json<ErrorResponse>)> {
     info!("Getting approval: {}", approval_id);
-    let approval_store = state
-        .approval_store
-        .as_ref()
-        .ok_or_else(|| {
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(ErrorResponse {
-                    error: "ServiceUnavailable".to_string(),
-                    message: "Approval functionality is not enabled".to_string(),
-                }),
-            )
-        })?;
-    let approval = approval_store
-        .get(approval_id)
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "NotFound".to_string(),
-                    message: format!("Approval {} not found", approval_id),
-                }),
-            )
-        })?;
-    Ok(
-        Json(ApprovalRequestView {
-            id: approval.id,
-            execution_id: approval.execution_id,
-            node_id: approval.node_id,
-            message: approval.config.message,
-            description: approval.config.description,
-            approvers: approval.config.approvers,
-            timeout_seconds: approval.config.timeout_seconds,
-            context_data: approval.config.context_data,
-            status: format!("{:?}", approval.status),
-            requested_at: approval.requested_at,
-            resolved_at: approval.resolved_at,
-            resolved_by: approval.resolved_by,
-            comments: approval.comments,
-        }),
-    )
+    let approval_store = state.approval_store.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "ServiceUnavailable".to_string(),
+                message: "Approval functionality is not enabled".to_string(),
+            }),
+        )
+    })?;
+    let approval = approval_store.get(approval_id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "NotFound".to_string(),
+                message: format!("Approval {} not found", approval_id),
+            }),
+        )
+    })?;
+    Ok(Json(ApprovalRequestView {
+        id: approval.id,
+        execution_id: approval.execution_id,
+        node_id: approval.node_id,
+        message: approval.config.message,
+        description: approval.config.description,
+        approvers: approval.config.approvers,
+        timeout_seconds: approval.config.timeout_seconds,
+        context_data: approval.config.context_data,
+        status: format!("{:?}", approval.status),
+        requested_at: approval.requested_at,
+        resolved_at: approval.resolved_at,
+        resolved_by: approval.resolved_by,
+        comments: approval.comments,
+    }))
 }
 /// Approve an approval request
 pub async fn approve_approval(
@@ -306,27 +293,21 @@ pub async fn approve_approval(
     Json(request): Json<ApprovalActionRequest>,
 ) -> Result<Json<ApprovalActionResponse>, (StatusCode, Json<ErrorResponse>)> {
     info!("Approving approval: {} by user: {}", approval_id, user.id);
-    let approval_store = state
-        .approval_store
-        .as_ref()
-        .ok_or_else(|| {
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(ErrorResponse {
-                    error: "ServiceUnavailable".to_string(),
-                    message: "Approval functionality is not enabled".to_string(),
-                }),
-            )
-        })?;
-    let success = approval_store
-        .approve(approval_id, user.id.to_string(), request.comments);
-    if success {
-        Ok(
-            Json(ApprovalActionResponse {
-                success: true,
-                message: "Approval approved successfully".to_string(),
+    let approval_store = state.approval_store.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "ServiceUnavailable".to_string(),
+                message: "Approval functionality is not enabled".to_string(),
             }),
         )
+    })?;
+    let success = approval_store.approve(approval_id, user.id.to_string(), request.comments);
+    if success {
+        Ok(Json(ApprovalActionResponse {
+            success: true,
+            message: "Approval approved successfully".to_string(),
+        }))
     } else {
         Err((
             StatusCode::NOT_FOUND,
@@ -345,27 +326,21 @@ pub async fn reject_approval(
     Json(request): Json<ApprovalActionRequest>,
 ) -> Result<Json<ApprovalActionResponse>, (StatusCode, Json<ErrorResponse>)> {
     info!("Rejecting approval: {} by user: {}", approval_id, user.id);
-    let approval_store = state
-        .approval_store
-        .as_ref()
-        .ok_or_else(|| {
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(ErrorResponse {
-                    error: "ServiceUnavailable".to_string(),
-                    message: "Approval functionality is not enabled".to_string(),
-                }),
-            )
-        })?;
-    let success = approval_store
-        .reject(approval_id, user.id.to_string(), request.comments);
-    if success {
-        Ok(
-            Json(ApprovalActionResponse {
-                success: true,
-                message: "Approval rejected successfully".to_string(),
+    let approval_store = state.approval_store.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "ServiceUnavailable".to_string(),
+                message: "Approval functionality is not enabled".to_string(),
             }),
         )
+    })?;
+    let success = approval_store.reject(approval_id, user.id.to_string(), request.comments);
+    if success {
+        Ok(Json(ApprovalActionResponse {
+            success: true,
+            message: "Approval rejected successfully".to_string(),
+        }))
     } else {
         Err((
             StatusCode::NOT_FOUND,

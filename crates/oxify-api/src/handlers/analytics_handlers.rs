@@ -2,17 +2,21 @@
 //!
 //! 🤖 Generated with [SplitRS](https://github.com/cool-japan/splitrs)
 
+use crate::types::*;
 use axum::{
     extract::{Path, State},
-    http::StatusCode, Json,
+    http::StatusCode,
+    Json,
 };
 use std::sync::Arc;
 use tracing::{error, info};
 use uuid::Uuid;
-use crate::types::*;
 
-use super::template_vector_handlers::{AppState, BatchAnalysisResponse, BatchSummary, CreateScheduleRequest, CreateScheduleResponse, EstimateCostRequest, EstimateCostResponse, ExecutionAnalytics, ListSchedulesResponse, NodeCostSummary, TimeSeriesData, UpdateScheduleRequest, WorkflowAnalytics};
-
+use super::template_vector_handlers::{
+    AppState, BatchAnalysisResponse, BatchSummary, CreateScheduleRequest, CreateScheduleResponse,
+    EstimateCostRequest, EstimateCostResponse, ExecutionAnalytics, ListSchedulesResponse,
+    NodeCostSummary, TimeSeriesData, UpdateScheduleRequest, WorkflowAnalytics,
+};
 
 /// Optimization analysis response
 #[derive(serde::Serialize)]
@@ -96,10 +100,9 @@ pub async fn estimate_workflow_cost(
             ));
         }
     };
-    let estimator = if let (Some(prompt), Some(response)) = (
-        request.avg_prompt_tokens,
-        request.avg_response_tokens,
-    ) {
+    let estimator = if let (Some(prompt), Some(response)) =
+        (request.avg_prompt_tokens, request.avg_response_tokens)
+    {
         oxify_engine::CostEstimator::with_averages(prompt, response)
     } else {
         oxify_engine::CostEstimator::new()
@@ -116,15 +119,13 @@ pub async fn estimate_workflow_cost(
             output_tokens: nc.estimated_output_tokens,
         })
         .collect();
-    Ok(
-        Json(EstimateCostResponse {
-            total_cost_usd: estimate.total_cost_usd,
-            total_input_tokens: estimate.total_input_tokens,
-            total_output_tokens: estimate.total_output_tokens,
-            node_costs,
-            category_costs: estimate.category_costs,
-        }),
-    )
+    Ok(Json(EstimateCostResponse {
+        total_cost_usd: estimate.total_cost_usd,
+        total_input_tokens: estimate.total_input_tokens,
+        total_output_tokens: estimate.total_output_tokens,
+        node_costs,
+        category_costs: estimate.category_costs,
+    }))
 }
 /// Analyze workflow batching opportunities
 pub async fn analyze_workflow_batching(
@@ -168,17 +169,15 @@ pub async fn analyze_workflow_batching(
             node_ids: b.nodes.clone(),
         })
         .collect();
-    Ok(
-        Json(BatchAnalysisResponse {
-            total_nodes: stats.total_nodes,
-            batched_nodes: stats.batched_nodes,
-            batch_count: stats.batch_count,
-            average_batch_size: stats.average_batch_size,
-            batching_efficiency: stats.efficiency(),
-            estimated_time_savings: stats.estimated_time_savings,
-            batches,
-        }),
-    )
+    Ok(Json(BatchAnalysisResponse {
+        total_nodes: stats.total_nodes,
+        batched_nodes: stats.batched_nodes,
+        batch_count: stats.batch_count,
+        average_batch_size: stats.average_batch_size,
+        batching_efficiency: stats.efficiency(),
+        estimated_time_savings: stats.estimated_time_savings,
+        batches,
+    }))
 }
 /// Test workflow execution with inputs and optional expected output
 pub async fn test_workflow(
@@ -227,9 +226,7 @@ pub async fn test_workflow(
                         serde_json::from_str::<serde_json::Value>(&output),
                         serde_json::from_str::<serde_json::Value>(expected),
                     ) {
-                        (Ok(output_json), Ok(expected_json)) => {
-                            output_json == expected_json
-                        }
+                        (Ok(output_json), Ok(expected_json)) => output_json == expected_json,
                         _ => false,
                     }
                 }
@@ -237,29 +234,25 @@ pub async fn test_workflow(
                 true
             };
             let execution_id = ctx.execution_id;
-            Ok(
-                Json(TestWorkflowResponse {
-                    passed,
-                    execution_id,
-                    output,
-                    expected_output: request.expected_output,
-                    execution_time_ms,
-                    error: None,
-                }),
-            )
+            Ok(Json(TestWorkflowResponse {
+                passed,
+                execution_id,
+                output,
+                expected_output: request.expected_output,
+                execution_time_ms,
+                error: None,
+            }))
         }
         Err(e) => {
             error!("Workflow execution failed: {}", e);
-            Ok(
-                Json(TestWorkflowResponse {
-                    passed: false,
-                    execution_id: Uuid::new_v4(),
-                    output: String::new(),
-                    expected_output: request.expected_output,
-                    execution_time_ms,
-                    error: Some(e.to_string()),
-                }),
-            )
+            Ok(Json(TestWorkflowResponse {
+                passed: false,
+                execution_id: Uuid::new_v4(),
+                output: String::new(),
+                expected_output: request.expected_output,
+                execution_time_ms,
+                error: Some(e.to_string()),
+            }))
         }
     }
 }
@@ -268,10 +261,7 @@ pub async fn test_workflow(
 pub async fn create_schedule(
     State(_state): State<Arc<AppState>>,
     Json(_request): Json<CreateScheduleRequest>,
-) -> Result<
-    (StatusCode, Json<CreateScheduleResponse>),
-    (StatusCode, Json<ErrorResponse>),
-> {
+) -> Result<(StatusCode, Json<CreateScheduleResponse>), (StatusCode, Json<ErrorResponse>)> {
     Err((
         StatusCode::SERVICE_UNAVAILABLE,
         Json(ErrorResponse {
@@ -355,10 +345,7 @@ pub async fn delete_schedule(
 pub async fn get_schedule_history(
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<Uuid>,
-) -> Result<
-    Json<Vec<oxify_model::ScheduleExecution>>,
-    (StatusCode, Json<ErrorResponse>),
-> {
+) -> Result<Json<Vec<oxify_model::ScheduleExecution>>, (StatusCode, Json<ErrorResponse>)> {
     Err((
         StatusCode::SERVICE_UNAVAILABLE,
         Json(ErrorResponse {
@@ -497,25 +484,23 @@ pub async fn analyze_workflow_optimization(
             action: opt.action.clone(),
         })
         .collect();
-    Ok(
-        Json(OptimizationAnalysisResponse {
-            total_optimizations: optimizations.len(),
-            by_priority: OptimizationsByPriority {
-                critical,
-                high,
-                medium,
-                low,
-            },
-            by_category: OptimizationsByCategory {
-                performance,
-                cost,
-                reliability,
-                maintainability,
-                security,
-            },
-            estimated_time_savings: total_time_savings,
-            estimated_cost_reduction: total_cost_reduction,
-            optimizations: optimization_dtos,
-        }),
-    )
+    Ok(Json(OptimizationAnalysisResponse {
+        total_optimizations: optimizations.len(),
+        by_priority: OptimizationsByPriority {
+            critical,
+            high,
+            medium,
+            low,
+        },
+        by_category: OptimizationsByCategory {
+            performance,
+            cost,
+            reliability,
+            maintainability,
+            security,
+        },
+        estimated_time_savings: total_time_savings,
+        estimated_cost_reduction: total_cost_reduction,
+        optimizations: optimization_dtos,
+    }))
 }
