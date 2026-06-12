@@ -1,5 +1,18 @@
 # OxiFY - Development TODO
 
+## Stubs to implement (added 2026-06-12 by /cooljapan-stub-check)
+
+- [ ] `oxify-api`: `crates/oxify-api/src/checkpoint_handlers.rs:162` — implement checkpoint resume: restore ExecutionContext, mark completed nodes, re-run from checkpoint
+  - Priority: P2 | Scope: medium | Hint: none
+- [ ] `oxify-mcp`: `crates/oxify-mcp/src/servers/web.rs:133` — implement CSS selector parsing for web_fetch tool (currently passes through raw HTML)
+  - Priority: P2 | Scope: small | Hint: none
+- [ ] `oxify-mcp`: `crates/oxify-mcp/src/servers/web.rs:154` — implement headless browser screenshot for `web_screenshot` MCP tool
+  - Priority: P2 | Scope: medium | Hint: none
+- [ ] `oxify-storage`: `crates/oxify-storage/src/cache.rs:49` — migrate quota_store to SQLite and re-enable the disabled cache module
+  - Priority: P2 | Scope: medium | Hint: oxisql
+- [ ] `oxify-server`: `crates/oxify-server/src/websocket.rs:428` — implement MessagePack binary message support in websocket handler
+  - Priority: P2 | Scope: small | Hint: none
+
 ## v0.2.10 Additions (2026-06-10)
 1. **Real end-to-end SSE** (engine→api→ui) — `Engine::execute_with_context(&self, workflow, ctx, config)` new entrypoint (executor.rs) preserves caller's `execution_id` through the event bus so all `WorkflowEvent`s carry one consistent id; `oxify-api` `AppState` gains `Arc<EventBus>` built via `EngineBuilder::with_event_bus`; `execute_workflow` bug-fixed (was minting 3 different execution ids — create/update/engine — so stored execution was never updated; now one id end-to-end); `sse.rs::stream_execution` rewritten to subscribe to the bus via `broadcast::Receiver::recv` in a `tokio::select!` loop (replaced 500ms polling loop that was reading a store written only at the end); `oxify-ui` `ApiClient::stream_execution` opens `GET /api/v1/executions/{id}/stream` and the `execution_stream` handler proxies upstream events, transforming JSON payloads to OOB-swap HTML `<div id="execution-status" hx-swap-oob="true">` (zero template changes); mock branch preserved for dev mode. +50 tests in oxify-api, +86 in oxify-ui.
 2. **Plugin WASM activation** (`oxify-engine`) — `WasmNodePlugin` adapter (`plugin_wasm.rs`) implements `NodePlugin` via `std::sync::Mutex<WasmContext { store, plugin }>` (wasmer 7.1 `Store: Send+Sync` → no `unsafe`; synchronous wasmer call runs inside the lock, no `.await` while locked → `Send` future); `PluginLoader::with_registry(config, Arc<PluginRegistry>)` constructor shares the engine's live registry (previously created an isolated private one and never registered anything executable); `load_plugin` now registers sandboxed WASM plugins into the shared registry (wasm-feature: `WasmNodePlugin::from_wasm_file`; no-wasm: returns a clear error); dead `#[allow(dead_code)] wasm_loader` field removed; `PluginCapabilities::wasm_module: Option<String>` added (backward-compatible `#[serde(default)]`, falls back to `<name>.wasm` convention); `Engine::load_plugins_from(&self, dir) -> Result<Vec<PluginLoadResult>>` discovers + registers manifests end-to-end; `#[tokio::test(flavor = "multi_thread")]` WASM E2E test (required because `block_in_place` panics on current-thread runtime). +326 tests in oxify-engine (default), +325 with `--features wasm`.
