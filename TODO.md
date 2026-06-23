@@ -833,3 +833,30 @@ Defined DAGs (code-based) can be executed in parallel with vector search support
     - (b) `crates/oxify-cli/Cargo.toml` (~line 34): `flate2 = "1.1"` — **unconditional** (not optional). One call site: `crates/oxify-cli/src/commands/workflow.rs:859-860` — `flate2::write::GzEncoder` + `flate2::Compression` (workflow archive export, **gzip**, paired with `tar::Builder`).
   - Replacement: `oxiarc-deflate` — use its raw-DEFLATE encoder for the authn `DeflateEncoder` (raw stream, no gzip wrapper) and its gzip encoder for the CLI `GzEncoder`. Roughly 3 call sites total; the change is mechanical (swap the encoder type + `Write` plumbing, keep the same compression semantics).
   - **Acceptance:** `oxify-authn` (built with the `saml` feature) and `oxify-cli` compile and their test suites pass; the SAML redirect-binding round-trip (deflate-encode → base64 → decode) and the CLI gzip archive output remain byte-valid and consumable by standard tools; `cargo tree | grep flate2` returns empty across the workspace.
+
+## Stubs to implement (added 2026-06-22 by /cooljapan-stub-check)
+
+- [ ] **oxify** `oxify-api`: `crates/oxify-api/src/checkpoint_handlers.rs:162` — `TODO`: `Actually resume the execution using the engine`
+  - **Priority:** P2  **Scope:** medium  **Cross-project:** none
+  - **Approach:** Resume endpoint is a no-op ("implementation pending"); restore ExecutionContext from the checkpoint, mark already-completed nodes as done, and re-run the engine from the saved state.
+  - **Risk:** Incorrect state restoration could double-execute side-effecting nodes; gate replay on node idempotency/completion flags.
+- [ ] **oxify** `oxify-mcp`: `crates/oxify-mcp/src/servers/web.rs:133` — `TODO`: `Implement CSS selector parsing with scraper crate`
+  - **Priority:** P2  **Scope:** medium  **Cross-project:** none
+  - **Approach:** Parse the supplied CSS selector via a selector library (scraper) and extract all matching nodes from the fetched document.
+  - **Risk:** Malformed selectors must surface as a clean McpError rather than panicking; validate/`Result`-wrap selector compilation.
+- [ ] **oxify** `oxify-mcp`: `crates/oxify-mcp/src/servers/web.rs:154` — `TODO`: `Implement headless browser screenshot`
+  - **Priority:** P2  **Scope:** large  **Cross-project:** none
+  - **Approach:** Wire a headless-browser backend to render the page and return an encoded screenshot, replacing the current "not yet implemented" McpError.
+  - **Risk:** Headless browser is a heavy external dependency; must be feature-gated so default builds stay lean and Pure-Rust where possible.
+- [ ] **oxify** `oxify-server`: `crates/oxify-server/src/websocket.rs:428` — `TODO`: `Support MessagePack for binary messages`
+  - **Priority:** P2  **Scope:** small  **Cross-project:** none
+  - **Approach:** Branch on `Message::Binary` in the WS handler and decode the payload via rmp-serde into the existing WsMessage enum.
+  - **Risk:** Untrusted binary frames need bounded/validated decoding to avoid panics or resource exhaustion.
+- [ ] **oxify** `oxify-server`: `crates/oxify-server/src/websocket.rs:359` — `TODO`: `scope broadcasts to connections that are subscribed to workflow_id`
+  - **Priority:** P2  **Scope:** medium  **Cross-project:** none
+  - **Approach:** Add per-workflow subscription tracking to WsConnectionManager and filter `broadcast()` so only subscribers of the edited `workflow_id` receive real-time edits.
+  - **Risk:** Subscription bookkeeping must be cleaned up on disconnect to avoid leaks and stale fan-out.
+- [ ] **oxify** `oxify-storage`: `crates/oxify-storage/src/cache.rs:49` — `TODO`: `Re-enable when quota_store is migrated to SQLite`
+  - **Priority:** P2  **Scope:** medium  **Cross-project:** oxisql-sqlite-compat
+  - **Approach:** Migrate quota_store onto oxisql-sqlite-compat (COOLJAPAN policy — never rusqlite) and re-enable the disabled quota path.
+  - **Risk:** Schema/migration must preserve existing quota accounting; verify round-trip before flipping the path back on.
