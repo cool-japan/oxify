@@ -6,7 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use object_store::{gcp::GoogleCloudStorageBuilder, path::Path as StoragePath, ObjectStore, ObjectStoreExt};
+use object_store::{
+    gcp::GoogleCloudStorageBuilder, path::Path as StoragePath, ObjectStore, ObjectStoreExt,
+};
 use tracing::{debug, instrument};
 
 use super::ObjectStoreProvider;

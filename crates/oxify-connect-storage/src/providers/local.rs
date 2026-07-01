@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures::StreamExt as _;
-use object_store::{local::LocalFileSystem, path::Path as StoragePath, ObjectStore, ObjectStoreExt};
+use object_store::{
+    local::LocalFileSystem, path::Path as StoragePath, ObjectStore, ObjectStoreExt,
+};
 use tracing::{debug, instrument};
 
 use super::ObjectStoreProvider;
