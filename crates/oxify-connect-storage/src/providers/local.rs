@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures::StreamExt as _;
-use object_store::{local::LocalFileSystem, path::Path as StoragePath, ObjectStore};
+use object_store::{local::LocalFileSystem, path::Path as StoragePath, ObjectStore, ObjectStoreExt};
 use tracing::{debug, instrument};
 
 use super::ObjectStoreProvider;
@@ -244,7 +244,7 @@ impl ObjectStoreProvider for LocalFsProvider {
             let meta = item.map_err(|e| StorageError::Provider(e.to_string()))?;
             results.push(ObjectListing {
                 key: meta.location.to_string(),
-                size: meta.size as u64,
+                size: meta.size,
                 last_modified: Some(meta.last_modified),
                 etag: meta.e_tag,
             });

@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn test_build_mysql_args_float() {
-        let params = vec![Value::Number(serde_json::Number::from_f64(2.718).unwrap())];
+        let params = vec![Value::Number(serde_json::Number::from_f64(2.5).unwrap())];
         let result = build_mysql_args(&params);
         assert!(result.is_ok());
     }

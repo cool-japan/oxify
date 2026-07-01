@@ -602,7 +602,7 @@ impl DeviceFingerprint {
         hasher.update(user_agent.as_bytes());
         let result = hasher.finalize();
 
-        format!("{result:x}")
+        hex::encode(result)
     }
 
     /// Parse IP address for validation

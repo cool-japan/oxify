@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_build_pg_args_float() {
-        let params = vec![Value::Number(serde_json::Number::from_f64(3.14).unwrap())];
+        let params = vec![Value::Number(serde_json::Number::from_f64(9.75).unwrap())];
         let result = build_pg_args(&params);
         assert!(result.is_ok());
     }

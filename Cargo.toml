@@ -47,14 +47,14 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 serde_yaml = "0.9"
 thiserror = "2.0.18"
-anyhow = "1.0.102"
+anyhow = "1.0.103"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "registry"] }
 
 # Web framework
 axum = { version = "0.8.9", features = ["macros", "ws"] }
 tower = "0.5.3"
-tower-http = { version = "0.6.11", features = ["cors", "trace"] }
+tower-http = { version = "0.7.0", features = ["cors", "trace"] }
 hyper = { version = "1.10", features = ["full"] }
 
 # GraphQL
@@ -68,11 +68,11 @@ sqlx = { version = "0.9.0", features = ["runtime-tokio", "sqlite", "chrono", "uu
 
 # Utilities
 clap = { version = "4.6.1", features = ["derive"] }
-uuid = { version = "1.23.3", features = ["v4", "serde"] }
+uuid = { version = "1.23.4", features = ["v4", "serde"] }
 chrono = { version = "0.4.45", features = ["serde"] }
 futures = "0.3"
 tokio-stream = "0.1"
-cron = "0.16"
+cron = "0.17"
 rand = "0.10"
 rayon = "1.12"
 num_cpus = "1.17"
@@ -113,8 +113,8 @@ lettre = { version = "0.11", default-features = false, features = ["tokio1-rustl
 mongodb = "3.7.0"
 
 # Object storage
-object_store = { version = "0.13", default-features = false, features = ["aws", "gcp", "azure"] }
-bytes = "1.11"
+object_store = { version = "0.14", default-features = false, features = ["aws", "gcp", "azure", "fs"] }
+bytes = "1.12"
 
 # Compression (Pure Rust, OxiARC ecosystem)
 oxiarc-deflate = "0.3.3"

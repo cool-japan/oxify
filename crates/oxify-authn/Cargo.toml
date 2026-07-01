@@ -46,9 +46,10 @@ percent-encoding = "2.3"
 
 # SHA256 for PKCE
 sha2 = "0.11"
+hex = { workspace = true }
 
 # SAML 2.0 support (optional)
-quick-xml = { version = "0.40", features = ["serialize"], optional = true }
+quick-xml = { version = "0.41", features = ["serialize"], optional = true }
 oxiarc-deflate = { workspace = true, optional = true }
 url = { version = "2.5", optional = true }
 

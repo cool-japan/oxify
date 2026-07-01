@@ -549,6 +549,7 @@ pub enum WasmNodeKind {
     TryCatch,
     SubWorkflow,
     Vision,
+    Custom,
 }
 
 impl From<&NodeKind> for WasmNodeKind {
@@ -569,6 +570,7 @@ impl From<&NodeKind> for WasmNodeKind {
             NodeKind::TryCatch(_) => WasmNodeKind::TryCatch,
             NodeKind::SubWorkflow(_) => WasmNodeKind::SubWorkflow,
             NodeKind::Vision(_) => WasmNodeKind::Vision,
+            NodeKind::Custom(_) => WasmNodeKind::Custom,
         }
     }
 }
