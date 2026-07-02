@@ -1,9 +1,17 @@
 //! Database-backed checkpoint storage
+//!
+//! Ported from the retired `sqlx` API to the Pure-Rust OxiSQL stack
+//! (`oxisql_core::Connection` + the shared [`row_ext`](crate::row_ext) mapping
+//! helpers), mirroring [`crate::execution_store`]. All JSON payloads
+//! (`context`, `completed_nodes`, `node_results`) are persisted as TEXT via
+//! `serde_json::to_string`, integers as `INTEGER`, the paused flag as `0`/`1`,
+//! and `created_at` as an RFC 3339 string.
 
-use crate::{DatabasePool, Result};
+use crate::row_ext::RowExt;
+use crate::{DatabasePool, Result, StorageError};
 use chrono::{DateTime, Utc};
 use oxify_model::{ExecutionContext, NodeExecutionResult, NodeId, WorkflowId};
-use sqlx::Row;
+use oxisql_core::{Connection, Row};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -54,6 +62,57 @@ impl ExecutionCheckpoint {
     }
 }
 
+/// The nine columns selected by every read query in this module.
+const CHECKPOINT_COLUMNS: &str = "id, workflow_id, execution_id, context, completed_nodes, \
+     node_results, current_level, paused, reason, created_at";
+
+/// Map a full `execution_checkpoints` row onto [`ExecutionCheckpoint`].
+///
+/// JSON columns are deserialized, UUID/timestamp columns are parsed, and the
+/// integer `current_level` / `paused` columns are normalized back to `usize` /
+/// `bool`. A malformed row surfaces as a [`StorageError`] rather than a panic.
+fn row_to_checkpoint(row: &Row) -> Result<ExecutionCheckpoint> {
+    let id_str: String = row.col("id")?;
+    let workflow_id_str: String = row.col("workflow_id")?;
+    let execution_id_str: String = row.col("execution_id")?;
+    let context_json: String = row.col("context")?;
+    let completed_nodes_json: String = row.col("completed_nodes")?;
+    let node_results_json: String = row.col("node_results")?;
+    let current_level: i64 = row.col("current_level")?;
+    let paused: i64 = row.col("paused")?;
+    let reason: String = row.col("reason")?;
+    let created_at_str: String = row.col("created_at")?;
+
+    let parse_uuid = |value: &str, field: &str| -> Result<Uuid> {
+        Uuid::parse_str(value).map_err(|e| {
+            StorageError::ValidationError(format!("invalid {field} in checkpoint row: {e}"))
+        })
+    };
+
+    let context: ExecutionContext = serde_json::from_str(&context_json)?;
+    let completed_nodes: Vec<NodeId> = serde_json::from_str(&completed_nodes_json)?;
+    let node_results: HashMap<NodeId, NodeExecutionResult> =
+        serde_json::from_str(&node_results_json)?;
+    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .map_err(|e| {
+            StorageError::ValidationError(format!("invalid created_at in checkpoint row: {e}"))
+        })?;
+
+    Ok(ExecutionCheckpoint {
+        id: parse_uuid(&id_str, "id")?,
+        workflow_id: parse_uuid(&workflow_id_str, "workflow_id")?,
+        execution_id: parse_uuid(&execution_id_str, "execution_id")?,
+        context,
+        completed_nodes,
+        node_results,
+        current_level: current_level as usize,
+        paused: paused != 0,
+        created_at,
+        reason,
+    })
+}
+
 /// Database checkpoint store
 #[derive(Clone)]
 pub struct DatabaseCheckpointStore {
@@ -65,31 +124,71 @@ impl DatabaseCheckpointStore {
         Self { pool }
     }
 
+    /// Idempotently create the `execution_checkpoints` table.
+    ///
+    /// Production deployments create this table (with its foreign key and
+    /// indexes) through the migration runner
+    /// ([`DatabasePool::migrate`](crate::DatabasePool::migrate) applies
+    /// `migrations/20251130000007__execution_checkpoints.sql`). This helper is
+    /// a lightweight, dependency-free bootstrap for embedded and test contexts
+    /// that do not run the full migration set; it is safe to call repeatedly
+    /// and never overwrites an existing table.
+    pub async fn ensure_table(&self) -> Result<()> {
+        let conn = self.pool.acquire().await?;
+        conn.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS execution_checkpoints (
+                id TEXT PRIMARY KEY,
+                workflow_id TEXT NOT NULL,
+                execution_id TEXT NOT NULL,
+                context TEXT NOT NULL,
+                completed_nodes TEXT NOT NULL DEFAULT '[]',
+                node_results TEXT NOT NULL DEFAULT '{}',
+                current_level INTEGER NOT NULL DEFAULT 0,
+                paused INTEGER NOT NULL DEFAULT 0,
+                reason TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            "#,
+            &[],
+        )
+        .await?;
+        Ok(())
+    }
+
     /// Save a checkpoint
     pub async fn save(&self, checkpoint: &ExecutionCheckpoint) -> Result<Uuid> {
-        let context_json = serde_json::to_value(&checkpoint.context)?;
-        let completed_nodes_json = serde_json::to_value(&checkpoint.completed_nodes)?;
-        let node_results_json = serde_json::to_value(&checkpoint.node_results)?;
+        let id = checkpoint.id.to_string();
+        let workflow_id = checkpoint.workflow_id.to_string();
+        let execution_id = checkpoint.execution_id.to_string();
+        let context_json = serde_json::to_string(&checkpoint.context)?;
+        let completed_nodes_json = serde_json::to_string(&checkpoint.completed_nodes)?;
+        let node_results_json = serde_json::to_string(&checkpoint.node_results)?;
+        let current_level = checkpoint.current_level as i64;
+        let paused = i64::from(checkpoint.paused);
+        let created_at = checkpoint.created_at.to_rfc3339();
 
-        sqlx::query(
-            r"
+        let conn = self.pool.acquire().await?;
+        conn.execute(
+            r#"
             INSERT INTO execution_checkpoints
             (id, workflow_id, execution_id, context, completed_nodes, node_results,
              current_level, paused, reason, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            ",
+            "#,
+            &[
+                &id,
+                &workflow_id,
+                &execution_id,
+                &context_json,
+                &completed_nodes_json,
+                &node_results_json,
+                &current_level,
+                &paused,
+                &checkpoint.reason,
+                &created_at,
+            ],
         )
-        .bind(checkpoint.id)
-        .bind(checkpoint.workflow_id)
-        .bind(checkpoint.execution_id)
-        .bind(&context_json)
-        .bind(&completed_nodes_json)
-        .bind(&node_results_json)
-        .bind(checkpoint.current_level as i32)
-        .bind(checkpoint.paused)
-        .bind(&checkpoint.reason)
-        .bind(checkpoint.created_at)
-        .execute(self.pool.pool())
         .await?;
 
         Ok(checkpoint.id)
@@ -97,121 +196,58 @@ impl DatabaseCheckpointStore {
 
     /// Load a checkpoint by ID
     pub async fn load(&self, id: Uuid) -> Result<Option<ExecutionCheckpoint>> {
-        let row = sqlx::query(
-            r"
-            SELECT id, workflow_id, execution_id, context, completed_nodes, node_results,
-                   current_level, paused, reason, created_at
-            FROM execution_checkpoints
-            WHERE id = $1
-            ",
-        )
-        .bind(id)
-        .fetch_optional(self.pool.pool())
-        .await?;
+        let id_str = id.to_string();
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                &format!("SELECT {CHECKPOINT_COLUMNS} FROM execution_checkpoints WHERE id = $1"),
+                &[&id_str],
+            )
+            .await?;
 
-        match row {
-            Some(row) => {
-                let context: ExecutionContext = serde_json::from_value(row.get("context"))?;
-                let completed_nodes: Vec<NodeId> =
-                    serde_json::from_value(row.get("completed_nodes"))?;
-                let node_results: HashMap<NodeId, NodeExecutionResult> =
-                    serde_json::from_value(row.get("node_results"))?;
-
-                Ok(Some(ExecutionCheckpoint {
-                    id: row.get("id"),
-                    workflow_id: row.get("workflow_id"),
-                    execution_id: row.get("execution_id"),
-                    context,
-                    completed_nodes,
-                    node_results,
-                    current_level: row.get::<i32, _>("current_level") as usize,
-                    paused: row.get("paused"),
-                    created_at: row.get("created_at"),
-                    reason: row.get("reason"),
-                }))
-            }
+        match rows.first() {
+            Some(row) => Ok(Some(row_to_checkpoint(row)?)),
             None => Ok(None),
         }
     }
 
     /// Load the latest checkpoint for an execution
     pub async fn load_latest(&self, execution_id: Uuid) -> Result<Option<ExecutionCheckpoint>> {
-        let row = sqlx::query(
-            r"
-            SELECT id, workflow_id, execution_id, context, completed_nodes, node_results,
-                   current_level, paused, reason, created_at
-            FROM execution_checkpoints
-            WHERE execution_id = $1
-            ORDER BY created_at DESC
-            LIMIT 1
-            ",
-        )
-        .bind(execution_id)
-        .fetch_optional(self.pool.pool())
-        .await?;
+        let execution_id_str = execution_id.to_string();
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                &format!(
+                    "SELECT {CHECKPOINT_COLUMNS} FROM execution_checkpoints \
+                     WHERE execution_id = $1 ORDER BY created_at DESC LIMIT 1"
+                ),
+                &[&execution_id_str],
+            )
+            .await?;
 
-        match row {
-            Some(row) => {
-                let context: ExecutionContext = serde_json::from_value(row.get("context"))?;
-                let completed_nodes: Vec<NodeId> =
-                    serde_json::from_value(row.get("completed_nodes"))?;
-                let node_results: HashMap<NodeId, NodeExecutionResult> =
-                    serde_json::from_value(row.get("node_results"))?;
-
-                Ok(Some(ExecutionCheckpoint {
-                    id: row.get("id"),
-                    workflow_id: row.get("workflow_id"),
-                    execution_id: row.get("execution_id"),
-                    context,
-                    completed_nodes,
-                    node_results,
-                    current_level: row.get::<i32, _>("current_level") as usize,
-                    paused: row.get("paused"),
-                    created_at: row.get("created_at"),
-                    reason: row.get("reason"),
-                }))
-            }
+        match rows.first() {
+            Some(row) => Ok(Some(row_to_checkpoint(row)?)),
             None => Ok(None),
         }
     }
 
     /// List checkpoints for an execution
     pub async fn list_by_execution(&self, execution_id: Uuid) -> Result<Vec<ExecutionCheckpoint>> {
-        let rows = sqlx::query(
-            r"
-            SELECT id, workflow_id, execution_id, context, completed_nodes, node_results,
-                   current_level, paused, reason, created_at
-            FROM execution_checkpoints
-            WHERE execution_id = $1
-            ORDER BY created_at DESC
-            ",
-        )
-        .bind(execution_id)
-        .fetch_all(self.pool.pool())
-        .await?;
+        let execution_id_str = execution_id.to_string();
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                &format!(
+                    "SELECT {CHECKPOINT_COLUMNS} FROM execution_checkpoints \
+                     WHERE execution_id = $1 ORDER BY created_at DESC"
+                ),
+                &[&execution_id_str],
+            )
+            .await?;
 
         let checkpoints = rows
-            .into_iter()
-            .filter_map(|row| {
-                let context: ExecutionContext = serde_json::from_value(row.get("context")).ok()?;
-                let completed_nodes: Vec<NodeId> =
-                    serde_json::from_value(row.get("completed_nodes")).ok()?;
-                let node_results: HashMap<NodeId, NodeExecutionResult> =
-                    serde_json::from_value(row.get("node_results")).ok()?;
-
-                Some(ExecutionCheckpoint {
-                    id: row.get("id"),
-                    workflow_id: row.get("workflow_id"),
-                    execution_id: row.get("execution_id"),
-                    context,
-                    completed_nodes,
-                    node_results,
-                    current_level: row.get::<i32, _>("current_level") as usize,
-                    paused: row.get("paused"),
-                    created_at: row.get("created_at"),
-                    reason: row.get("reason"),
-                })
-            })
+            .iter()
+            .filter_map(|row| row_to_checkpoint(row).ok())
             .collect();
 
         Ok(checkpoints)
@@ -219,32 +255,30 @@ impl DatabaseCheckpointStore {
 
     /// Delete a checkpoint
     pub async fn delete(&self, id: Uuid) -> Result<bool> {
-        let result = sqlx::query(
-            r"
-            DELETE FROM execution_checkpoints
-            WHERE id = $1
-            ",
-        )
-        .bind(id)
-        .execute(self.pool.pool())
-        .await?;
+        let id_str = id.to_string();
+        let conn = self.pool.acquire().await?;
+        let rows_affected = conn
+            .execute(
+                "DELETE FROM execution_checkpoints WHERE id = $1",
+                &[&id_str],
+            )
+            .await?;
 
-        Ok(result.rows_affected() > 0)
+        Ok(rows_affected > 0)
     }
 
     /// Delete all checkpoints for an execution
     pub async fn delete_by_execution(&self, execution_id: Uuid) -> Result<u64> {
-        let result = sqlx::query(
-            r"
-            DELETE FROM execution_checkpoints
-            WHERE execution_id = $1
-            ",
-        )
-        .bind(execution_id)
-        .execute(self.pool.pool())
-        .await?;
+        let execution_id_str = execution_id.to_string();
+        let conn = self.pool.acquire().await?;
+        let rows_affected = conn
+            .execute(
+                "DELETE FROM execution_checkpoints WHERE execution_id = $1",
+                &[&execution_id_str],
+            )
+            .await?;
 
-        Ok(result.rows_affected())
+        Ok(rows_affected)
     }
 }
 
@@ -308,7 +342,10 @@ mod tests {
 
         assert_eq!(checkpoint.node_results.len(), 1);
         assert!(checkpoint.node_results.contains_key(&node_id));
-        let stored_result = checkpoint.node_results.get(&node_id).unwrap();
+        let stored_result = checkpoint
+            .node_results
+            .get(&node_id)
+            .expect("node result present");
         match &stored_result.result {
             oxify_model::ExecutionResult::Success(val) => {
                 assert_eq!(val, &serde_json::json!({"status": "success"}));
@@ -379,7 +416,10 @@ mod tests {
         // Verify all results are stored correctly
         for (node_id, i) in node_ids {
             assert!(checkpoint.node_results.contains_key(&node_id));
-            let stored_result = checkpoint.node_results.get(&node_id).unwrap();
+            let stored_result = checkpoint
+                .node_results
+                .get(&node_id)
+                .expect("node result present");
             match &stored_result.result {
                 oxify_model::ExecutionResult::Success(val) => {
                     assert_eq!(val, &serde_json::json!({"value": i}));
@@ -387,7 +427,11 @@ mod tests {
                 _ => panic!("Expected Success result"),
             }
             assert_eq!(
-                stored_result.metrics.as_ref().unwrap().duration_ms,
+                stored_result
+                    .metrics
+                    .as_ref()
+                    .expect("metrics present")
+                    .duration_ms,
                 Some(i * 10)
             );
         }

@@ -15,7 +15,7 @@ use chrono::{DateTime, Utc};
 use futures::{stream::StreamExt, SinkExt};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -67,6 +67,18 @@ pub enum WsMessage {
         message: String,
         timestamp: DateTime<Utc>,
     },
+    /// Subscribe to real-time updates for a specific workflow.
+    ///
+    /// Client-to-server control message: once subscribed, the connection
+    /// receives `WorkflowEdit` broadcasts scoped to `workflow_id` via
+    /// [`WsConnectionManager::broadcast_to_workflow`]. Not broadcast or
+    /// replied to.
+    Subscribe { workflow_id: String },
+    /// Unsubscribe from a previously subscribed workflow's updates.
+    ///
+    /// Client-to-server control message; the inverse of [`WsMessage::Subscribe`].
+    /// Not broadcast or replied to.
+    Unsubscribe { workflow_id: String },
 }
 
 /// WebSocket authentication query parameters.
@@ -97,6 +109,10 @@ pub struct WsConnectionManager {
     next_id: AtomicU64,
     /// Max connections per user
     max_connections_per_user: usize,
+    /// Connection IDs subscribed to real-time updates for each workflow,
+    /// keyed by workflow ID. Used to scope `WorkflowEdit` broadcasts to only
+    /// the collaborators currently viewing a given workflow.
+    subscriptions: Arc<RwLock<HashMap<String, HashSet<u64>>>>,
 }
 
 impl WsConnectionManager {
@@ -106,6 +122,7 @@ impl WsConnectionManager {
             connections: Arc::new(RwLock::new(HashMap::new())),
             next_id: AtomicU64::new(1),
             max_connections_per_user,
+            subscriptions: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -156,8 +173,21 @@ impl WsConnectionManager {
     }
 
     /// Unregister a WebSocket connection.
+    ///
+    /// Also purges `connection_id` from every workflow's subscriber set so
+    /// disconnected connections neither leak as stale entries nor receive
+    /// fan-out from `broadcast_to_workflow` after they are gone.
     pub async fn unregister(&self, connection_id: u64) {
         self.connections.write().await.remove(&connection_id);
+
+        let mut subscriptions = self.subscriptions.write().await;
+        for subscribers in subscriptions.values_mut() {
+            subscribers.remove(&connection_id);
+        }
+        // Bound memory growth: drop workflows left with no subscribers.
+        subscriptions.retain(|_, subscribers| !subscribers.is_empty());
+        drop(subscriptions);
+
         info!(
             connection_id = connection_id,
             "WebSocket connection unregistered"
@@ -202,6 +232,52 @@ impl WsConnectionManager {
                         error = %e,
                         "Failed to send message to user"
                     );
+                }
+            }
+        }
+    }
+
+    /// Subscribe a connection to real-time updates for a specific workflow.
+    ///
+    /// Once subscribed, the connection becomes a recipient of
+    /// [`WsConnectionManager::broadcast_to_workflow`] calls for `workflow_id`.
+    pub async fn subscribe(&self, connection_id: u64, workflow_id: String) {
+        self.subscriptions
+            .write()
+            .await
+            .entry(workflow_id)
+            .or_default()
+            .insert(connection_id);
+    }
+
+    /// Unsubscribe a connection from a workflow's real-time updates.
+    ///
+    /// A no-op if the connection was not subscribed to `workflow_id`.
+    pub async fn unsubscribe(&self, connection_id: u64, workflow_id: &str) {
+        if let Some(subscribers) = self.subscriptions.write().await.get_mut(workflow_id) {
+            subscribers.remove(&connection_id);
+        }
+    }
+
+    /// Broadcast a message only to connections subscribed to `workflow_id`.
+    ///
+    /// Connections that never called [`WsConnectionManager::subscribe`] for
+    /// this `workflow_id` (or that have since unsubscribed / disconnected)
+    /// do not receive the message.
+    pub async fn broadcast_to_workflow(&self, workflow_id: &str, message: WsMessage) {
+        let subscriber_ids: Vec<u64> = self
+            .subscriptions
+            .read()
+            .await
+            .get(workflow_id)
+            .map(|subscribers| subscribers.iter().copied().collect())
+            .unwrap_or_default();
+
+        let connections = self.connections.read().await;
+        for id in subscriber_ids {
+            if let Some(connection) = connections.get(&id) {
+                if let Err(e) = connection.tx.send(message.clone()) {
+                    error!(connection_id = id, error = %e, "Failed to send message");
                 }
             }
         }
@@ -323,114 +399,24 @@ async fn handle_websocket(socket: WebSocket, user_id: String, manager: Arc<WsCon
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
             match msg {
-                Message::Text(text) => {
-                    match serde_json::from_str::<WsMessage>(&text) {
-                        Ok(ws_msg) => {
-                            debug!(
-                                connection_id = connection_id,
-                                user_id = %user_id_clone,
-                                message_type = ?ws_msg,
-                                "Received WebSocket message"
-                            );
-
-                            match &ws_msg {
-                                WsMessage::Ping { .. } => {
-                                    let pong = WsMessage::Pong {
-                                        timestamp: Utc::now(),
-                                    };
-                                    manager_clone.send_to_user(&user_id_clone, pong).await;
-                                }
-                                WsMessage::WorkflowEdit {
-                                    workflow_id,
-                                    user_id: editor_id,
-                                    operation,
-                                    ..
-                                } => {
-                                    debug!(
-                                        connection_id = connection_id,
-                                        workflow_id = %workflow_id,
-                                        editor_id = %editor_id,
-                                        operation = %operation,
-                                        "WorkflowEdit received — broadcasting to collaborators"
-                                    );
-                                    // Broadcast to all connected users so collaborators
-                                    // see real-time edits.
-                                    //
-                                    // TODO(follow-up): scope broadcasts to connections that
-                                    // are subscribed to `workflow_id` once per-workflow
-                                    // subscription tracking is added to WsConnectionManager.
-                                    manager_clone.broadcast(ws_msg.clone()).await;
-                                }
-                                WsMessage::LlmChat {
-                                    session_id,
-                                    message,
-                                    ..
-                                } => {
-                                    debug!(
-                                        connection_id = connection_id,
-                                        session_id = %session_id,
-                                        message_len = message.len(),
-                                        "LlmChat received — echoing acknowledgement to user"
-                                    );
-                                    // Acknowledge receipt so the client knows the
-                                    // message was delivered to the server.
-                                    let ack = WsMessage::LlmResponse {
-                                        session_id: session_id.clone(),
-                                        content: String::new(),
-                                        is_final: false,
-                                        timestamp: Utc::now(),
-                                    };
-                                    manager_clone.send_to_user(&user_id_clone, ack).await;
-                                }
-                                WsMessage::ExecutionUpdate {
-                                    execution_id,
-                                    status,
-                                    progress,
-                                    ..
-                                } => {
-                                    debug!(
-                                        connection_id = connection_id,
-                                        execution_id = %execution_id,
-                                        status = %status,
-                                        progress = %progress,
-                                        "ExecutionUpdate received — broadcasting status"
-                                    );
-                                    manager_clone.broadcast(ws_msg.clone()).await;
-                                }
-                                // Pong, LlmResponse, Error — server-originated; no action needed.
-                                WsMessage::Pong { .. }
-                                | WsMessage::LlmResponse { .. }
-                                | WsMessage::Error { .. } => {
-                                    debug!(
-                                        connection_id = connection_id,
-                                        "Server-originated message type received from client — ignoring"
-                                    );
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            warn!(
-                                connection_id = connection_id,
-                                error = %e,
-                                "Failed to parse WebSocket message"
-                            );
-
-                            let error_msg = WsMessage::Error {
-                                code: "PARSE_ERROR".to_string(),
-                                message: "Invalid message format".to_string(),
-                                timestamp: Utc::now(),
-                            };
-                            manager_clone.send_to_user(&user_id_clone, error_msg).await;
-                        }
+                Message::Text(text) => match serde_json::from_str::<WsMessage>(&text) {
+                    Ok(ws_msg) => {
+                        dispatch_message(ws_msg, connection_id, &manager_clone, &user_id_clone)
+                            .await;
                     }
-                }
-                Message::Binary(_) => {
-                    // TODO: Support MessagePack for binary messages
-                    warn!(
-                        connection_id = connection_id,
-                        "Binary messages not yet supported"
-                    );
-                }
+                    Err(e) => {
+                        reply_parse_error(&manager_clone, &user_id_clone, connection_id, e).await;
+                    }
+                },
+                Message::Binary(data) => match rmp_serde::from_slice::<WsMessage>(&data) {
+                    Ok(ws_msg) => {
+                        dispatch_message(ws_msg, connection_id, &manager_clone, &user_id_clone)
+                            .await;
+                    }
+                    Err(e) => {
+                        reply_parse_error(&manager_clone, &user_id_clone, connection_id, e).await;
+                    }
+                },
                 Message::Ping(_data) => {
                     // Axum handles Pong automatically, but we can log it
                     debug!(connection_id = connection_id, "Received ping");
@@ -473,6 +459,139 @@ async fn handle_websocket(socket: WebSocket, user_id: String, manager: Arc<WsCon
         user_id = %user_id,
         "WebSocket connection closed"
     );
+}
+
+/// Dispatch a successfully-decoded client [`WsMessage`] to its handler.
+///
+/// Shared by both the JSON (`Message::Text`) and MessagePack
+/// (`Message::Binary`) receive paths in [`handle_websocket`] so a message
+/// is routed identically no matter which wire format carried it.
+async fn dispatch_message(
+    ws_msg: WsMessage,
+    connection_id: u64,
+    manager: &Arc<WsConnectionManager>,
+    user_id: &str,
+) {
+    debug!(
+        connection_id = connection_id,
+        user_id = %user_id,
+        message_type = ?ws_msg,
+        "Received WebSocket message"
+    );
+
+    match &ws_msg {
+        WsMessage::Ping { .. } => {
+            let pong = WsMessage::Pong {
+                timestamp: Utc::now(),
+            };
+            manager.send_to_user(user_id, pong).await;
+        }
+        WsMessage::WorkflowEdit {
+            workflow_id,
+            user_id: editor_id,
+            operation,
+            ..
+        } => {
+            debug!(
+                connection_id = connection_id,
+                workflow_id = %workflow_id,
+                editor_id = %editor_id,
+                operation = %operation,
+                "WorkflowEdit received — broadcasting to workflow subscribers"
+            );
+            // Scope the broadcast to connections subscribed to this
+            // workflow_id, rather than every connected user.
+            manager
+                .broadcast_to_workflow(workflow_id, ws_msg.clone())
+                .await;
+        }
+        WsMessage::LlmChat {
+            session_id,
+            message,
+            ..
+        } => {
+            debug!(
+                connection_id = connection_id,
+                session_id = %session_id,
+                message_len = message.len(),
+                "LlmChat received — echoing acknowledgement to user"
+            );
+            // Acknowledge receipt so the client knows the
+            // message was delivered to the server.
+            let ack = WsMessage::LlmResponse {
+                session_id: session_id.clone(),
+                content: String::new(),
+                is_final: false,
+                timestamp: Utc::now(),
+            };
+            manager.send_to_user(user_id, ack).await;
+        }
+        WsMessage::ExecutionUpdate {
+            execution_id,
+            status,
+            progress,
+            ..
+        } => {
+            debug!(
+                connection_id = connection_id,
+                execution_id = %execution_id,
+                status = %status,
+                progress = %progress,
+                "ExecutionUpdate received — broadcasting status"
+            );
+            manager.broadcast(ws_msg.clone()).await;
+        }
+        WsMessage::Subscribe { workflow_id } => {
+            debug!(
+                connection_id = connection_id,
+                workflow_id = %workflow_id,
+                "Connection subscribed to workflow updates"
+            );
+            manager.subscribe(connection_id, workflow_id.clone()).await;
+        }
+        WsMessage::Unsubscribe { workflow_id } => {
+            debug!(
+                connection_id = connection_id,
+                workflow_id = %workflow_id,
+                "Connection unsubscribed from workflow updates"
+            );
+            manager.unsubscribe(connection_id, workflow_id).await;
+        }
+        // Pong, LlmResponse, Error — server-originated; no action needed.
+        WsMessage::Pong { .. } | WsMessage::LlmResponse { .. } | WsMessage::Error { .. } => {
+            debug!(
+                connection_id = connection_id,
+                "Server-originated message type received from client — ignoring"
+            );
+        }
+    }
+}
+
+/// Notify the sending user that their most recent message could not be
+/// decoded into a [`WsMessage`].
+///
+/// Shared by both the JSON (`Message::Text`) and MessagePack
+/// (`Message::Binary`) receive paths in [`handle_websocket`] so a decode
+/// failure produces the same `PARSE_ERROR` reply no matter which wire format
+/// failed to parse.
+async fn reply_parse_error<E: std::fmt::Display>(
+    manager: &Arc<WsConnectionManager>,
+    user_id: &str,
+    connection_id: u64,
+    error: E,
+) {
+    warn!(
+        connection_id = connection_id,
+        error = %error,
+        "Failed to parse WebSocket message"
+    );
+
+    let error_msg = WsMessage::Error {
+        code: "PARSE_ERROR".to_string(),
+        message: "Invalid message format".to_string(),
+        timestamp: Utc::now(),
+    };
+    manager.send_to_user(user_id, error_msg).await;
 }
 
 /// WebSocket error response helper.
@@ -684,18 +803,20 @@ mod tests {
     //
     // These tests exercise the match-arm routing logic added to `handle_websocket`
     // by exercising the WsConnectionManager primitives that each arm delegates to:
-    // broadcast() for WorkflowEdit / ExecutionUpdate, send_to_user() for LlmChat.
+    // broadcast_to_workflow() for WorkflowEdit, broadcast() for ExecutionUpdate,
+    // send_to_user() for LlmChat.
 
-    /// WorkflowEdit reaches every connected user via broadcast.
+    /// WorkflowEdit reaches connections subscribed to the edited workflow via
+    /// `broadcast_to_workflow` (not a blanket `broadcast` to every connection).
     #[tokio::test]
     async fn test_dispatch_workflow_edit_broadcasts() {
         let manager = Arc::new(WsConnectionManager::new(5));
 
         let (tx1, mut rx1) = mpsc::unbounded_channel();
-        manager.register("user1".to_string(), tx1).await.unwrap();
+        let conn1 = manager.register("user1".to_string(), tx1).await.unwrap();
 
         let (tx2, mut rx2) = mpsc::unbounded_channel();
-        manager.register("user2".to_string(), tx2).await.unwrap();
+        let conn2 = manager.register("user2".to_string(), tx2).await.unwrap();
 
         let edit_msg = WsMessage::WorkflowEdit {
             workflow_id: "wf-99".to_string(),
@@ -705,16 +826,21 @@ mod tests {
             timestamp: Utc::now(),
         };
 
-        // Simulate what the dispatch arm does: broadcast to all.
-        manager.broadcast(edit_msg.clone()).await;
+        // Simulate what the dispatch arm does: both collaborators are
+        // subscribed to wf-99, so both receive the scoped broadcast.
+        manager.subscribe(conn1.id, "wf-99".to_string()).await;
+        manager.subscribe(conn2.id, "wf-99".to_string()).await;
+        manager
+            .broadcast_to_workflow("wf-99", edit_msg.clone())
+            .await;
 
         assert!(
             matches!(rx1.recv().await, Some(WsMessage::WorkflowEdit { .. })),
-            "user1 must receive WorkflowEdit broadcast"
+            "user1 must receive WorkflowEdit broadcast for a workflow it subscribed to"
         );
         assert!(
             matches!(rx2.recv().await, Some(WsMessage::WorkflowEdit { .. })),
-            "user2 must receive WorkflowEdit broadcast"
+            "user2 must receive WorkflowEdit broadcast for a workflow it subscribed to"
         );
     }
 
@@ -806,6 +932,215 @@ mod tests {
         assert!(
             rx.try_recv().is_err(),
             "no messages should be enqueued for server-originated variants"
+        );
+    }
+
+    // ── MessagePack (binary) decoding tests ─────────────────────────────────
+
+    /// `rmp_serde::from_slice` — the exact call used for `Message::Binary` in
+    /// `handle_websocket` — must decode a MessagePack-encoded `WsMessage`
+    /// back into an equal value, and that value must match what the JSON
+    /// (`Message::Text`) path decodes for the same logical message.
+    #[test]
+    fn test_ws_message_messagepack_round_trip_matches_json() {
+        let message = WsMessage::WorkflowEdit {
+            workflow_id: "wf-msgpack".to_string(),
+            user_id: "user-mp".to_string(),
+            operation: "insert_node".to_string(),
+            data: serde_json::json!({"node_id": "n42", "kind": "transform"}),
+            timestamp: Utc::now(),
+        };
+
+        // Encode/decode via MessagePack, mirroring the `Message::Binary` arm.
+        let packed = rmp_serde::to_vec(&message).expect("MessagePack encoding must succeed");
+        let from_msgpack: WsMessage =
+            rmp_serde::from_slice(&packed).expect("MessagePack decoding must succeed");
+        assert_eq!(
+            from_msgpack, message,
+            "MessagePack round-trip must reproduce the original WsMessage"
+        );
+
+        // Encode/decode the same logical message via JSON, mirroring the
+        // `Message::Text` arm, and confirm both formats agree.
+        let json = serde_json::to_string(&message).expect("JSON encoding must succeed");
+        let from_json: WsMessage = serde_json::from_str(&json).expect("JSON decoding must succeed");
+        assert_eq!(
+            from_msgpack, from_json,
+            "MessagePack- and JSON-decoded WsMessage values must be equal"
+        );
+    }
+
+    /// A second variant (control message, no payload body) round-trips
+    /// through MessagePack too, confirming the decoding is not
+    /// accidentally coupled to `WorkflowEdit`'s shape.
+    #[test]
+    fn test_ws_message_messagepack_round_trip_subscribe() {
+        let message = WsMessage::Subscribe {
+            workflow_id: "wf-sub".to_string(),
+        };
+
+        let packed = rmp_serde::to_vec(&message).expect("MessagePack encoding must succeed");
+        let decoded: WsMessage =
+            rmp_serde::from_slice(&packed).expect("MessagePack decoding must succeed");
+        assert_eq!(decoded, message);
+    }
+
+    // ── per-workflow subscription tests ─────────────────────────────────────
+
+    /// `broadcast_to_workflow` reaches only connections subscribed to that
+    /// exact workflow_id — not connections subscribed to a different
+    /// workflow, and not connections that never subscribed at all.
+    #[tokio::test]
+    async fn test_broadcast_to_workflow_scopes_to_subscribers() {
+        let manager = WsConnectionManager::new(5);
+
+        let (tx_sub, mut rx_sub) = mpsc::unbounded_channel();
+        let sub_conn = manager
+            .register("subscriber".to_string(), tx_sub)
+            .await
+            .expect("registration must succeed under the connection limit");
+
+        let (tx_other_wf, mut rx_other_wf) = mpsc::unbounded_channel();
+        let other_wf_conn = manager
+            .register("other_workflow_user".to_string(), tx_other_wf)
+            .await
+            .expect("registration must succeed under the connection limit");
+
+        let (tx_unsubbed, mut rx_unsubbed) = mpsc::unbounded_channel();
+        manager
+            .register("never_subscribed".to_string(), tx_unsubbed)
+            .await
+            .expect("registration must succeed under the connection limit");
+
+        manager.subscribe(sub_conn.id, "wf-a".to_string()).await;
+        manager
+            .subscribe(other_wf_conn.id, "wf-b".to_string())
+            .await;
+        // `never_subscribed` intentionally never calls subscribe().
+
+        let edit = WsMessage::WorkflowEdit {
+            workflow_id: "wf-a".to_string(),
+            user_id: "subscriber".to_string(),
+            operation: "update_node".to_string(),
+            data: serde_json::json!({"node_id": "n1"}),
+            timestamp: Utc::now(),
+        };
+
+        manager.broadcast_to_workflow("wf-a", edit.clone()).await;
+
+        assert_eq!(
+            rx_sub.recv().await,
+            Some(edit),
+            "a connection subscribed to wf-a must receive the broadcast"
+        );
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        assert!(
+            rx_other_wf.try_recv().is_err(),
+            "a connection subscribed to a different workflow must not receive the broadcast"
+        );
+        assert!(
+            rx_unsubbed.try_recv().is_err(),
+            "a connection that never subscribed must not receive the broadcast"
+        );
+    }
+
+    /// Unsubscribing removes a connection from `broadcast_to_workflow`'s
+    /// fan-out, even though the connection remains registered.
+    #[tokio::test]
+    async fn test_unsubscribe_stops_broadcast_to_workflow_delivery() {
+        let manager = WsConnectionManager::new(5);
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let conn = manager
+            .register("user1".to_string(), tx)
+            .await
+            .expect("registration must succeed under the connection limit");
+
+        manager.subscribe(conn.id, "wf-c".to_string()).await;
+
+        let first = WsMessage::Ping {
+            timestamp: Utc::now(),
+        };
+        manager.broadcast_to_workflow("wf-c", first.clone()).await;
+        assert_eq!(
+            rx.recv().await,
+            Some(first),
+            "subscribed connection must receive a broadcast before unsubscribing"
+        );
+
+        manager.unsubscribe(conn.id, "wf-c").await;
+
+        let second = WsMessage::Ping {
+            timestamp: Utc::now(),
+        };
+        manager.broadcast_to_workflow("wf-c", second).await;
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        assert!(
+            rx.try_recv().is_err(),
+            "connection must not receive broadcasts to a workflow it unsubscribed from"
+        );
+    }
+
+    /// `unregister` purges the connection from every workflow's subscriber
+    /// set, so no stale connection IDs accumulate in `subscriptions` and no
+    /// dead fan-out is attempted afterward.
+    #[tokio::test]
+    async fn test_unregister_purges_subscriptions() {
+        let manager = WsConnectionManager::new(5);
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let conn = manager
+            .register("user1".to_string(), tx)
+            .await
+            .expect("registration must succeed under the connection limit");
+
+        manager.subscribe(conn.id, "wf-leak".to_string()).await;
+        assert!(
+            manager
+                .subscriptions
+                .read()
+                .await
+                .get("wf-leak")
+                .is_some_and(|subscribers| subscribers.contains(&conn.id)),
+            "connection must be recorded as a subscriber before unregister"
+        );
+
+        manager.unregister(conn.id).await;
+
+        // The connection_id must be gone from the workflow's subscriber set.
+        let still_subscribed = manager
+            .subscriptions
+            .read()
+            .await
+            .get("wf-leak")
+            .is_some_and(|subscribers| subscribers.contains(&conn.id));
+        assert!(
+            !still_subscribed,
+            "connection_id must be purged from subscriptions on unregister"
+        );
+        // The workflow had exactly one subscriber, so the now-empty entry
+        // should have been pruned too, bounding memory growth.
+        assert!(
+            !manager.subscriptions.read().await.contains_key("wf-leak"),
+            "empty subscriber sets should be dropped after unregister"
+        );
+
+        // Broadcasting afterward must be a harmless no-op: no panic, and the
+        // now-unregistered connection receives nothing further.
+        manager
+            .broadcast_to_workflow(
+                "wf-leak",
+                WsMessage::Ping {
+                    timestamp: Utc::now(),
+                },
+            )
+            .await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        assert!(
+            rx.try_recv().is_err(),
+            "unregistered connection must not receive further broadcasts"
         );
     }
 }

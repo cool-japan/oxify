@@ -28,6 +28,7 @@ pub struct AppState {
     pub event_bus: Arc<EventBus>,
     pub version_store: Option<Arc<oxify_storage::WorkflowVersionStore>>,
     pub approval_store: Option<Arc<oxify_engine::ApprovalStore>>,
+    pub checkpoint_store: Option<Arc<oxify_storage::checkpoint_store::DatabaseCheckpointStore>>,
     pub vector_registry: Option<Arc<crate::vector_handlers::VectorStoreRegistry>>,
     pub mcp_registry: Arc<tokio::sync::RwLock<oxify_mcp::McpRegistry>>,
     pub db_pool: Option<oxify_storage::DatabasePool>,
@@ -50,6 +51,7 @@ impl AppState {
             event_bus,
             version_store: None,
             approval_store: Some(Arc::new(oxify_engine::ApprovalStore::new())),
+            checkpoint_store: None,
             vector_registry: Some(Arc::new(crate::vector_handlers::VectorStoreRegistry::new())),
             mcp_registry: Arc::new(tokio::sync::RwLock::new(oxify_mcp::McpRegistry::new())),
             db_pool: None,
@@ -66,6 +68,9 @@ impl AppState {
             pool.clone(),
         )));
         let approval_store = Some(Arc::new(oxify_engine::ApprovalStore::new()));
+        let checkpoint_store = Some(Arc::new(
+            oxify_storage::checkpoint_store::DatabaseCheckpointStore::new(pool.clone()),
+        ));
         let vector_registry = Some(Arc::new(crate::vector_handlers::VectorStoreRegistry::new()));
         let event_bus = Arc::new(EventBus::new(1024));
         let engine = Arc::new(
@@ -82,6 +87,7 @@ impl AppState {
             event_bus,
             version_store,
             approval_store,
+            checkpoint_store,
             vector_registry,
             mcp_registry: Arc::new(tokio::sync::RwLock::new(oxify_mcp::McpRegistry::new())),
             db_pool: Some(pool),

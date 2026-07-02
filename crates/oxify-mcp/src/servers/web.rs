@@ -133,11 +133,12 @@ impl McpServer for WebServer {
                     .await
                     .map_err(|e| crate::McpError::ToolExecutionError(e.to_string()))?;
 
-                // Basic HTML to text conversion (simple implementation)
-                // In production, use a proper HTML parser like scraper or html2text
-                let text = if let Some(_css_selector) = selector {
-                    // TODO: Implement CSS selector parsing with scraper crate
-                    html
+                // Basic HTML to text conversion.
+                let text = if let Some(css_selector) = selector {
+                    // Extract the text content of every element matching the caller-supplied
+                    // CSS selector. A malformed selector is a caller error (InvalidRequest,
+                    // never a panic); a selector that matches nothing yields an empty string.
+                    extract_selected_text(&html, css_selector)?
                 } else {
                     // Simple HTML tag removal
                     html.replace("<script", "\n<script")
@@ -157,11 +158,32 @@ impl McpServer for WebServer {
             }
 
             "web_screenshot" => {
-                // TODO: Implement headless browser screenshot
-                // Requires puppeteer/playwright integration
-                Err(crate::McpError::ToolExecutionError(
-                    "Screenshot not yet implemented. Requires headless browser.".to_string(),
-                ))
+                #[cfg(feature = "headless-browser")]
+                {
+                    use base64::Engine as _;
+
+                    let url = arguments["url"].as_str().ok_or_else(|| {
+                        crate::McpError::InvalidRequest("Missing 'url'".to_string())
+                    })?;
+
+                    let png = capture_screenshot(url).await?;
+                    let screenshot_base64 = base64::engine::general_purpose::STANDARD.encode(&png);
+
+                    Ok(json!({
+                        "url": url,
+                        "screenshot_base64": screenshot_base64,
+                        "format": "png",
+                    }))
+                }
+
+                #[cfg(not(feature = "headless-browser"))]
+                {
+                    // Off by default: real capture requires a local headless browser. Rebuild
+                    // oxify-mcp with `--features headless-browser` to enable the CDP path.
+                    Err(crate::McpError::ToolExecutionError(
+                        "Screenshot not yet implemented. Requires headless browser.".to_string(),
+                    ))
+                }
             }
 
             _ => Err(crate::McpError::ToolNotFound(name.to_string())),
@@ -227,7 +249,7 @@ impl McpServer for WebServer {
             }),
             json!({
                 "name": "web_screenshot",
-                "description": "Take screenshot of web page (not yet implemented)",
+                "description": "Take a screenshot of a web page (PNG, base64-encoded). Requires oxify-mcp to be built with the `headless-browser` feature and a local Chrome/Chromium binary at runtime.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -241,6 +263,109 @@ impl McpServer for WebServer {
             }),
         ])
     }
+}
+
+/// Extract the text content of every element in `html` matching the given CSS `selector`.
+///
+/// The text of each matched element is the space-joined, trimmed concatenation of its
+/// descendant text nodes; matched elements are joined by newlines, in document order.
+///
+/// # Errors
+///
+/// Returns [`crate::McpError::InvalidRequest`] if `selector` is not a valid CSS selector.
+/// This never panics on malformed input. A syntactically valid selector that matches no
+/// elements is not an error — it yields an empty string.
+fn extract_selected_text(html: &str, selector: &str) -> Result<String> {
+    let document = scraper::Html::parse_document(html);
+    let parsed = scraper::Selector::parse(selector).map_err(|e| {
+        crate::McpError::InvalidRequest(format!("Invalid CSS selector '{selector}': {e:?}"))
+    })?;
+
+    let text = document
+        .select(&parsed)
+        .map(|element| {
+            element
+                .text()
+                .map(str::trim)
+                .filter(|fragment| !fragment.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(text)
+}
+
+/// Launch a headless Chrome/Chromium instance, navigate to `url`, and capture a PNG
+/// screenshot of the loaded page, returning the raw PNG bytes.
+///
+/// The external browser process and its event handler are always torn down before this
+/// function returns, on both the success and error paths, so no Chrome process is leaked.
+///
+/// # Errors
+///
+/// Every failure mode — a browser that cannot be configured or launched (e.g. no
+/// Chrome/Chromium binary is installed), a navigation that fails, or a screenshot that
+/// cannot be captured — is surfaced as [`crate::McpError::ToolExecutionError`] with an
+/// actionable message. This function never panics.
+#[cfg(feature = "headless-browser")]
+async fn capture_screenshot(url: &str) -> Result<Vec<u8>> {
+    use chromiumoxide::browser::{Browser, BrowserConfig};
+    use futures::StreamExt as _;
+
+    let config = BrowserConfig::builder().build().map_err(|e| {
+        crate::McpError::ToolExecutionError(format!("Failed to build browser config: {e}"))
+    })?;
+
+    let (mut browser, mut handler) = Browser::launch(config).await.map_err(|e| {
+        crate::McpError::ToolExecutionError(format!(
+            "Failed to launch headless browser (is Chrome/Chromium installed?): {e}"
+        ))
+    })?;
+
+    // Drive the CDP event handler in the background for the lifetime of this call; it must
+    // be polled continuously for commands (navigation, screenshot, close) to make progress.
+    let handler_task = tokio::spawn(async move {
+        while let Some(event) = handler.next().await {
+            if event.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Capture the screenshot, then unconditionally tear the browser down so a failure part
+    // way through never leaks the external Chrome process.
+    let outcome = capture_page_png(&browser, url).await;
+
+    // Best-effort clean shutdown: we already hold the PNG bytes on success, and closing
+    // here also collects the child process and silences chromiumoxide's drop-time
+    // "browser was not closed manually" warning. Shutdown errors must not mask `outcome`.
+    let _ = browser.close().await;
+    let _ = browser.wait().await;
+    handler_task.abort();
+
+    outcome
+}
+
+/// Navigate a launched [`chromiumoxide::Browser`] to `url`, wait for the navigation to
+/// settle, and capture a PNG screenshot of the page.
+#[cfg(feature = "headless-browser")]
+async fn capture_page_png(browser: &chromiumoxide::Browser, url: &str) -> Result<Vec<u8>> {
+    use chromiumoxide::page::ScreenshotParams;
+
+    let page = browser.new_page(url).await.map_err(|e| {
+        crate::McpError::ToolExecutionError(format!("Failed to navigate to {url}: {e}"))
+    })?;
+
+    page.wait_for_navigation().await.map_err(|e| {
+        crate::McpError::ToolExecutionError(format!("Navigation to {url} did not complete: {e}"))
+    })?;
+
+    // `ScreenshotParams::builder().build()` defaults to the PNG capture format.
+    page.screenshot(ScreenshotParams::builder().build())
+        .await
+        .map_err(|e| crate::McpError::ToolExecutionError(format!("Screenshot capture failed: {e}")))
 }
 
 #[cfg(test)]
@@ -272,6 +397,10 @@ mod tests {
         assert!(tools.iter().any(|t| t["name"] == "web_screenshot"));
     }
 
+    // Without the `headless-browser` feature, `web_screenshot` is an unimplemented off-path
+    // returning a clear error. With the feature, that arm instead drives a real browser, so
+    // this "not implemented" expectation only holds in the default (feature-off) build.
+    #[cfg(not(feature = "headless-browser"))]
     #[tokio::test]
     async fn test_web_screenshot_not_implemented() {
         let server = WebServer::new();
@@ -289,6 +418,91 @@ mod tests {
         if let Err(e) = result {
             assert!(e.to_string().contains("not yet implemented"));
         }
+    }
+
+    #[test]
+    fn test_extract_selected_text_matches_known_structure() {
+        let html = r#"
+            <html><body>
+                <div class="post"><h2>First</h2><p>Hello <b>world</b></p></div>
+                <div class="post"><h2>Second</h2><p>Goodbye</p></div>
+                <div class="sidebar"><p>ignore me</p></div>
+            </body></html>
+        "#;
+
+        // Two `<p>` elements live inside `div.post`; the sidebar paragraph is excluded.
+        // Each element's descendant text nodes are trimmed and space-joined; elements are
+        // newline-joined in document order.
+        let text = extract_selected_text(html, "div.post p")
+            .expect("a valid selector should parse without error");
+        assert_eq!(text, "Hello world\nGoodbye");
+    }
+
+    #[test]
+    fn test_extract_selected_text_zero_matches_is_empty_not_error() {
+        let html = "<html><body><p>content</p></body></html>";
+
+        // A syntactically valid selector that matches nothing must yield an empty string,
+        // never an error.
+        let text = extract_selected_text(html, "table.does-not-exist")
+            .expect("a valid selector matching zero elements must not error");
+        assert!(
+            text.is_empty(),
+            "expected an empty string for zero matches, got {text:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_selected_text_invalid_selector_is_invalid_request() {
+        let html = "<html><body><p>content</p></body></html>";
+
+        // A malformed selector must be reported as InvalidRequest, not panic.
+        let result = extract_selected_text(html, ">>> not a valid selector <<<");
+        match result {
+            Err(crate::McpError::InvalidRequest(msg)) => {
+                assert!(
+                    msg.contains("Invalid CSS selector"),
+                    "error message should identify the bad selector, got: {msg}"
+                );
+            }
+            other => {
+                panic!("expected McpError::InvalidRequest for a malformed selector, got {other:?}")
+            }
+        }
+    }
+
+    // Real headless-browser screenshot capture. Compiled only with the `headless-browser`
+    // feature, and ignored by default because it needs a local Chrome/Chromium binary and
+    // network access. Run explicitly on a suitable machine with:
+    //   cargo nextest run -p oxify-mcp --features headless-browser --run-ignored all
+    #[cfg(feature = "headless-browser")]
+    #[tokio::test]
+    #[ignore = "requires a local Chrome/Chromium binary"]
+    async fn test_web_screenshot_captures_png() {
+        use base64::Engine as _;
+
+        let server = WebServer::new();
+
+        let result = server
+            .call_tool("web_screenshot", json!({ "url": "https://example.com" }))
+            .await
+            .expect("screenshot capture should succeed with a local Chrome/Chromium");
+
+        assert_eq!(result["url"], "https://example.com");
+        assert_eq!(result["format"], "png");
+
+        let encoded = result["screenshot_base64"]
+            .as_str()
+            .expect("screenshot_base64 must be a string");
+        assert!(!encoded.is_empty(), "screenshot data must not be empty");
+
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .expect("screenshot_base64 must be valid base64");
+        assert!(
+            bytes.starts_with(b"\x89PNG"),
+            "decoded screenshot bytes should carry the PNG magic header"
+        );
     }
 
     #[tokio::test]

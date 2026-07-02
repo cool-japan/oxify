@@ -2,25 +2,31 @@
 
 ## Known Issues
 
-- [ ] **`oxify-engine` does not compile under `--features wasm`** (`crates/oxify-engine/src/plugin_wasm.rs:361`) — pre-existing, unrelated to the COOLJAPAN/noffi dependency migration.
-  - **Symptom:** `cargo build -p oxify-engine --features wasm` fails with ~20 `E0277` errors: *"future cannot be sent between threads safely"*. `WasmNodePlugin::execute(&self, …)` returns a `Pin<Box<dyn Future + Send>>` (required by the `NodePlugin` trait), but the future captures `&self`, which is only `Send` when `WasmNodePlugin: Sync`. It is **not** `Sync`: wasmer 7.1's VM internals (`UnsafeCell<VMCallerCheckedAnyfunc>`, raw `*mut c_void` function pointers reachable through the embedded `Store`) are neither `Send` nor `Sync`. Wrapping the context in `std::sync::Mutex<WasmContext>` makes the *struct* `Send` but does not make it `Sync`, so the `&self`-capturing future still fails the `Send` bound.
-  - **Note on the v0.2.10 changelog:** the "Plugin WASM activation" entry below claims the adapter yields a `Send` future ("wasmer 7.1 `Store: Send+Sync`"). That assumption does not hold for the resolved wasmer 7.1 — the `--features wasm` build is currently broken. The default (non-`wasm`) build and its 326 tests are unaffected; this only blocks the optional `wasm` feature and therefore any `--all-features` build of the workspace.
-  - **Priority:** P2 | **Scope:** medium | **Cross-project:** wasmer
-  - **Approach:** Give `NodePlugin` a non-`Send` execution path for VM-backed plugins (e.g. run the wasmer call on a dedicated single-thread executor / `LocalSet` and hand back results over a channel, so the `async fn execute` future never captures the `!Sync` VM state), or hold the wasmer `Store`/`Instance` behind a thread-affine actor. Do **not** paper over it with an `unsafe impl Sync` — the VM pointers are genuinely not thread-safe.
-  - **Risk:** touching the plugin execution boundary affects all node-plugin dispatch; keep the default-feature path byte-for-byte unchanged and gate the fix behind the `wasm` feature.
+- [x] ~~`oxify-engine` does not compile under `--features wasm`~~ **RESOLVED 2026-07-02** (`crates/oxify-engine/src/plugin_wasm.rs`).
+  - **Was:** `cargo build -p oxify-engine --features wasm` failed with ~20 `E0277` errors — `WasmNodePlugin`'s `std::sync::Mutex<WasmContext>` gave the struct `Send` but not `Sync` (wasmer 7.2's VM internals — raw `*mut c_void`, `NonNull<VMContext>`, a non-`Send` `dyn FnOnce(StoreMut) -> ...` callback — are not thread-safe), and `NodePlugin: Send + Sync` requires it. The v0.2.10 changelog entry below's "`Store: Send+Sync`" assumption did not hold for the resolved wasmer 7.2.
+  - **Fix:** thread-affine actor. `WasmNodePlugin::from_wasm_file` now spawns one dedicated `std::thread` that owns the `wasmer::Store`/`WasmPlugin` for its entire lifetime and never lets them cross a thread boundary; `WasmNodePlugin` itself holds only a `std::sync::mpsc::Sender<WasmRequest>` (trivially `Send + Sync`, since the request/reply payloads are plain `Node`/`ExecutionContext`/`Result<ExecutionResult, String>` data). `async fn execute` sends a request and `.await`s a `tokio::sync::oneshot` reply — the future never touches wasmer state, so it's `Send` with **zero `unsafe impl`**. An init handshake preserves the original eager load-error semantics; `Drop` disconnects the channel so the actor thread exits and is joined. The now-redundant `tokio::task::block_in_place` (would panic off a tokio runtime) was removed. The compile-time `test_wasm_node_plugin_is_send_sync` proof passes unmodified. `cargo nextest run -p oxify-engine --features wasm`: 326 passed (0 regressions from the default-feature 326).
 
-## Stubs to implement (added 2026-06-12 by /cooljapan-stub-check)
+- [ ] **`oxify-model`'s `python` feature is incompatible with `cargo test`/`nextest`** (`crates/oxify-model/Cargo.toml:32`) — discovered 2026-07-02 while running full `--all-features` verification; pre-existing, unrelated to any work in this session.
+  - **Symptom:** `cargo nextest run --workspace --all-features` (or any `cargo test`/`--no-run` that activates oxify-model's `python` feature) fails to *link* the `oxify-model` test binary with dozens of `undefined reference to 'PyErr_Fetch'` / `PyImport_Import` / `Py_IsInitialized` / etc. errors, even though `cargo build`/`cargo clippy --all-targets` for the same feature set succeed.
+  - **Root cause:** `pyo3 = { version = "0.29", features = ["extension-module", "abi3-py38"], ... }` is unconditional under the `python` feature. `extension-module` deliberately tells pyo3 **not** to link `libpython` — that's correct for a `.so` Python will `dlopen()` (Python supplies the symbols at load time), but it is fundamentally incompatible with building a *standalone* test executable, which needs those symbols resolved at link time. This is a documented pyo3 limitation, not an oxify bug introduced by this or any prior session — a real, functional Python (3.11, `Py_ENABLE_SHARED=1`) with `libpython3.11.so` is present on this machine, confirming the failure is the feature configuration, not a missing system dependency.
+  - **Impact:** `--all-features` workspace-wide build/clippy are unaffected (verified green); only test-binary linking for the `python` feature specifically fails. Every other oxify-model feature (`openapi`, `wasm`, `typescript`, default) tests cleanly (412/412). Workaround used for this session's verification: `cargo nextest run --workspace --all-features --exclude oxify-model` + `cargo nextest run -p oxify-model --features openapi,wasm,typescript` separately.
+  - **Priority:** P3 | **Scope:** small | **Cross-project:** pyo3
+  - **Approach:** split the Cargo feature in two, per pyo3's own recommendation — keep `python = ["pyo3"]` for library consumers/maturin builds (as today), and add a test-only feature (e.g. `python-test`) that depends on `pyo3` **without** `extension-module` (so it links against libpython normally), then have `[dev-dependencies]`/CI select `python-test` instead of `python` when running `cargo test`/`nextest` for this crate.
+  - **Risk:** low — purely a Cargo feature/test-harness config change, no runtime behavior affected.
 
-- [ ] `oxify-api`: `crates/oxify-api/src/checkpoint_handlers.rs:162` — implement checkpoint resume: restore ExecutionContext, mark completed nodes, re-run from checkpoint
-  - Priority: P2 | Scope: medium | Hint: none
-- [ ] `oxify-mcp`: `crates/oxify-mcp/src/servers/web.rs:133` — implement CSS selector parsing for web_fetch tool (currently passes through raw HTML)
-  - Priority: P2 | Scope: small | Hint: none
-- [ ] `oxify-mcp`: `crates/oxify-mcp/src/servers/web.rs:154` — implement headless browser screenshot for `web_screenshot` MCP tool
-  - Priority: P2 | Scope: medium | Hint: none
-- [ ] `oxify-storage`: `crates/oxify-storage/src/cache.rs:49` — migrate quota_store to SQLite and re-enable the disabled cache module
-  - Priority: P2 | Scope: medium | Hint: oxisql
-- [ ] `oxify-server`: `crates/oxify-server/src/websocket.rs:428` — implement MessagePack binary message support in websocket handler
-  - Priority: P2 | Scope: small | Hint: none
+## v0.2.11 Additions (2026-07-02)
+
+Closed out the remaining tracked `TODO.md` backlog (the "Stubs to implement" list below, now resolved) plus the wasm Send/Sync fix above. All five landed independently (disjoint files) and were verified together: `cargo build`/`clippy --all-features -D warnings` clean workspace-wide; full `nextest --all-features` green (2702 passed, 38 skipped — all pre-existing `#[ignore]`d external-resource tests — excluding the pre-existing/unrelated `oxify-model` `python`-feature link issue documented above).
+
+1. **Checkpoint pause/resume, fully wired end-to-end** (`oxify-api`) — the `checkpoint_handlers`/`checkpoint_types` module (and every route/OpenAPI registration) was fully re-enabled after being disabled; discovered along the way that `oxify-storage::checkpoint_store` was *also* disabled and still on the retired `sqlx` API, so it was ported to `oxisql` too (necessary, not optional, to make the API compile). `resume_execution` bridges `oxify_storage::ExecutionCheckpoint` → `oxify_engine::checkpoint::ExecutionCheckpoint` (`created_at: DateTime<Utc>` → `SystemTime` via `.into()`) and calls the engine's `execute_from_checkpoint` (widened from `pub(super)` to `pub`), which already skipped completed levels/nodes — mirrors `execute_workflow`'s `tokio::spawn` + `execution_store.update` + metrics pattern, returns `202 Accepted`. New test proves already-completed nodes are not re-executed on resume (shared-counter check). `AppState` gained `checkpoint_store: Option<Arc<DatabaseCheckpointStore>>`. +4 tests in oxify-api (110 total).
+2. **`web_scrape` real CSS selector support + `web_screenshot` implemented** (`oxify-mcp`) — CSS selectors now parsed via `scraper` 0.27 (pure Rust, unconditional dependency); malformed selectors return a clean error instead of passing through raw HTML. `web_screenshot` implemented for real behind a new off-by-default `headless-browser` feature using `chromiumoxide` 0.9 (async CDP client) — launches/connects Chrome, navigates, captures a PNG, returns it base64-encoded; every failure mode (no Chrome binary, navigation, capture) is a clean `McpError`, never a panic; browser is torn down on both success and error paths. Without the feature, the original honest "not implemented" error is unchanged. +4 tests (89 total default, 88+1 `#[ignore]`d with the feature).
+3. **WebSocket binary MessagePack + per-workflow broadcast scoping** (`oxify-server`) — `Message::Binary` now decodes via `rmp-serde` 1.3.1 into the same `WsMessage` enum as the JSON/text path (shared dispatch helper, zero behavior change for text). New `Subscribe`/`Unsubscribe { workflow_id }` message variants let clients declare interest; `WsConnectionManager` gained a subscription map + `broadcast_to_workflow`, and `unregister` now purges stale subscriptions on disconnect. `WorkflowEdit` broadcasts are now scoped to subscribers instead of fanning out to every connection. +5 tests (170 total).
+4. **`quota_store` + `redis_cache` re-enabled on oxisql** (`oxify-storage`) — ported the 1059-line disabled `quota_store.rs` (user/workflow execution quotas, token/cost limits, hourly/daily/monthly resets — 24 `sqlx` sites) to `oxisql`, reusing the already-existing `20251201000004__quotas.sql` migration (no schema changes needed). Two Limbo-specific landmines handled at every touch point: no `FromValue for Uuid` (read as `String`, parse explicitly) and bare `datetime('now')` not being RFC3339 (every timestamp now written via `.to_rfc3339()` and parsed back explicitly). Also hit the same Limbo bound-`LIMIT` panic documented in the sqlx→oxisql migration — worked around the same way (inline the trusted integer literal). `redis_cache.rs` unblocked once `quota_store` compiled again (plus two stale test literals updated to the current all-`String` `WorkflowRow` shape). `cache.rs`'s temporary stub `UserQuota`/`WorkflowQuota` types replaced with the real ones. +9 new DB-level quota tests (153 passed, 2 pre-existing `#[ignore]`d live-Redis tests unchanged).
+
+### New optional dependencies
+- `scraper = "0.27"` (`oxify-mcp`, unconditional — pure Rust)
+- `chromiumoxide = "0.9"` + `futures` (`oxify-mcp`, optional, `headless-browser` feature, off by default)
+- `rmp-serde = "1.3"` (`oxify-server`, unconditional — pure Rust)
 
 ## v0.2.10 Additions (2026-06-10)
 1. **Real end-to-end SSE** (engine→api→ui) — `Engine::execute_with_context(&self, workflow, ctx, config)` new entrypoint (executor.rs) preserves caller's `execution_id` through the event bus so all `WorkflowEvent`s carry one consistent id; `oxify-api` `AppState` gains `Arc<EventBus>` built via `EngineBuilder::with_event_bus`; `execute_workflow` bug-fixed (was minting 3 different execution ids — create/update/engine — so stored execution was never updated; now one id end-to-end); `sse.rs::stream_execution` rewritten to subscribe to the bus via `broadcast::Receiver::recv` in a `tokio::select!` loop (replaced 500ms polling loop that was reading a store written only at the end); `oxify-ui` `ApiClient::stream_execution` opens `GET /api/v1/executions/{id}/stream` and the `execution_stream` handler proxies upstream events, transforming JSON payloads to OOB-swap HTML `<div id="execution-status" hx-swap-oob="true">` (zero template changes); mock branch preserved for dev mode. +50 tests in oxify-api, +86 in oxify-ui.
@@ -843,29 +849,14 @@ Defined DAGs (code-based) can be executed in parallel with vector search support
   - Replacement: `oxiarc-deflate` — use its raw-DEFLATE encoder for the authn `DeflateEncoder` (raw stream, no gzip wrapper) and its gzip encoder for the CLI `GzEncoder`. Roughly 3 call sites total; the change is mechanical (swap the encoder type + `Write` plumbing, keep the same compression semantics).
   - **Acceptance:** `oxify-authn` (built with the `saml` feature) and `oxify-cli` compile and their test suites pass; the SAML redirect-binding round-trip (deflate-encode → base64 → decode) and the CLI gzip archive output remain byte-valid and consumable by standard tools; `cargo tree | grep flate2` returns empty across the workspace.
 
-## Stubs to implement (added 2026-06-22 by /cooljapan-stub-check)
+## Stubs to implement (added 2026-06-22 by /cooljapan-stub-check) — ALL RESOLVED 2026-07-02
 
-- [ ] **oxify** `oxify-api`: `crates/oxify-api/src/checkpoint_handlers.rs:162` — `TODO`: `Actually resume the execution using the engine`
-  - **Priority:** P2  **Scope:** medium  **Cross-project:** none
-  - **Approach:** Resume endpoint is a no-op ("implementation pending"); restore ExecutionContext from the checkpoint, mark already-completed nodes as done, and re-run the engine from the saved state.
-  - **Risk:** Incorrect state restoration could double-execute side-effecting nodes; gate replay on node idempotency/completion flags.
-- [ ] **oxify** `oxify-mcp`: `crates/oxify-mcp/src/servers/web.rs:133` — `TODO`: `Implement CSS selector parsing with scraper crate`
-  - **Priority:** P2  **Scope:** medium  **Cross-project:** none
-  - **Approach:** Parse the supplied CSS selector via a selector library (scraper) and extract all matching nodes from the fetched document.
-  - **Risk:** Malformed selectors must surface as a clean McpError rather than panicking; validate/`Result`-wrap selector compilation.
-- [ ] **oxify** `oxify-mcp`: `crates/oxify-mcp/src/servers/web.rs:154` — `TODO`: `Implement headless browser screenshot`
-  - **Priority:** P2  **Scope:** large  **Cross-project:** none
-  - **Approach:** Wire a headless-browser backend to render the page and return an encoded screenshot, replacing the current "not yet implemented" McpError.
-  - **Risk:** Headless browser is a heavy external dependency; must be feature-gated so default builds stay lean and Pure-Rust where possible.
-- [ ] **oxify** `oxify-server`: `crates/oxify-server/src/websocket.rs:428` — `TODO`: `Support MessagePack for binary messages`
-  - **Priority:** P2  **Scope:** small  **Cross-project:** none
-  - **Approach:** Branch on `Message::Binary` in the WS handler and decode the payload via rmp-serde into the existing WsMessage enum.
-  - **Risk:** Untrusted binary frames need bounded/validated decoding to avoid panics or resource exhaustion.
-- [ ] **oxify** `oxify-server`: `crates/oxify-server/src/websocket.rs:359` — `TODO`: `scope broadcasts to connections that are subscribed to workflow_id`
-  - **Priority:** P2  **Scope:** medium  **Cross-project:** none
-  - **Approach:** Add per-workflow subscription tracking to WsConnectionManager and filter `broadcast()` so only subscribers of the edited `workflow_id` receive real-time edits.
-  - **Risk:** Subscription bookkeeping must be cleaned up on disconnect to avoid leaks and stale fan-out.
-- [ ] **oxify** `oxify-storage`: `crates/oxify-storage/src/cache.rs:49` — `TODO`: `Re-enable when quota_store is migrated to SQLite`
-  - **Priority:** P2  **Scope:** medium  **Cross-project:** oxisql-sqlite-compat
-  - **Approach:** Migrate quota_store onto oxisql-sqlite-compat (COOLJAPAN policy — never rusqlite) and re-enable the disabled quota path.
-  - **Risk:** Schema/migration must preserve existing quota accounting; verify round-trip before flipping the path back on.
+See "v0.2.11 Additions" near the top of this file for full implementation detail. Superseded the
+duplicate 2026-06-12 dated copy of this same list (removed).
+
+- [x] **oxify** `oxify-api`: `crates/oxify-api/src/checkpoint_handlers.rs:162` — `resume_execution` now bridges the storage checkpoint to the engine and calls `execute_from_checkpoint`; already-completed nodes are proven not to re-execute (new test).
+- [x] **oxify** `oxify-mcp`: `crates/oxify-mcp/src/servers/web.rs:133` — CSS selectors parsed for real via the `scraper` crate; malformed selectors return a clean `McpError`.
+- [x] **oxify** `oxify-mcp`: `crates/oxify-mcp/src/servers/web.rs:154` — headless screenshot implemented via `chromiumoxide`, feature-gated behind off-by-default `headless-browser`.
+- [x] **oxify** `oxify-server`: `crates/oxify-server/src/websocket.rs:428` — `Message::Binary` now decodes via `rmp-serde` into `WsMessage`, sharing the same dispatch as the JSON/text path.
+- [x] **oxify** `oxify-server`: `crates/oxify-server/src/websocket.rs:359` — `WsConnectionManager` gained `Subscribe`/`Unsubscribe` + a subscription map; `WorkflowEdit` broadcasts are scoped to subscribers, with cleanup on disconnect.
+- [x] **oxify** `oxify-storage`: `crates/oxify-storage/src/cache.rs:49` — `quota_store` ported to `oxisql-sqlite-compat` and re-enabled; `redis_cache` (depended on it) re-enabled alongside it.

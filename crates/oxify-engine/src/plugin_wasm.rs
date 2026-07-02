@@ -191,26 +191,30 @@ impl WasmPlugin {
         // Write input to WASM memory
         let input_ptr = self.write_to_memory(store, input_str.as_bytes())?;
 
-        // Execute with timeout
+        // Execute with timeout.
+        //
+        // This runs on the plugin's dedicated actor OS thread (see
+        // `WasmNodePlugin`), which is *not* a tokio worker, so the wasmer call is
+        // plain synchronous code. The former `tokio::task::block_in_place` wrapper
+        // was removed: it panics outside a multi-thread tokio runtime, and there is
+        // no runtime at all on the actor thread. Thread affinity — one OS thread per
+        // plugin — already prevents any tokio worker from being starved by a
+        // long-running wasmer call, which is what `block_in_place` used to guard.
         let timeout = self.config.timeout;
-        let result = tokio::task::block_in_place(|| {
-            let start = std::time::Instant::now();
+        let start = std::time::Instant::now();
 
-            // Call the function
-            let result_ptr = execute_fn
-                .call(store, input_ptr as i32, input_str.len() as i32)
-                .map_err(|e| WasmError::ExecutionError(e.to_string()))?;
+        // Call the function
+        let result_ptr = execute_fn
+            .call(store, input_ptr as i32, input_str.len() as i32)
+            .map_err(|e| WasmError::ExecutionError(e.to_string()))?;
 
-            // Check timeout
-            if start.elapsed() > timeout {
-                return Err(WasmError::TimeoutExceeded);
-            }
-
-            Ok(result_ptr)
-        })?;
+        // Check timeout
+        if start.elapsed() > timeout {
+            return Err(WasmError::TimeoutExceeded);
+        }
 
         // Read result from WASM memory
-        let result_str = self.read_from_memory(store, result)?;
+        let result_str = self.read_from_memory(store, result_ptr)?;
 
         // Deserialize result
         let execution_result: ExecutionResult = serde_json::from_str(&result_str)
@@ -276,39 +280,68 @@ impl WasmPlugin {
     }
 }
 
-// ── WasmNodePlugin adapter ──────────────────────────────────────────────────
+// ── WasmNodePlugin adapter (thread-affine actor) ─────────────────────────────
 //
-// Bridges wasmer's synchronous WasmPlugin::execute(&mut Store, ...) to the
-// async NodePlugin trait.  Interior mutability is provided by a std::sync::Mutex
-// so the whole adapter is Send + Sync without any unsafe code.
-// (wasmer::Store is Send+Sync in wasmer 7.x; Mutex<T: Send> is Send+Sync.)
+// wasmer's `Store` — and everything reachable through it: `Instance`, `Memory`,
+// and the VM's raw `NonNull<…>`/`*mut …` pointers — is neither `Send` nor `Sync`
+// in wasmer 7.x, because it carries thread-unsafe VM state. The engine, however,
+// requires every `NodePlugin` to be `Send + Sync`: the `PluginRegistry` is shared
+// across tokio worker threads inside an `Arc`, and `WorkflowScheduler::start`
+// `tokio::spawn`s work that transitively captures it.
+//
+// We reconcile the two with a *thread-affine actor*. Each `WasmNodePlugin` owns
+// exactly one dedicated OS thread that constructs and then forever holds the
+// wasmer `Store`/`WasmPlugin`. The wasmer state is born on that thread and never
+// leaves it, so no `!Send` value ever crosses a thread boundary — meaning no
+// `unsafe`, and specifically no `unsafe impl Send`/`Sync` (which would be an
+// actual soundness hole, since those pointers really are thread-unsafe). Callers
+// reach the actor only through channels that carry plain `Send` data — `Node`,
+// `ExecutionContext`, `Result<ExecutionResult, String>`, and a `oneshot` reply
+// handle — so `WasmNodePlugin` itself is trivially `Send + Sync`.
 
-/// Interior state protected by a mutex.
+/// A unit of work handed to a [`WasmNodePlugin`]'s actor thread.
+///
+/// Every field is `Send` and touches no wasmer type, so the whole request — and
+/// hence `std::sync::mpsc::Sender<WasmRequest>` — is freely `Send + Sync`.
 #[cfg(feature = "wasm")]
-struct WasmContext {
-    store: wasmer::Store,
-    plugin: WasmPlugin,
+struct WasmRequest {
+    node: Node,
+    context: ExecutionContext,
+    reply_tx: tokio::sync::oneshot::Sender<Result<ExecutionResult, String>>,
 }
 
 /// A loaded WASM plugin exposed as a live [`crate::plugin::NodePlugin`].
 ///
-/// The adapter bridges wasmer's synchronous `execute(&mut Store, ...)` to the
-/// `async fn execute(&self, ...)` trait method via a `std::sync::Mutex`.
-/// No `.await` occurs while the guard is held, so the future stays `Send`.
+/// All wasmer calls happen on a single dedicated OS thread (the "actor"); this
+/// handle holds only the `Send + Sync` channel used to talk to it plus the
+/// actor's join handle. See the module-level note above for why the actor is
+/// required and why the design is sound without any `unsafe`.
 #[cfg(feature = "wasm")]
 pub struct WasmNodePlugin {
     name: String,
     version: String,
     node_types: Vec<String>,
-    ctx: std::sync::Mutex<WasmContext>,
+    /// Outbound channel to the actor thread. `std::sync::mpsc::Sender<T>` is
+    /// `Send + Sync` whenever `T: Send`, which `WasmRequest` is.
+    request_tx: std::sync::mpsc::Sender<WasmRequest>,
+    /// Join handle for the actor thread; taken and joined on drop.
+    handle: Option<std::thread::JoinHandle<()>>,
 }
 
 #[cfg(feature = "wasm")]
 impl WasmNodePlugin {
-    /// Load a WASM file and capture manifest metadata.
+    /// Load a WASM file and spawn its dedicated actor thread.
     ///
     /// `name` MUST equal the manifest's `plugin.name` (and thus
     /// `CustomConfig.plugin_id`) so the engine registry can dispatch correctly.
+    ///
+    /// The wasmer `Store`/`WasmPlugin` are **constructed on the actor thread**,
+    /// not here. `wasmer::Store` is `!Send`, so it can neither be captured by a
+    /// `std::thread::spawn` closure (which demands `F: Send`) nor otherwise moved
+    /// across a thread boundary without `unsafe`. Building it thread-locally
+    /// sidesteps that entirely: only `Send` data (an owned path and the config)
+    /// crosses into the thread. We then block until the actor reports the outcome
+    /// of the load, preserving the eager load-error semantics callers rely on.
     pub fn from_wasm_file(
         config: WasmPluginConfig,
         wasm_path: &Path,
@@ -316,16 +349,101 @@ impl WasmNodePlugin {
         version: String,
         node_types: Vec<String>,
     ) -> Result<Self, WasmError> {
-        let mut loader = WasmPluginLoader::new(config);
-        let plugin = loader.load_from_file(wasm_path)?;
-        // Access private fields within the same file — no unsafe required.
-        let WasmPluginLoader { store, .. } = loader;
-        Ok(Self {
-            name,
-            version,
-            node_types,
-            ctx: std::sync::Mutex::new(WasmContext { store, plugin }),
-        })
+        let (request_tx, request_rx) = std::sync::mpsc::channel::<WasmRequest>();
+        let (init_tx, init_rx) = std::sync::mpsc::channel::<Result<(), WasmError>>();
+
+        // Only `Send` data crosses into the actor thread: an owned path + config.
+        let wasm_path_owned = wasm_path.to_path_buf();
+        let thread_name = format!("oxify-wasm-plugin-{name}");
+        let handle = std::thread::Builder::new()
+            .name(thread_name)
+            .spawn(move || {
+                // Construct the (non-`Send`) wasmer state here, on its owning
+                // thread — the one place it will ever legally live.
+                let mut loader = WasmPluginLoader::new(config);
+                let mut plugin = match loader.load_from_file(&wasm_path_owned) {
+                    Ok(plugin) => plugin,
+                    Err(e) => {
+                        // Surface the load failure to the constructor, then exit.
+                        let _ = init_tx.send(Err(e));
+                        return;
+                    }
+                };
+                let WasmPluginLoader { mut store, .. } = loader;
+
+                // Announce the successful load, then release the init channel.
+                if init_tx.send(Ok(())).is_err() {
+                    // The constructor stopped waiting; tear down immediately.
+                    return;
+                }
+                drop(init_tx);
+
+                // Actor loop: serve requests until every `Sender` is dropped. Each
+                // request runs the *exact* synchronous wasmer path from
+                // `WasmPlugin::execute`; `store`/`plugin` never leave this thread.
+                while let Ok(request) = request_rx.recv() {
+                    let WasmRequest {
+                        node,
+                        context,
+                        reply_tx,
+                    } = request;
+                    let result = plugin
+                        .execute(&mut store, &node, &context)
+                        .map_err(|e| e.to_string());
+                    // A dropped receiver just means the caller stopped awaiting.
+                    let _ = reply_tx.send(result);
+                }
+                // Channel disconnected: `store`/`plugin` drop here, on their owning
+                // thread — the only place it is sound to drop them.
+            })
+            .map_err(|e| {
+                WasmError::InstantiationError(format!("failed to spawn WASM actor thread: {e}"))
+            })?;
+
+        // Block until the actor finishes loading so load errors surface
+        // synchronously, exactly as the previous eager implementation did.
+        match init_rx.recv() {
+            Ok(Ok(())) => Ok(Self {
+                name,
+                version,
+                node_types,
+                request_tx,
+                handle: Some(handle),
+            }),
+            Ok(Err(e)) => {
+                let _ = handle.join();
+                Err(e)
+            }
+            Err(_) => {
+                let _ = handle.join();
+                Err(WasmError::InstantiationError(
+                    "WASM actor thread terminated during initialization".to_string(),
+                ))
+            }
+        }
+    }
+}
+
+#[cfg(feature = "wasm")]
+impl Drop for WasmNodePlugin {
+    fn drop(&mut self) {
+        // Disconnect the request channel *now* by swapping our live sender for a
+        // fresh, already-disconnected one and dropping the real sender. That makes
+        // the actor's `recv()` return `Err`, so its loop exits and the wasmer state
+        // is dropped on its owning thread.
+        //
+        // `execute(&self, …)` borrows `self` through the owning `Arc` for the whole
+        // life of its future, so the plugin cannot be dropped while a request is in
+        // flight; the actor is therefore always parked in `recv()` at drop time and
+        // the join below returns essentially immediately — never blocking on an
+        // in-progress wasm call.
+        let (disconnected_tx, disconnected_rx) = std::sync::mpsc::channel::<WasmRequest>();
+        drop(disconnected_rx);
+        let live_tx = std::mem::replace(&mut self.request_tx, disconnected_tx);
+        drop(live_tx);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -363,17 +481,28 @@ impl crate::plugin::NodePlugin for WasmNodePlugin {
         node: &oxify_model::Node,
         context: &oxify_model::ExecutionContext,
     ) -> Result<oxify_model::ExecutionResult, String> {
-        // Lock the mutex, run the fully synchronous wasmer call, release.
-        // No .await occurs while the guard is held — the future never yields
-        // with the mutex locked, so this is safe to use in async contexts.
-        let guard = &mut *self
-            .ctx
-            .lock()
-            .map_err(|_| "WASM plugin mutex poisoned".to_string())?;
-        let WasmContext { store, plugin } = guard;
-        plugin
-            .execute(store, node, context)
-            .map_err(|e| e.to_string())
+        // Hand the work to the actor thread and await its reply. Both the request
+        // payload and the `oneshot::Receiver` we await carry only `Send` data, so
+        // the generated future is `Send` — exactly what the `#[async_trait]` bound
+        // and the scheduler's `tokio::spawn` require.
+        //
+        // `std::sync::mpsc::Sender::send` on an unbounded channel is synchronous and
+        // non-blocking, so there is no `.await` before the reply and no need to
+        // offload the send. Both channel-failure paths (actor gone / reply dropped)
+        // become a recoverable `Err(String)` rather than a panic.
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.request_tx
+            .send(WasmRequest {
+                node: node.clone(),
+                context: context.clone(),
+                reply_tx,
+            })
+            .map_err(|_| {
+                "WASM plugin actor thread is not running (request channel closed)".to_string()
+            })?;
+        reply_rx.await.map_err(|_| {
+            "WASM plugin actor thread dropped the reply channel without responding".to_string()
+        })?
     }
 }
 
@@ -498,5 +627,67 @@ mod tests {
     fn test_wasm_node_plugin_is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<super::WasmNodePlugin>();
+    }
+
+    // End-to-end proof that the actor thread survives across calls and that the
+    // wasmer `Store`'s instance state persists between them. A tiny hand-written
+    // WAT module (compiled on load via wasmer's `wat` feature) keeps a mutable
+    // global counter and, on each `execute`, increments it and writes a
+    // length-prefixed JSON string `{"Success":N}` (N = counter as one ASCII digit)
+    // to a fixed result offset — matching the host's read/write memory layout.
+    // Calling `execute` twice on the *same* plugin must observe N == 1 then N == 2,
+    // which can only happen if the one dedicated thread — and its single `Store` —
+    // is reused across both calls.
+    #[cfg(feature = "wasm")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_wasm_node_plugin_execute_twice_persists_state() {
+        use crate::plugin::NodePlugin;
+        use oxify_model::{ExecutionResult, Node, NodeKind, WorkflowId};
+
+        // Result region: 4-byte little-endian length (13) at offset 4096, followed
+        // by the 13-byte body `{"Success":0}` at offset 4100 (digit at 4111). The
+        // host writes its input at offset 1024, comfortably clear of this region.
+        const WAT: &str = r#"
+            (module
+              (import "env" "memory" (memory 1))
+              (import "env" "log" (func $log (param i32 i32)))
+              (global $counter (mut i32) (i32.const 0))
+              (data (i32.const 4096) "\0d\00\00\00")
+              (data (i32.const 4100) "{\22Success\22:0}")
+              (func (export "execute") (param $ptr i32) (param $len i32) (result i32)
+                (global.set $counter (i32.add (global.get $counter) (i32.const 1)))
+                (i32.store8 (i32.const 4111)
+                  (i32.add (i32.const 48) (global.get $counter)))
+                (i32.const 4096)))
+        "#;
+
+        // Temp file per the workspace test policy (std::env::temp_dir()).
+        let path =
+            std::env::temp_dir().join(format!("oxify_wasm_actor_{}.wat", uuid::Uuid::new_v4()));
+        std::fs::write(&path, WAT).expect("write temp WAT module");
+
+        let plugin = WasmNodePlugin::from_wasm_file(
+            WasmPluginConfig::default(),
+            &path,
+            "actor-test".to_string(),
+            "0.1.0".to_string(),
+            vec!["actor_test".to_string()],
+        )
+        .expect("load WASM actor plugin");
+
+        let node = Node::new("actor".to_string(), NodeKind::Start);
+        let ctx = ExecutionContext::new(WorkflowId::new_v4());
+
+        // First call: counter -> 1 -> {"Success":1}.
+        let first = plugin.execute(&node, &ctx).await.expect("first execute");
+        assert_eq!(first, ExecutionResult::Success(serde_json::json!(1)));
+
+        // Second call on the SAME plugin: the actor thread and its Store survived,
+        // so the global counter -> 2 -> {"Success":2}.
+        let second = plugin.execute(&node, &ctx).await.expect("second execute");
+        assert_eq!(second, ExecutionResult::Success(serde_json::json!(2)));
+
+        drop(plugin);
+        let _ = std::fs::remove_file(&path);
     }
 }

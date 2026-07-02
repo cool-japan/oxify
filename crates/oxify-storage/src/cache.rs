@@ -43,21 +43,8 @@
 //! ```
 
 use crate::models::WorkflowRow;
+use crate::quota_store::{UserQuota, WorkflowQuota};
 use chrono::{DateTime, Duration, Utc};
-
-// Stub types for disabled quota_store module
-// TODO: Re-enable when quota_store is migrated to SQLite
-#[derive(Debug, Clone)]
-pub struct UserQuota {
-    pub user_id: uuid::Uuid,
-    pub max_executions: i64,
-}
-
-#[derive(Debug, Clone)]
-pub struct WorkflowQuota {
-    pub workflow_id: uuid::Uuid,
-    pub max_executions: i64,
-}
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};

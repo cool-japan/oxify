@@ -21,9 +21,8 @@ mod auth;
 mod auth_handlers;
 mod authz_middleware;
 mod batch_handlers;
-// Disabled for SQLite migration (requires DatabaseCheckpointStore)
-// mod checkpoint_handlers;
-// mod checkpoint_types;
+mod checkpoint_handlers;
+mod checkpoint_types;
 mod handlers;
 mod mcp_handlers;
 mod mcp_types;
@@ -81,11 +80,10 @@ use handlers::*;
         version_handlers::get_workflow_version,
         version_handlers::compare_workflow_versions,
         version_handlers::restore_workflow_version,
-        // Disabled for SQLite migration (requires DatabaseCheckpointStore)
-        // checkpoint_handlers::pause_execution,
-        // checkpoint_handlers::resume_execution,
-        // checkpoint_handlers::list_execution_checkpoints,
-        // checkpoint_handlers::delete_execution_checkpoints,
+        checkpoint_handlers::pause_execution,
+        checkpoint_handlers::resume_execution,
+        checkpoint_handlers::list_execution_checkpoints,
+        checkpoint_handlers::delete_execution_checkpoints,
         rollback_handlers::create_snapshot,
         rollback_handlers::list_snapshots,
         rollback_handlers::rollback_execution,
@@ -136,13 +134,12 @@ use handlers::*;
             version_types::GetVersionResponse,
             version_types::CompareVersionsResponse,
             version_types::RestoreVersionResponse,
-            // Disabled for SQLite migration (requires DatabaseCheckpointStore)
-            // checkpoint_types::PauseExecutionRequest,
-            // checkpoint_types::PauseExecutionResponse,
-            // checkpoint_types::ResumeExecutionResponse,
-            // checkpoint_types::CheckpointSummary,
-            // checkpoint_types::ListCheckpointsResponse,
-            // checkpoint_types::DeleteCheckpointsResponse,
+            checkpoint_types::PauseExecutionRequest,
+            checkpoint_types::PauseExecutionResponse,
+            checkpoint_types::ResumeExecutionResponse,
+            checkpoint_types::CheckpointSummary,
+            checkpoint_types::ListCheckpointsResponse,
+            checkpoint_types::DeleteCheckpointsResponse,
             handlers::ImportWorkflowRequest,
             handlers::ImportWorkflowResponse,
             batch_handlers::BatchCreateWorkflowsRequest,
@@ -310,11 +307,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/webhooks/{id}", get(get_webhook))
         .route("/api/v1/webhooks/{id}/events", get(list_webhook_events))
         .route("/api/v1/webhooks/{id}/stats", get(get_webhook_stats))
-        // Checkpoint read routes (DISABLED for SQLite migration)
-        // .route(
-        //     "/api/v1/executions/{id}/checkpoints",
-        //     get(checkpoint_handlers::list_execution_checkpoints),
-        // )
+        // Checkpoint read routes
+        .route(
+            "/api/v1/executions/{id}/checkpoints",
+            get(checkpoint_handlers::list_execution_checkpoints),
+        )
         // Rollback read routes
         .route(
             "/api/v1/executions/{id}/snapshots",
@@ -386,15 +383,15 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/workflows/{id}/versions/{version}/restore",
             post(version_handlers::restore_workflow_version),
         )
-        // Checkpoint write routes (DISABLED for SQLite migration)
-        // .route(
-        //     "/api/v1/executions/{id}/pause",
-        //     post(checkpoint_handlers::pause_execution),
-        // )
-        // .route(
-        //     "/api/v1/executions/{id}/resume",
-        //     post(checkpoint_handlers::resume_execution),
-        // )
+        // Checkpoint write routes
+        .route(
+            "/api/v1/executions/{id}/pause",
+            post(checkpoint_handlers::pause_execution),
+        )
+        .route(
+            "/api/v1/executions/{id}/resume",
+            post(checkpoint_handlers::resume_execution),
+        )
         // Approval write routes
         .route("/api/v1/approvals/{id}/approve", post(approve_approval))
         .route("/api/v1/approvals/{id}/reject", post(reject_approval))
@@ -448,11 +445,11 @@ async fn main() -> anyhow::Result<()> {
         //     "/api/v1/secrets/{id}",
         //     delete(secret_handlers::delete_secret),
         // )
-        // Checkpoint delete routes (DISABLED for SQLite migration)
-        // .route(
-        //     "/api/v1/executions/{id}/checkpoints",
-        //     delete(checkpoint_handlers::delete_execution_checkpoints),
-        // )
+        // Checkpoint delete routes
+        .route(
+            "/api/v1/executions/{id}/checkpoints",
+            delete(checkpoint_handlers::delete_execution_checkpoints),
+        )
         // Rollback delete routes
         .route(
             "/api/v1/executions/{id}/snapshots",

@@ -22,6 +22,8 @@ tracing = { workspace = true }
 oxihttp = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+# Pure-Rust HTML parsing / CSS-selector extraction for the `web_scrape` tool.
+scraper = { workspace = true }
 
 # Database support (optional) — Pure-Rust OxiSQL stack (replaces sqlx)
 oxisql-core = { workspace = true, optional = true }
@@ -31,6 +33,12 @@ oxisql-pool = { workspace = true, optional = true }
 # GitHub API support (optional)
 octocrab = { workspace = true, optional = true }
 
+# Headless-browser support (optional, off by default) — async CDP client for the
+# `web_screenshot` tool. Drives an external Chrome/Chromium binary; gated so default
+# builds stay lean. `futures` is needed only to drive chromiumoxide's event handler.
+chromiumoxide = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+
 [features]
 default = []
 database = ["dep:oxisql-core", "dep:oxisql-sqlite-compat", "dep:oxisql-pool"]
@@ -39,6 +47,10 @@ github-actions = []
 gitlab = []
 jira = []
 linear = []
+# Headless-browser screenshot support for the `web_screenshot` tool. Off by default:
+# requires a local Chrome/Chromium binary at runtime. Pure-Rust crate (chromiumoxide)
+# that speaks CDP to an external browser process.
+headless-browser = ["dep:chromiumoxide", "dep:futures"]
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }

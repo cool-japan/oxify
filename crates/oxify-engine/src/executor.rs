@@ -421,7 +421,7 @@ impl Engine {
     }
 
     /// Execute workflow from a checkpoint
-    pub(super) async fn execute_from_checkpoint(
+    pub async fn execute_from_checkpoint(
         &self,
         workflow: &Workflow,
         checkpoint: ExecutionCheckpoint,

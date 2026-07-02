@@ -38,7 +38,7 @@
 // pub mod batch_ops;     // Disabled - complex
 pub mod cache;
 // pub mod cache_warmer;  // Disabled - uses WorkflowRow
-// mod checkpoint_store;  // Disabled - complex
+pub mod checkpoint_store;
 // mod cleanup;           // Disabled - complex
 pub mod connection_leak_detector;
 pub mod db_utils;
@@ -64,9 +64,9 @@ mod row_ext;
 // pub mod pool_tuner;    // Disabled - complex
 pub mod query_builder;
 // pub mod query_profiler; // Disabled - complex
-// mod quota_store;       // Disabled - complex
-// #[cfg(feature = "redis-cache")]
-// pub mod redis_cache;   // Disabled - depends on quota_store
+mod quota_store;
+#[cfg(feature = "redis-cache")]
+pub mod redis_cache;
 pub mod retry;
 // mod schedule_store;    // Disabled - complex
 pub mod session_store;
@@ -107,6 +107,7 @@ mod workflow_version_store;
 
 // Minimal exports for SQLite migration
 pub use cache::{Cache, CacheConfig, CacheMetrics, CacheStats};
+pub use checkpoint_store::{DatabaseCheckpointStore, ExecutionCheckpoint};
 pub use connection_leak_detector::{
     ConnectionToken, LeakDetector, LeakDetectorConfig, LeakReport, LeakStats, SuspectedLeak,
 };
@@ -124,8 +125,11 @@ pub use pagination::{
     PaginationStrategy,
 };
 pub use pool::{DatabasePool, PoolHealth, PoolMetrics, PoolStats, PooledConnection};
-// #[cfg(feature = "redis-cache")]
-// pub use redis_cache::{RedisCache, RedisCacheConfig, TwoLevelCache};
+pub use quota_store::{
+    QuotaCheckResult, QuotaStore, QuotaUsageRecord, UserQuota, UserQuotaLimitUpdate, WorkflowQuota,
+};
+#[cfg(feature = "redis-cache")]
+pub use redis_cache::{RedisCache, RedisCacheConfig, TwoLevelCache};
 #[cfg(feature = "redis-cache")]
 pub use session_store::RedisSessionStore;
 pub use session_store::{

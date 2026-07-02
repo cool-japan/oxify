@@ -440,14 +440,14 @@ mod tests {
         // Test workflow operations
         let workflow_id = Uuid::new_v4();
         let workflow = WorkflowRow {
-            id: workflow_id,
+            id: workflow_id.to_string(),
             name: "test".to_string(),
             description: None,
-            definition: serde_json::json!({}),
+            definition: "{}".to_string(),
             version: 1,
             tags: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
         };
 
         // Set workflow
@@ -459,7 +459,7 @@ mod tests {
         // Get workflow
         let cached = cache.get_workflow(&workflow_id).await.unwrap();
         assert!(cached.is_some());
-        assert_eq!(cached.unwrap().id, workflow_id);
+        assert_eq!(cached.unwrap().id, workflow_id.to_string());
 
         // Delete workflow
         cache.delete_workflow(&workflow_id).await.unwrap();
@@ -488,14 +488,14 @@ mod tests {
 
         let workflow_id = Uuid::new_v4();
         let workflow = WorkflowRow {
-            id: workflow_id,
+            id: workflow_id.to_string(),
             name: "test".to_string(),
             description: None,
-            definition: serde_json::json!({}),
+            definition: "{}".to_string(),
             version: 1,
             tags: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
         };
 
         // Put into cache
@@ -507,7 +507,7 @@ mod tests {
         // Get from cache (should be in L1)
         let cached = two_level.get_workflow(&workflow_id).await.unwrap();
         assert!(cached.is_some());
-        assert_eq!(cached.unwrap().id, workflow_id);
+        assert_eq!(cached.unwrap().id, workflow_id.to_string());
 
         // Invalidate
         two_level.invalidate_workflow(&workflow_id).await.unwrap();

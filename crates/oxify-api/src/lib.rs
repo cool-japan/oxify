@@ -4,9 +4,8 @@ pub mod auth;
 pub mod auth_handlers;
 pub mod authz_middleware;
 pub mod batch_handlers;
-// Disabled for SQLite migration (requires DatabaseCheckpointStore)
-// pub mod checkpoint_handlers;
-// pub mod checkpoint_types;
+pub mod checkpoint_handlers;
+pub mod checkpoint_types;
 pub mod feature_flags;
 pub mod handlers;
 pub mod mcp_handlers;
