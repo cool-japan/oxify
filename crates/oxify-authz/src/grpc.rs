@@ -19,8 +19,8 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Create a hybrid engine connected to PostgreSQL
-//!     let engine = HybridRebacEngine::new("postgres://localhost/authz").await?;
+//!     // Create a hybrid engine backed by the pure-Rust SQLite (Limbo) store
+//!     let engine = HybridRebacEngine::new("sqlite:/var/lib/oxify/authz.db").await?;
 //!     let service = AuthzGrpcService::new(engine);
 //!
 //!     let addr = "[::1]:50051".parse()?;
@@ -433,7 +433,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore] // Requires PostgreSQL database
     async fn test_grpc_check() {
         let engine = HybridRebacEngine::for_testing().await.unwrap();
         let service = AuthzGrpcService::new(engine);
@@ -472,7 +471,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires PostgreSQL database
     async fn test_grpc_batch_check() {
         let engine = HybridRebacEngine::for_testing().await.unwrap();
         let service = AuthzGrpcService::new(engine);
@@ -533,7 +531,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires PostgreSQL database
     async fn test_grpc_expand() {
         let engine = HybridRebacEngine::for_testing().await.unwrap();
         let service = AuthzGrpcService::new(engine);

@@ -15,15 +15,21 @@ use oxisql_core::Connection;
 ///
 /// ## Indexes Created
 ///
-/// - `idx_executions_workflow_id_created_at` - Speeds up workflow execution lookups
-/// - `idx_executions_state_created_at` - Speeds up state-based queries
+/// These mirror `migrations/20251201000005__performance_indexes.sql` exactly
+/// (same names, columns, and set). The columns/tables are those of the SQLite
+/// schema, which differs from the Postgres schema the original index list was
+/// written against: `executions` timestamps on `started_at` (not `created_at`),
+/// `schedule_executions` on `triggered_at` (not `executed_at`), and the
+/// Postgres-era `execution_durations` table / `workflows.user_id` column have no
+/// SQLite counterpart so their indexes are intentionally absent.
+///
+/// - `idx_executions_workflow_id_started_at` - Speeds up workflow execution lookups
+/// - `idx_executions_state_started_at` - Speeds up state-based queries
 /// - `idx_audit_logs_event_type_timestamp` - Speeds up audit log filtering
 /// - `idx_quota_usage_history_user_id_time_bucket` - Speeds up quota history lookups
 /// - `idx_secret_audit_logs_timestamp` - Speeds up secret audit log queries
-/// - `idx_execution_durations_workflow_time` - Speeds up percentile calculations
 /// - `idx_api_key_usage_logs_key_id_timestamp` - Speeds up API key usage queries
-/// - `idx_schedule_executions_schedule_id_executed_at` - Speeds up schedule history
-/// - `idx_workflows_user_id_updated_at` - Speeds up workflow filtering
+/// - `idx_schedule_executions_schedule_id_triggered_at` - Speeds up schedule history
 /// - `idx_workflow_versions_workflow_id_version` - Speeds up version history
 ///
 /// ## Example
@@ -37,21 +43,22 @@ use oxisql_core::Connection;
 pub async fn apply_performance_indexes(pool: &DatabasePool) -> Result<()> {
     let conn = pool.acquire().await?;
 
-    // Index for executions table - workflow_id + created_at
+    // Index for executions table - workflow_id + started_at
+    // (SQLite `executions` timestamps on `started_at`, not `created_at`).
     conn.execute(
         r"
-        CREATE INDEX IF NOT EXISTS idx_executions_workflow_id_created_at
-        ON executions(workflow_id, created_at DESC)
+        CREATE INDEX IF NOT EXISTS idx_executions_workflow_id_started_at
+        ON executions(workflow_id, started_at DESC)
         ",
         &[],
     )
     .await?;
 
-    // Index for executions table - state + created_at
+    // Index for executions table - state + started_at
     conn.execute(
         r"
-        CREATE INDEX IF NOT EXISTS idx_executions_state_created_at
-        ON executions(state, created_at DESC)
+        CREATE INDEX IF NOT EXISTS idx_executions_state_started_at
+        ON executions(state, started_at DESC)
         ",
         &[],
     )
@@ -87,15 +94,9 @@ pub async fn apply_performance_indexes(pool: &DatabasePool) -> Result<()> {
     )
     .await?;
 
-    // Index for execution_durations table - for percentile calculations
-    conn.execute(
-        r"
-        CREATE INDEX IF NOT EXISTS idx_execution_durations_workflow_time
-        ON execution_durations(workflow_id, time_bucket, duration_ms)
-        ",
-        &[],
-    )
-    .await?;
+    // NOTE: the Postgres-era `execution_durations` percentile index was dropped
+    // here (and from the .sql migration): no `execution_durations` table exists
+    // in the SQLite schema, so there is nothing to index.
 
     // Index for api_key_usage_logs table - key_id + timestamp
     conn.execute(
@@ -107,25 +108,20 @@ pub async fn apply_performance_indexes(pool: &DatabasePool) -> Result<()> {
     )
     .await?;
 
-    // Index for schedule_executions table - schedule_id + executed_at
+    // Index for schedule_executions table - schedule_id + triggered_at
+    // (SQLite `schedule_executions` timestamps on `triggered_at`, not `executed_at`).
     conn.execute(
         r"
-        CREATE INDEX IF NOT EXISTS idx_schedule_executions_schedule_id_executed_at
-        ON schedule_executions(schedule_id, executed_at DESC)
+        CREATE INDEX IF NOT EXISTS idx_schedule_executions_schedule_id_triggered_at
+        ON schedule_executions(schedule_id, triggered_at DESC)
         ",
         &[],
     )
     .await?;
 
-    // Index for workflows table - user_id + updated_at
-    conn.execute(
-        r"
-        CREATE INDEX IF NOT EXISTS idx_workflows_user_id_updated_at
-        ON workflows(user_id, updated_at DESC)
-        ",
-        &[],
-    )
-    .await?;
+    // NOTE: the Postgres-era `workflows(user_id, updated_at)` index was dropped
+    // here (and from the .sql migration): the SQLite `workflows` table has no
+    // `user_id` column, so there is nothing to index.
 
     // Index for workflow_versions table - workflow_id + version
     conn.execute(
@@ -329,15 +325,13 @@ struct IndexNameRow {
 /// Returns a list of missing index names that should be created.
 pub async fn check_missing_indexes(pool: &DatabasePool) -> Result<Vec<String>> {
     let required_indexes = vec![
-        "idx_executions_workflow_id_created_at",
-        "idx_executions_state_created_at",
+        "idx_executions_workflow_id_started_at",
+        "idx_executions_state_started_at",
         "idx_audit_logs_event_type_timestamp",
         "idx_quota_usage_history_user_id_time_bucket",
         "idx_secret_audit_logs_timestamp",
-        "idx_execution_durations_workflow_time",
         "idx_api_key_usage_logs_key_id_timestamp",
-        "idx_schedule_executions_schedule_id_executed_at",
-        "idx_workflows_user_id_updated_at",
+        "idx_schedule_executions_schedule_id_triggered_at",
         "idx_workflow_versions_workflow_id_version",
     ];
 
@@ -377,18 +371,16 @@ mod tests {
     fn test_required_indexes_list() {
         // This test ensures we document all required indexes
         let indexes = [
-            "idx_executions_workflow_id_created_at",
-            "idx_executions_state_created_at",
+            "idx_executions_workflow_id_started_at",
+            "idx_executions_state_started_at",
             "idx_audit_logs_event_type_timestamp",
             "idx_quota_usage_history_user_id_time_bucket",
             "idx_secret_audit_logs_timestamp",
-            "idx_execution_durations_workflow_time",
             "idx_api_key_usage_logs_key_id_timestamp",
-            "idx_schedule_executions_schedule_id_executed_at",
-            "idx_workflows_user_id_updated_at",
+            "idx_schedule_executions_schedule_id_triggered_at",
             "idx_workflow_versions_workflow_id_version",
         ];
 
-        assert_eq!(indexes.len(), 10);
+        assert_eq!(indexes.len(), 8);
     }
 }

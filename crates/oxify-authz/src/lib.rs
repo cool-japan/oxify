@@ -19,7 +19,11 @@
 //! use oxify_authz::*;
 //!
 //! # async fn example() -> Result<()> {
-//! let engine = AuthzEngine::new("postgres://localhost/db").await?;
+//! // Backed by the pure-Rust SQLite (Limbo) engine via `oxisql`. Use
+//! // `sqlite::memory:` for an ephemeral database or `sqlite:/path/to.db`
+//! // for a persistent one.
+//! let engine = AuthzEngine::new("sqlite:/var/lib/oxify/authz.db").await?;
+//! engine.migrate().await?;
 //!
 //! // Define: User alice is an owner of document:123
 //! engine.write_tuple(RelationTuple::new(

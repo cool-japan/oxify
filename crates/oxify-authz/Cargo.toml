@@ -15,11 +15,16 @@ tokio = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sqlx = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+
+# Pure-Rust SQL stack (SQLite backend) — replaces sqlx.
+oxisql-core = { workspace = true }
+oxisql-sqlite-compat = { workspace = true }
+oxisql-pool = { workspace = true }
+oxisql-migrate = { workspace = true }
 
 # Graph algorithms for reachability
 petgraph = "0.8"

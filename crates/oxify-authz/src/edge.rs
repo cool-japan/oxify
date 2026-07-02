@@ -35,11 +35,12 @@
 //! ```
 
 use crate::{
-    memory::InMemoryRebacManager, AuthzError, CheckRequest, RelationTuple, Result, Subject,
+    engine::sqlite_path_from_url, memory::InMemoryRebacManager, AuthzError, CheckRequest,
+    RelationTuple, Result, Subject,
 };
+use oxisql_core::Connection;
+use oxisql_pool::sqlite::{new_sqlite_compat_pool, SqlitePool};
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
-use sqlx::Row;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -260,13 +261,14 @@ impl EdgeEngine {
     pub async fn new(config: EdgeConfig) -> Result<Self> {
         let node_id = uuid::Uuid::new_v4().to_string();
 
-        // Attempt to open the pool; treat connection failure as non-fatal so
-        // that the engine can be used in-memory even without a DB.
-        let pool = SqlitePoolOptions::new()
-            .max_connections(5)
-            .connect(&config.central_db_url)
-            .await
-            .ok();
+        // Attempt to open the pool; treat an unusable URL as non-fatal so that
+        // the engine can still be used in-memory even without a central DB.
+        // Only SQLite URLs are supported; a non-SQLite URL (e.g. a Postgres URL)
+        // yields `None`, matching the previous best-effort connect behaviour.
+        let pool = match sqlite_path_from_url(&config.central_db_url) {
+            Some(path) => new_sqlite_compat_pool(path, 5).await.ok(),
+            None => None,
+        };
 
         Ok(Self {
             manager: InMemoryRebacManager::new(),
@@ -360,15 +362,20 @@ impl EdgeEngine {
             SyncConfig::NamespacesAndTenants { namespaces, .. } => Some(namespaces.clone()),
         };
 
-        // Fetch rows. We use the function form of sqlx::query (not the macro)
-        // so there is no compile-time DATABASE_URL requirement.
-        let rows = sqlx::query(
-            "SELECT namespace, object_id, relation, subject_type, subject_id, subject_relation \
-             FROM authz_relation_tuples",
-        )
-        .fetch_all(pool)
-        .await
-        .map_err(|e| AuthzError::DatabaseError(format!("Failed to fetch tuples: {e}")))?;
+        // Fetch rows via a pooled connection. This SELECT takes no bind
+        // parameters, so there are no `?`/`$N` placeholders to renumber.
+        let conn = pool
+            .get()
+            .await
+            .map_err(|e| AuthzError::DatabaseError(format!("Failed to acquire connection: {e}")))?;
+        let rows = conn
+            .query(
+                "SELECT namespace, object_id, relation, subject_type, subject_id, subject_relation \
+                 FROM authz_relation_tuples",
+                &[],
+            )
+            .await
+            .map_err(|e| AuthzError::DatabaseError(format!("Failed to fetch tuples: {e}")))?;
 
         let mut synced: u64 = 0;
 

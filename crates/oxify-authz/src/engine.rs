@@ -2,12 +2,69 @@
 
 use crate::*;
 use moka::future::Cache;
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
-use sqlx::Row;
+use oxisql_core::{Connection, Row};
+use oxisql_pool::sqlite::{new_sqlite_compat_pool, SqlitePool};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+
+/// Translate a database URL into a path understood by the pure-Rust SQLite
+/// (Limbo) backend used by `oxisql`.
+///
+/// Accepted forms and their normalisation:
+/// - `sqlite::memory:`, `sqlite://:memory:`, `:memory:` → `":memory:"`
+/// - `sqlite:/path/to.db`, `sqlite:///path/to.db`, `/path/to.db` → the file path
+///
+/// Returns `None` for URLs carrying a non-SQLite scheme (e.g. `postgres://…`),
+/// signalling that the SQLite backend cannot serve that URL.
+pub(crate) fn sqlite_path_from_url(database_url: &str) -> Option<String> {
+    let rest = if let Some(r) = database_url.strip_prefix("sqlite://") {
+        r
+    } else if let Some(r) = database_url.strip_prefix("sqlite:") {
+        r
+    } else if database_url.contains("://") {
+        // A non-SQLite scheme — unsupported by this backend.
+        return None;
+    } else {
+        database_url
+    };
+
+    let normalised = if rest.is_empty() || rest == ":memory:" || rest == "memory:" {
+        ":memory:"
+    } else {
+        rest
+    };
+    Some(normalised.to_string())
+}
+
+/// Pool size used for a file-backed SQLite database.
+///
+/// Every pooled connection re-opens the same on-disk file, so all slots
+/// observe identical, shared state; a larger pool simply allows more
+/// concurrent authorization checks in flight at once.
+const FILE_POOL_SIZE: usize = 20;
+
+/// Pool size forced for an in-memory (`:memory:`) SQLite database.
+///
+/// The pure-Rust SQLite (Limbo) backend gives every pooled connection to an
+/// in-memory database its own **independent, empty** database — pool slots
+/// share no state (this mirrors upstream SQLite's own semantics for private
+/// in-memory connections; see the `oxisql_pool::sqlite_compat` module docs,
+/// which state plainly: "For in-memory databases (`:memory:`) each pool slot
+/// is independent — there is no shared state between pool slots"). A pool
+/// size greater than 1 against `:memory:` would therefore silently split
+/// authorization state across multiple invisible databases as soon as more
+/// than one connection is checked out concurrently — e.g. two overlapping
+/// `check`/`write_tuple` calls served by a gRPC handler — corrupting
+/// permission-check results with no error raised. Every method on
+/// `AuthzEngine` acquires-and-drops its own pooled connection per call, so
+/// nothing short of a single-connection pool eliminates the hazard for good.
+/// Capping the pool at one connection makes every checkout observe the same
+/// database, at the cost of serialising concurrent access — the same
+/// trade-off recommended upstream (e.g. sqlx's own `:memory:` guidance) for a
+/// single-instance in-memory SQLite database.
+const MEMORY_POOL_SIZE: usize = 1;
 
 /// The main authorization engine
 pub struct AuthzEngine {
@@ -73,10 +130,19 @@ impl BloomStatsTracker {
 impl AuthzEngine {
     /// Create a new authorization engine
     pub async fn new(database_url: &str) -> Result<Self> {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(20)
-            .acquire_timeout(Duration::from_secs(5))
-            .connect(database_url)
+        let path = sqlite_path_from_url(database_url).ok_or_else(|| {
+            AuthzError::DatabaseError(format!(
+                "Unsupported database URL for the SQLite backend: {database_url}"
+            ))
+        })?;
+        // See `MEMORY_POOL_SIZE` for why `:memory:` cannot safely use a
+        // multi-connection pool.
+        let pool_size = if path == ":memory:" {
+            MEMORY_POOL_SIZE
+        } else {
+            FILE_POOL_SIZE
+        };
+        let pool = new_sqlite_compat_pool(path, pool_size)
             .await
             .map_err(|e| AuthzError::DatabaseError(format!("Failed to connect: {}", e)))?;
 
@@ -121,33 +187,44 @@ impl AuthzEngine {
 
     /// Write a relation tuple
     pub async fn write_tuple(&self, tuple: RelationTuple) -> Result<()> {
-        sqlx::query(
-            r#"
-            INSERT OR IGNORE INTO authz_relation_tuples
-                (namespace, object_id, relation, subject_type, subject_id, subject_relation)
-            VALUES (?, ?, ?, ?, ?, ?)
-            "#,
-        )
-        .bind(&tuple.namespace)
-        .bind(&tuple.object_id)
-        .bind(&tuple.relation)
-        .bind(match &tuple.subject {
+        // Bind order: $1 namespace, $2 object_id, $3 relation,
+        //             $4 subject_type, $5 subject_id, $6 subject_relation.
+        let subject_type = match &tuple.subject {
             Subject::User(_) => "user",
             Subject::UserSet { .. } => "userset",
-        })
-        .bind(match &tuple.subject {
+        };
+        let subject_id = match &tuple.subject {
             Subject::User(id) => id.clone(),
             Subject::UserSet {
                 namespace,
                 object_id,
                 ..
             } => format!("{}:{}", namespace, object_id),
-        })
-        .bind(match &tuple.subject {
+        };
+        let subject_relation: Option<String> = match &tuple.subject {
             Subject::User(_) => None,
             Subject::UserSet { relation, .. } => Some(relation.clone()),
-        })
-        .execute(&self.pool)
+        };
+
+        let conn =
+            self.pool.get().await.map_err(|e| {
+                AuthzError::DatabaseError(format!("Failed to acquire connection: {e}"))
+            })?;
+        conn.execute(
+            r#"
+            INSERT OR IGNORE INTO authz_relation_tuples
+                (namespace, object_id, relation, subject_type, subject_id, subject_relation)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            "#,
+            &[
+                &tuple.namespace,  // $1
+                &tuple.object_id,  // $2
+                &tuple.relation,   // $3
+                &subject_type,     // $4
+                &subject_id,       // $5
+                &subject_relation, // $6
+            ],
+        )
         .await
         .map_err(|e| AuthzError::DatabaseError(format!("Failed to write tuple: {}", e)))?;
 
@@ -163,32 +240,42 @@ impl AuthzEngine {
 
     /// Delete a relation tuple
     pub async fn delete_tuple(&self, tuple: RelationTuple) -> Result<()> {
-        sqlx::query(
-            r#"
-            DELETE FROM authz_relation_tuples
-            WHERE namespace = ?
-              AND object_id = ?
-              AND relation = ?
-              AND subject_type = ?
-              AND subject_id = ?
-            "#,
-        )
-        .bind(&tuple.namespace)
-        .bind(&tuple.object_id)
-        .bind(&tuple.relation)
-        .bind(match &tuple.subject {
+        // Bind order: $1 namespace, $2 object_id, $3 relation,
+        //             $4 subject_type, $5 subject_id.
+        let subject_type = match &tuple.subject {
             Subject::User(_) => "user",
             Subject::UserSet { .. } => "userset",
-        })
-        .bind(match &tuple.subject {
+        };
+        let subject_id = match &tuple.subject {
             Subject::User(id) => id.clone(),
             Subject::UserSet {
                 namespace,
                 object_id,
                 ..
             } => format!("{}:{}", namespace, object_id),
-        })
-        .execute(&self.pool)
+        };
+
+        let conn =
+            self.pool.get().await.map_err(|e| {
+                AuthzError::DatabaseError(format!("Failed to acquire connection: {e}"))
+            })?;
+        conn.execute(
+            r#"
+            DELETE FROM authz_relation_tuples
+            WHERE namespace = $1
+              AND object_id = $2
+              AND relation = $3
+              AND subject_type = $4
+              AND subject_id = $5
+            "#,
+            &[
+                &tuple.namespace, // $1
+                &tuple.object_id, // $2
+                &tuple.relation,  // $3
+                &subject_type,    // $4
+                &subject_id,      // $5
+            ],
+        )
         .await
         .map_err(|e| AuthzError::DatabaseError(format!("Failed to delete tuple: {}", e)))?;
 
@@ -313,59 +400,85 @@ impl AuthzEngine {
 
     /// Check for a direct tuple match
     async fn check_direct(&self, request: &CheckRequest) -> Result<bool> {
-        let row = sqlx::query(
-            r#"
-            SELECT COUNT(*) as count FROM authz_relation_tuples
-            WHERE namespace = ?
-              AND object_id = ?
-              AND relation = ?
-              AND subject_type = ?
-              AND subject_id = ?
-            "#,
-        )
-        .bind(&request.namespace)
-        .bind(&request.object_id)
-        .bind(&request.relation)
-        .bind(match &request.subject {
+        // Bind order: $1 namespace, $2 object_id, $3 relation,
+        //             $4 subject_type, $5 subject_id.
+        let subject_type = match &request.subject {
             Subject::User(_) => "user",
             Subject::UserSet { .. } => "userset",
-        })
-        .bind(match &request.subject {
+        };
+        let subject_id = match &request.subject {
             Subject::User(id) => id.clone(),
             Subject::UserSet {
                 namespace,
                 object_id,
                 ..
             } => format!("{}:{}", namespace, object_id),
-        })
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| AuthzError::DatabaseError(format!("Failed to check direct: {}", e)))?;
+        };
 
-        let count: i64 = row.try_get("count").unwrap_or(0);
+        let conn =
+            self.pool.get().await.map_err(|e| {
+                AuthzError::DatabaseError(format!("Failed to acquire connection: {e}"))
+            })?;
+        let rows = conn
+            .query(
+                r#"
+            SELECT COUNT(*) as count FROM authz_relation_tuples
+            WHERE namespace = $1
+              AND object_id = $2
+              AND relation = $3
+              AND subject_type = $4
+              AND subject_id = $5
+            "#,
+                &[
+                    &request.namespace, // $1
+                    &request.object_id, // $2
+                    &request.relation,  // $3
+                    &subject_type,      // $4
+                    &subject_id,        // $5
+                ],
+            )
+            .await
+            .map_err(|e| AuthzError::DatabaseError(format!("Failed to check direct: {}", e)))?;
+
+        let count: i64 = match rows.first() {
+            Some(row) => row.try_get("count").unwrap_or(0),
+            None => 0,
+        };
         Ok(count > 0)
     }
 
     /// Find all usersets a user belongs to
     async fn find_usersets_for_user(&self, user_id: &str) -> Result<Vec<Subject>> {
-        let rows = sqlx::query(
-            r#"
+        // Bind order: $1 subject_id (the user id). `subject_type = 'user'` is a
+        // SQL string literal, not a bind parameter.
+        let conn =
+            self.pool.get().await.map_err(|e| {
+                AuthzError::DatabaseError(format!("Failed to acquire connection: {e}"))
+            })?;
+        let rows = conn
+            .query(
+                r#"
             SELECT namespace, object_id, relation
             FROM authz_relation_tuples
             WHERE subject_type = 'user'
-              AND subject_id = ?
+              AND subject_id = $1
             "#,
-        )
-        .bind(user_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| AuthzError::DatabaseError(format!("Failed to find usersets: {}", e)))?;
+                &[&user_id], // $1
+            )
+            .await
+            .map_err(|e| AuthzError::DatabaseError(format!("Failed to find usersets: {}", e)))?;
 
         let mut usersets = Vec::new();
         for row in rows {
-            let namespace: String = row.get("namespace");
-            let object_id: String = row.get("object_id");
-            let relation: String = row.get("relation");
+            let namespace: String = row
+                .try_get("namespace")
+                .map_err(|e| AuthzError::DatabaseError(format!("Row error: {e}")))?;
+            let object_id: String = row
+                .try_get("object_id")
+                .map_err(|e| AuthzError::DatabaseError(format!("Row error: {e}")))?;
+            let relation: String = row
+                .try_get("relation")
+                .map_err(|e| AuthzError::DatabaseError(format!("Row error: {e}")))?;
 
             usersets.push(Subject::UserSet {
                 namespace,
@@ -379,31 +492,44 @@ impl AuthzEngine {
 
     /// Expand a relation to find all subjects
     pub async fn expand(&self, request: ExpandRequest) -> Result<ExpandResponse> {
-        let rows = sqlx::query(
-            r#"
+        // Bind order: $1 namespace, $2 object_id, $3 relation.
+        let conn =
+            self.pool.get().await.map_err(|e| {
+                AuthzError::DatabaseError(format!("Failed to acquire connection: {e}"))
+            })?;
+        let rows = conn
+            .query(
+                r#"
             SELECT subject_type, subject_id, subject_relation
             FROM authz_relation_tuples
-            WHERE namespace = ?
-              AND object_id = ?
-              AND relation = ?
+            WHERE namespace = $1
+              AND object_id = $2
+              AND relation = $3
             "#,
-        )
-        .bind(&request.namespace)
-        .bind(&request.object_id)
-        .bind(&request.relation)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| AuthzError::DatabaseError(format!("Failed to expand: {}", e)))?;
+                &[
+                    &request.namespace, // $1
+                    &request.object_id, // $2
+                    &request.relation,  // $3
+                ],
+            )
+            .await
+            .map_err(|e| AuthzError::DatabaseError(format!("Failed to expand: {}", e)))?;
 
         let mut subjects = Vec::new();
         for row in rows {
-            let subject_type: String = row.get("subject_type");
-            let subject_id: String = row.get("subject_id");
+            let subject_type: String = row
+                .try_get("subject_type")
+                .map_err(|e| AuthzError::DatabaseError(format!("Row error: {e}")))?;
+            let subject_id: String = row
+                .try_get("subject_id")
+                .map_err(|e| AuthzError::DatabaseError(format!("Row error: {e}")))?;
 
             let subject = if subject_type == "user" {
                 Subject::User(subject_id)
             } else {
-                let subject_relation: Option<String> = row.get("subject_relation");
+                let subject_relation: Option<String> = row
+                    .try_get("subject_relation")
+                    .map_err(|e| AuthzError::DatabaseError(format!("Row error: {e}")))?;
                 let parts: Vec<&str> = subject_id.split(':').collect();
                 if let (2, Some(relation)) = (parts.len(), subject_relation) {
                     Subject::UserSet {
@@ -429,8 +555,13 @@ impl AuthzEngine {
 
     /// Run database migrations
     pub async fn migrate(&self) -> Result<()> {
-        sqlx::query(include_str!("../migrations/001_init.sql"))
-            .execute(&self.pool)
+        // The schema file is a multi-statement SQL script; `execute_batch`
+        // splits it (quote/comment aware) and runs each statement in turn.
+        let conn =
+            self.pool.get().await.map_err(|e| {
+                AuthzError::DatabaseError(format!("Failed to acquire connection: {e}"))
+            })?;
+        conn.execute_batch(include_str!("../migrations/20260702000001__init.sql"))
             .await
             .map_err(|e| AuthzError::DatabaseError(format!("Migration failed: {}", e)))?;
 
@@ -549,7 +680,15 @@ impl AuthzEngine {
         // This is less efficient than PostgreSQL's unnest, but SQLite doesn't support arrays
         let mut results = Vec::with_capacity(requests.len());
 
+        // A single pooled connection is reused for every probe in this batch.
+        let conn =
+            self.pool.get().await.map_err(|e| {
+                AuthzError::DatabaseError(format!("Failed to acquire connection: {e}"))
+            })?;
+
         for (_, request, _) in requests {
+            // Bind order: $1 namespace, $2 object_id, $3 relation,
+            //             $4 subject_type, $5 subject_id.
             let subject_type = match &request.subject {
                 Subject::User(_) => "user",
                 Subject::UserSet { .. } => "userset",
@@ -563,26 +702,31 @@ impl AuthzEngine {
                 } => format!("{}:{}", namespace, object_id),
             };
 
-            let row = sqlx::query(
-                r#"
+            let rows = conn
+                .query(
+                    r#"
                 SELECT COUNT(*) as count FROM authz_relation_tuples
-                WHERE namespace = ?
-                  AND object_id = ?
-                  AND relation = ?
-                  AND subject_type = ?
-                  AND subject_id = ?
+                WHERE namespace = $1
+                  AND object_id = $2
+                  AND relation = $3
+                  AND subject_type = $4
+                  AND subject_id = $5
                 "#,
-            )
-            .bind(&request.namespace)
-            .bind(&request.object_id)
-            .bind(&request.relation)
-            .bind(subject_type)
-            .bind(&subject_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| AuthzError::DatabaseError(format!("Batch check failed: {}", e)))?;
+                    &[
+                        &request.namespace, // $1
+                        &request.object_id, // $2
+                        &request.relation,  // $3
+                        &subject_type,      // $4
+                        &subject_id,        // $5
+                    ],
+                )
+                .await
+                .map_err(|e| AuthzError::DatabaseError(format!("Batch check failed: {}", e)))?;
 
-            let count: i64 = row.try_get("count").unwrap_or(0);
+            let count: i64 = match rows.first() {
+                Some(row) => row.try_get("count").unwrap_or(0),
+                None => 0,
+            };
             results.push(count > 0);
         }
 
@@ -591,41 +735,25 @@ impl AuthzEngine {
 
     /// Load existing tuples into the Bloom filter (for warm-up)
     pub async fn warm_bloom_filter(&self) -> Result<usize> {
-        let rows = sqlx::query(
-            r#"
+        let conn =
+            self.pool.get().await.map_err(|e| {
+                AuthzError::DatabaseError(format!("Failed to acquire connection: {e}"))
+            })?;
+        let rows = conn
+            .query(
+                r#"
             SELECT namespace, object_id, relation, subject_type, subject_id, subject_relation
             FROM authz_relation_tuples
             "#,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| AuthzError::DatabaseError(format!("Failed to load tuples: {}", e)))?;
+                &[],
+            )
+            .await
+            .map_err(|e| AuthzError::DatabaseError(format!("Failed to load tuples: {}", e)))?;
 
+        // `row_to_tuple` applies the same parse-and-skip-malformed-userset logic
+        // used elsewhere, returning `None` for rows that should be ignored.
         let mut count = 0;
-        for row in rows {
-            let namespace: String = row.get("namespace");
-            let object_id: String = row.get("object_id");
-            let relation: String = row.get("relation");
-            let subject_type: String = row.get("subject_type");
-            let subject_id: String = row.get("subject_id");
-            let subject_relation: Option<String> = row.get("subject_relation");
-
-            let subject = if subject_type == "user" {
-                Subject::User(subject_id)
-            } else {
-                let parts: Vec<&str> = subject_id.split(':').collect();
-                if parts.len() == 2 {
-                    Subject::UserSet {
-                        namespace: parts[0].to_string(),
-                        object_id: parts[1].to_string(),
-                        relation: subject_relation.unwrap_or_default(),
-                    }
-                } else {
-                    continue;
-                }
-            };
-
-            let tuple = RelationTuple::new(&namespace, &relation, &object_id, subject);
+        for tuple in rows.iter().filter_map(Self::row_to_tuple) {
             self.bloom_filter.add_tuple(&tuple);
             count += 1;
         }
@@ -638,7 +766,7 @@ impl AuthzEngine {
     /// Returns `None` when the row contains a malformed userset entry that
     /// should be silently skipped (mirrors the `continue` pattern used in
     /// `warm_bloom_filter`).
-    fn row_to_tuple(row: &sqlx::sqlite::SqliteRow) -> Option<RelationTuple> {
+    fn row_to_tuple(row: &Row) -> Option<RelationTuple> {
         let namespace: String = row
             .try_get("namespace")
             .map_err(|e| {
@@ -719,19 +847,28 @@ impl AuthzEngine {
             ),
         };
 
-        let rows = sqlx::query(
-            r#"
+        // Bind order: $1 subject_type, $2 subject_id.
+        let conn =
+            self.pool.get().await.map_err(|e| {
+                AuthzError::DatabaseError(format!("Failed to acquire connection: {e}"))
+            })?;
+        let rows = conn
+            .query(
+                r#"
             SELECT namespace, object_id, relation, subject_type, subject_id, subject_relation
             FROM authz_relation_tuples
-            WHERE subject_type = ?
-              AND subject_id = ?
+            WHERE subject_type = $1
+              AND subject_id = $2
             "#,
-        )
-        .bind(&subject_type)
-        .bind(&subject_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| AuthzError::DatabaseError(format!("Failed to list subject tuples: {}", e)))?;
+                &[
+                    &subject_type, // $1
+                    &subject_id,   // $2
+                ],
+            )
+            .await
+            .map_err(|e| {
+                AuthzError::DatabaseError(format!("Failed to list subject tuples: {}", e))
+            })?;
 
         Ok(rows.iter().filter_map(Self::row_to_tuple).collect())
     }
@@ -746,19 +883,28 @@ impl AuthzEngine {
         namespace: &str,
         object_id: &str,
     ) -> Result<Vec<RelationTuple>> {
-        let rows = sqlx::query(
-            r#"
+        // Bind order: $1 namespace, $2 object_id.
+        let conn =
+            self.pool.get().await.map_err(|e| {
+                AuthzError::DatabaseError(format!("Failed to acquire connection: {e}"))
+            })?;
+        let rows = conn
+            .query(
+                r#"
             SELECT namespace, object_id, relation, subject_type, subject_id, subject_relation
             FROM authz_relation_tuples
-            WHERE namespace = ?
-              AND object_id = ?
+            WHERE namespace = $1
+              AND object_id = $2
             "#,
-        )
-        .bind(namespace)
-        .bind(object_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| AuthzError::DatabaseError(format!("Failed to list object tuples: {}", e)))?;
+                &[
+                    &namespace, // $1
+                    &object_id, // $2
+                ],
+            )
+            .await
+            .map_err(|e| {
+                AuthzError::DatabaseError(format!("Failed to list object tuples: {}", e))
+            })?;
 
         Ok(rows.iter().filter_map(Self::row_to_tuple).collect())
     }
@@ -773,20 +919,30 @@ impl AuthzEngine {
         namespace: &str,
         limit: usize,
     ) -> Result<Vec<RelationTuple>> {
-        let rows = sqlx::query(
+        // Bind order: $1 namespace. `limit` is an internal integer inlined as a
+        // SQL literal rather than passed as a second bound parameter: the
+        // pure-Rust SQLite (Limbo) backend mishandles a query that has a bound
+        // LIMIT *together with* another bound parameter elsewhere (verified
+        // empirically — a lone bound LIMIT works fine, but combining it with a
+        // WHERE-clause parameter such as $1 above silently returns zero rows).
+        // Inlining a value that is always an internal `i64`/`usize` (never
+        // untrusted input) sidesteps the interaction entirely and is
+        // injection-safe.
+        let limit = limit as i64;
+        let conn =
+            self.pool.get().await.map_err(|e| {
+                AuthzError::DatabaseError(format!("Failed to acquire connection: {e}"))
+            })?;
+        let sql = format!(
             r#"
             SELECT namespace, object_id, relation, subject_type, subject_id, subject_relation
             FROM authz_relation_tuples
-            WHERE namespace = ?
+            WHERE namespace = $1
             ORDER BY id ASC
-            LIMIT ?
-            "#,
-        )
-        .bind(namespace)
-        .bind(limit as i64)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| {
+            LIMIT {limit}
+            "#
+        );
+        let rows = conn.query(&sql, &[&namespace]).await.map_err(|e| {
             AuthzError::DatabaseError(format!("Failed to list namespace tuples: {}", e))
         })?;
 
@@ -799,21 +955,35 @@ impl AuthzEngine {
     /// default) to find tuples created within the last `days` days.  Results
     /// are ordered newest-first and capped at `limit` rows.
     pub async fn list_recent_tuples(&self, days: u32, limit: usize) -> Result<Vec<RelationTuple>> {
+        // Bind order: $1 cutoff modifier (used inside datetime('now', $1)).
+        // `limit` is inlined as a SQL literal rather than bound as $2: the
+        // pure-Rust SQLite (Limbo) backend mishandles a bound LIMIT combined
+        // with another bound parameter in the same query — verified
+        // empirically, this specific shape (`datetime('now', $1) ... LIMIT
+        // $2`) does not merely return wrong rows but panics inside the VDBE
+        // interpreter (`unreachable code: DecrJumpZero on non-integer
+        // register`). A lone bound LIMIT (no other params) is unaffected.
+        // Inlining a value that is always an internal `u32`/`usize` (never
+        // untrusted input) sidesteps the interaction entirely and is
+        // injection-safe.
         let cutoff = format!("-{} days", days);
-        let rows = sqlx::query(
+        let limit = limit as i64;
+        let conn =
+            self.pool.get().await.map_err(|e| {
+                AuthzError::DatabaseError(format!("Failed to acquire connection: {e}"))
+            })?;
+        let sql = format!(
             r#"
             SELECT namespace, object_id, relation, subject_type, subject_id, subject_relation
             FROM authz_relation_tuples
-            WHERE created_at >= datetime('now', ?)
+            WHERE created_at >= datetime('now', $1)
             ORDER BY created_at DESC
-            LIMIT ?
-            "#,
-        )
-        .bind(&cutoff)
-        .bind(limit as i64)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| AuthzError::DatabaseError(format!("Failed to list recent tuples: {}", e)))?;
+            LIMIT {limit}
+            "#
+        );
+        let rows = conn.query(&sql, &[&cutoff]).await.map_err(|e| {
+            AuthzError::DatabaseError(format!("Failed to list recent tuples: {}", e))
+        })?;
 
         Ok(rows.iter().filter_map(Self::row_to_tuple).collect())
     }
@@ -832,16 +1002,93 @@ mod tests {
         engine
     }
 
+    /// An in-memory database MUST be served from a single-connection pool:
+    /// the Limbo backend gives every additional pool slot its own
+    /// independent, empty database (no shared state between slots), so a
+    /// pool size > 1 would silently corrupt authorization state as soon as
+    /// two connections were checked out concurrently. See `MEMORY_POOL_SIZE`.
     #[tokio::test]
-    #[ignore] // Requires database
-    async fn test_basic_authorization() {
-        let database_url =
-            std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite::memory:".to_string());
+    async fn test_memory_url_forces_single_connection_pool() {
+        for url in ["sqlite::memory:", "sqlite://:memory:", ":memory:"] {
+            let engine = AuthzEngine::new(url)
+                .await
+                .unwrap_or_else(|e| panic!("Failed to create in-memory engine for {url}: {e}"));
+            assert_eq!(
+                engine.pool.max_size(),
+                MEMORY_POOL_SIZE,
+                "in-memory SQLite pool for {url} must be capped at exactly \
+                 {MEMORY_POOL_SIZE} connection(s) to avoid split-brain state"
+            );
+        }
+    }
 
-        let engine = AuthzEngine::new(&database_url)
+    /// File-backed SQLite does not suffer the in-memory isolation problem —
+    /// every connection re-opens the same file — so it should keep the
+    /// larger, concurrency-friendly pool size.
+    #[tokio::test]
+    async fn test_file_url_uses_multi_connection_pool() {
+        let path =
+            std::env::temp_dir().join(format!("oxify_authz_pool_test_{}.db", uuid::Uuid::new_v4()));
+        let url = format!("sqlite:{}", path.display());
+
+        let engine = AuthzEngine::new(&url)
             .await
-            .expect("Failed to create engine");
-        engine.migrate().await.expect("Migration failed");
+            .expect("Failed to create file-backed engine");
+        assert_eq!(
+            engine.pool.max_size(),
+            FILE_POOL_SIZE,
+            "file-backed SQLite pool should retain the multi-connection size"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// End-to-end proof that the single-connection cap actually preserves
+    /// consistency under concurrency: many `write_tuple` calls are fired
+    /// concurrently at a `:memory:` engine, then a subsequent read must see
+    /// every one of them. Before the `MEMORY_POOL_SIZE` fix this was only
+    /// accidentally true for strictly sequential access; a multi-threaded
+    /// runtime with real concurrent checkouts would otherwise be able to
+    /// split writes across independent, invisible in-memory databases.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn test_concurrent_writes_are_all_visible_on_memory_engine() {
+        let engine = Arc::new(make_engine().await);
+
+        let mut handles = Vec::new();
+        for i in 0..25 {
+            let engine = Arc::clone(&engine);
+            handles.push(tokio::spawn(async move {
+                engine
+                    .write_tuple(RelationTuple::new(
+                        "document",
+                        "viewer",
+                        "concurrent_doc",
+                        Subject::User(format!("user{i}")),
+                    ))
+                    .await
+                    .expect("concurrent write_tuple failed");
+            }));
+        }
+        for handle in handles {
+            handle.await.expect("writer task panicked");
+        }
+
+        let tuples = engine
+            .list_object_tuples("document", "concurrent_doc")
+            .await
+            .expect("list_object_tuples failed");
+        assert_eq!(
+            tuples.len(),
+            25,
+            "all 25 concurrently-written tuples must be visible from a single \
+             shared in-memory database"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_basic_authorization() {
+        // Deterministic fresh in-memory engine with the schema applied.
+        let engine = make_engine().await;
 
         // Write: alice owns document:123
         engine
@@ -854,7 +1101,8 @@ mod tests {
             .await
             .expect("write_tuple failed");
 
-        // Check: alice can view (owner inherits viewer)
+        // Check: alice can view (viewer inherits from owner via the namespace
+        // config), exercising the recursive permission path end to end.
         let response = engine
             .check(CheckRequest {
                 namespace: "document".to_string(),
@@ -867,6 +1115,20 @@ mod tests {
             .expect("check failed");
 
         assert!(response.allowed);
+
+        // Negative control: bob has no tuples, so he must be denied.
+        let denied = engine
+            .check(CheckRequest {
+                namespace: "document".to_string(),
+                object_id: "123".to_string(),
+                relation: "viewer".to_string(),
+                subject: Subject::User("bob".to_string()),
+                context: None,
+            })
+            .await
+            .expect("check failed");
+
+        assert!(!denied.allowed);
     }
 
     #[tokio::test]

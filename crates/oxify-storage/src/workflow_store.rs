@@ -528,10 +528,16 @@ mod tests {
     use oxify_model::{Node, NodeKind};
 
     async fn setup_test_pool() -> Result<DatabasePool> {
+        // `:memory:` SQLite databases are per-connection in oxisql's pool (each
+        // pool slot opens its own isolated in-memory database, with no shared
+        // state between slots), so the pool is pinned to a single connection
+        // here to guarantee that the schema applied by `migrate()` is visible to
+        // every subsequent `pool.acquire()` call made by the store in this test.
         let config = crate::DatabaseConfig {
             database_url: std::env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite::memory:".to_string()),
-            ..Default::default()
+            max_connections: 1,
+            min_connections: 1,
         };
         DatabasePool::new(config).await
     }

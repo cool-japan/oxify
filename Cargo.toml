@@ -69,8 +69,10 @@ async-graphql = { version = "7.2", features = ["chrono"] }
 async-graphql-axum = "7.2"
 
 # LLM & Vector DB clients
-reqwest = { version = "0.13.4", features = ["json", "stream", "form", "query"] }
-# COOLJAPAN pure-Rust HTTP client (OxiHTTP) — migration target replacing reqwest.
+# COOLJAPAN pure-Rust HTTP client (OxiHTTP) — the reqwest replacement for all
+# first-party HTTP. reqwest is no longer a direct dependency of any oxify crate;
+# it survives only transitively inside third-party crates outside the noffi scope
+# (opentelemetry-otlp's HTTP exporter, oauth2, qdrant-client).
 # NOTE: 0.2.1 was requested but is NOT published on crates.io; 0.2.0 is the latest
 # published release (verified via `cargo add --dry-run`), and matches oxitls' pin.
 oxihttp = { version = "0.2.0", default-features = false, features = ["client", "tls", "decompression"] }

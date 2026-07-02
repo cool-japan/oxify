@@ -1,5 +1,14 @@
 # OxiFY - Development TODO
 
+## Known Issues
+
+- [ ] **`oxify-engine` does not compile under `--features wasm`** (`crates/oxify-engine/src/plugin_wasm.rs:361`) — pre-existing, unrelated to the COOLJAPAN/noffi dependency migration.
+  - **Symptom:** `cargo build -p oxify-engine --features wasm` fails with ~20 `E0277` errors: *"future cannot be sent between threads safely"*. `WasmNodePlugin::execute(&self, …)` returns a `Pin<Box<dyn Future + Send>>` (required by the `NodePlugin` trait), but the future captures `&self`, which is only `Send` when `WasmNodePlugin: Sync`. It is **not** `Sync`: wasmer 7.1's VM internals (`UnsafeCell<VMCallerCheckedAnyfunc>`, raw `*mut c_void` function pointers reachable through the embedded `Store`) are neither `Send` nor `Sync`. Wrapping the context in `std::sync::Mutex<WasmContext>` makes the *struct* `Send` but does not make it `Sync`, so the `&self`-capturing future still fails the `Send` bound.
+  - **Note on the v0.2.10 changelog:** the "Plugin WASM activation" entry below claims the adapter yields a `Send` future ("wasmer 7.1 `Store: Send+Sync`"). That assumption does not hold for the resolved wasmer 7.1 — the `--features wasm` build is currently broken. The default (non-`wasm`) build and its 326 tests are unaffected; this only blocks the optional `wasm` feature and therefore any `--all-features` build of the workspace.
+  - **Priority:** P2 | **Scope:** medium | **Cross-project:** wasmer
+  - **Approach:** Give `NodePlugin` a non-`Send` execution path for VM-backed plugins (e.g. run the wasmer call on a dedicated single-thread executor / `LocalSet` and hand back results over a channel, so the `async fn execute` future never captures the `!Sync` VM state), or hold the wasmer `Store`/`Instance` behind a thread-affine actor. Do **not** paper over it with an `unsafe impl Sync` — the VM pointers are genuinely not thread-safe.
+  - **Risk:** touching the plugin execution boundary affects all node-plugin dispatch; keep the default-feature path byte-for-byte unchanged and gate the fix behind the `wasm` feature.
+
 ## Stubs to implement (added 2026-06-12 by /cooljapan-stub-check)
 
 - [ ] `oxify-api`: `crates/oxify-api/src/checkpoint_handlers.rs:162` — implement checkpoint resume: restore ExecutionContext, mark completed nodes, re-run from checkpoint

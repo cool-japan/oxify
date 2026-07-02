@@ -23,15 +23,17 @@ oxihttp = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 
-# Database support (optional)
-sqlx = { workspace = true, optional = true }
+# Database support (optional) — Pure-Rust OxiSQL stack (replaces sqlx)
+oxisql-core = { workspace = true, optional = true }
+oxisql-sqlite-compat = { workspace = true, optional = true }
+oxisql-pool = { workspace = true, optional = true }
 
 # GitHub API support (optional)
 octocrab = { workspace = true, optional = true }
 
 [features]
 default = []
-database = ["sqlx"]
+database = ["dep:oxisql-core", "dep:oxisql-sqlite-compat", "dep:oxisql-pool"]
 github = ["octocrab"]
 github-actions = []
 gitlab = []

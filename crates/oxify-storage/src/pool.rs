@@ -452,4 +452,85 @@ mod tests {
         assert_eq!(database_url_to_path("oxify.db"), "oxify.db");
         assert_eq!(database_url_to_path("sqlite:"), ":memory:");
     }
+
+    /// MANDATORY MIGRATION-COUNT GATE.
+    ///
+    /// Opens a fresh in-memory oxisql pool and runs the *entire* on-disk
+    /// `migrations/` directory through the runner, asserting that the number of
+    /// migrations actually recognized + applied equals the number of migration
+    /// `.sql` files present on disk.
+    ///
+    /// This guards against the oxisql-migrate filename landmine: files whose
+    /// names do not match the exact `<14-digit-timestamp>__<name>.sql` pattern
+    /// are *silently skipped* by the scanner (no error, no panic), which would
+    /// leave the applied count below the file count. If this assertion ever
+    /// fails with `applied < files`, a migration filename has drifted from the
+    /// required pattern and must be corrected -- do NOT lower the expectation to
+    /// match the wrong count.
+    ///
+    /// It doubles as an end-to-end check that every migration's SQL actually
+    /// executes against the SQLite (Limbo) backend: an unresolved
+    /// column/table reference aborts the run and fails this test loudly.
+    #[tokio::test]
+    async fn migration_count_gate_applies_every_file() -> Result<()> {
+        // Pin to a single connection: oxisql opens an independent `:memory:`
+        // database per pool slot, so one connection guarantees the runner and
+        // every subsequent acquire observe the same underlying database.
+        let config = DatabaseConfig {
+            database_url: ":memory:".to_string(),
+            max_connections: 1,
+            min_connections: 1,
+        };
+        let pool = DatabasePool::new(config).await?;
+
+        // Count migration files actually on disk. The directory is resolved
+        // absolutely (via `CARGO_MANIFEST_DIR`) so the test does not depend on
+        // the process working directory. Down-migration companions
+        // (`*.down.sql`) are not separate migrations and are excluded.
+        let migrations_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        let mut file_count = 0usize;
+        for entry in std::fs::read_dir(&migrations_dir)
+            .map_err(|e| StorageError::Migration(format!("read_dir {migrations_dir:?}: {e}")))?
+        {
+            let entry = entry.map_err(|e| StorageError::Migration(format!("dir entry: {e}")))?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.ends_with(".sql") && !name.ends_with(".down.sql") {
+                file_count += 1;
+            }
+        }
+        assert_eq!(
+            file_count, 12,
+            "expected 12 migration files on disk; update this guard only when \
+             migrations are deliberately added or removed"
+        );
+
+        let conn = pool.acquire().await?;
+        let mut runner = oxisql_migrate::runner::MigrationRunner::new(&migrations_dir);
+        let applied = runner
+            .run_with_conn(&*conn)
+            .await
+            .map_err(|e| StorageError::Migration(e.to_string()))?;
+        assert_eq!(
+            applied, file_count,
+            "migration runner applied {applied} migrations but {file_count} \
+             migration files exist on disk -- a filename likely drifted from the \
+             required `<14-digit-timestamp>__<name>.sql` pattern and was silently \
+             skipped by the scanner"
+        );
+
+        // Re-running against the same database must be a no-op: every version is
+        // now recorded in the `_oxisql_migrations` tracker, so zero are applied.
+        let reapplied = runner
+            .run_with_conn(&*conn)
+            .await
+            .map_err(|e| StorageError::Migration(e.to_string()))?;
+        assert_eq!(
+            reapplied, 0,
+            "re-running the migration set must be idempotent (tracker should \
+             report every migration already applied)"
+        );
+
+        Ok(())
+    }
 }

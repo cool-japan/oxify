@@ -122,13 +122,17 @@ impl HybridRebacEngine {
     }
 
     /// Create a memory-focused engine for testing
-    /// Note: Still requires a database connection, but won't sync writes to PostgreSQL
+    ///
+    /// Still requires a working SQLite connection (the durable layer is always
+    /// present), but writes are never synced to it, so an ephemeral in-memory
+    /// database is sufficient — no external infrastructure is required. Set
+    /// `DATABASE_URL` to override with a file-backed SQLite path if needed.
     pub async fn for_testing() -> Result<Self> {
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://postgres:postgres@localhost/oxify_test".to_string());
+        let database_url =
+            std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite::memory:".to_string());
 
         let mut engine = Self::new(&database_url).await?;
-        engine.set_sync_to_postgres(false); // Don't sync writes to PostgreSQL in tests
+        engine.set_sync_to_postgres(false); // Don't sync writes to the durable store in tests
         Ok(engine)
     }
 
@@ -809,10 +813,11 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore] // Requires PostgreSQL
     async fn test_hybrid_write_and_check() {
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://postgres:postgres@localhost/oxify_test".to_string());
+        // In-memory SQLite durable layer — no external database required.
+        // Override with `DATABASE_URL` to exercise a real file-backed store.
+        let database_url =
+            std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite::memory:".to_string());
 
         let engine = HybridRebacEngine::new(&database_url).await.unwrap();
         engine.migrate().await.unwrap();
@@ -839,19 +844,20 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires PostgreSQL even for memory-only mode
     async fn test_hybrid_memory_only() {
-        // Create memory-only engine (no PostgreSQL sync)
+        // Create memory-only engine (no durable-store sync). The durable
+        // layer still must construct successfully, so an ephemeral in-memory
+        // SQLite database is used — no external database required.
         let memory = Arc::new(InMemoryRebacManager::new());
 
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://postgres:postgres@localhost/oxify_test".to_string());
+        let database_url =
+            std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite::memory:".to_string());
         let postgres = Arc::new(AuthzEngine::new(&database_url).await.unwrap());
 
         let cache = Arc::new(Cache::builder().max_capacity(1000).build());
 
         let mut engine = HybridRebacEngine::with_components(memory, postgres, cache);
-        engine.set_sync_to_postgres(false); // Disable PostgreSQL sync
+        engine.set_sync_to_postgres(false); // Disable durable-store sync
 
         // Write a tuple (only to memory)
         let tuple = RelationTuple::new(
@@ -880,7 +886,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires PostgreSQL
     async fn test_batch_check() {
         let memory = Arc::new(InMemoryRebacManager::new());
         let cache = Arc::new(Cache::builder().max_capacity(1000).build());
@@ -905,10 +910,14 @@ mod tests {
             .await
             .unwrap();
 
-        // Create hybrid engine
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://postgres:postgres@localhost/oxify_test".to_string());
+        // Create hybrid engine backed by an ephemeral in-memory SQLite
+        // database — no external database required. The negative check below
+        // (doc3, never written anywhere) falls through past the memory layer
+        // to the durable store, so its schema must exist first.
+        let database_url =
+            std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite::memory:".to_string());
         let postgres = Arc::new(AuthzEngine::new(&database_url).await.unwrap());
+        postgres.migrate().await.unwrap();
 
         let engine = HybridRebacEngine::with_components(memory, postgres, cache);
 
