@@ -2,6 +2,7 @@
 name = "oxify-ui"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Web UI for OxiFY - Rust + Axum + Askama + HTMX"
@@ -40,7 +41,7 @@ futures = { workspace = true }
 tokio-stream = { workspace = true }
 
 # HTTP client
-reqwest = { workspace = true, features = ["json", "stream"] }
+oxihttp = { workspace = true }
 bytes = { workspace = true }
 
 # Utilities

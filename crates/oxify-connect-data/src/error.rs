@@ -27,8 +27,8 @@ pub enum DataError {
     Unsupported(String),
 }
 
-impl From<reqwest::Error> for DataError {
-    fn from(e: reqwest::Error) -> Self {
+impl From<oxihttp::OxiHttpError> for DataError {
+    fn from(e: oxihttp::OxiHttpError) -> Self {
         DataError::Http(e.to_string())
     }
 }

@@ -23,7 +23,7 @@ pub trait Reranker: Send + Sync {
 
 /// Cohere reranking provider
 pub struct CohereReranker {
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     api_key: String,
     model: String,
 }
@@ -58,7 +58,10 @@ impl CohereReranker {
     /// * `model` - Model name (e.g., "rerank-english-v3.0", "rerank-multilingual-v3.0")
     pub fn new(api_key: String, model: Option<String>) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: oxihttp::Client::builder()
+                .with_tls()
+                .build_https()
+                .expect("failed to build oxihttp HTTPS client for Cohere reranker"),
             api_key,
             model: model.unwrap_or_else(|| "rerank-english-v3.0".to_string()),
         }
@@ -106,16 +109,19 @@ impl Reranker for CohereReranker {
         let response = self
             .client
             .post("https://api.cohere.ai/v1/rerank")
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&request)
+            .and_then(|builder| {
+                builder.header("Authorization", &format!("Bearer {}", self.api_key))
+            })
+            .and_then(|builder| builder.header("Content-Type", "application/json"))
+            .and_then(|builder| builder.json(&request))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         let status = response.status();
         let body = response
-            .text()
+            .body_text()
             .await
             .map_err(|e| VectorError::QueryError(e.to_string()))?;
 

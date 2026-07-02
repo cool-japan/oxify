@@ -50,8 +50,8 @@
 //! ```
 
 use crate::{DatabasePool, Result};
+use oxisql_core::{Connection, OxiSqlError, Row, ToSqlValue};
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -190,7 +190,7 @@ impl HealthCheck {
     /// This is suitable for Kubernetes liveness probes.
     /// It only checks if the database connection works.
     pub async fn is_alive(&self) -> Result<bool> {
-        let result = sqlx::query("SELECT 1").fetch_one(self.pool.pool()).await;
+        let result = self.fetch_one_row("SELECT 1", &[]).await;
 
         Ok(result.is_ok())
     }
@@ -287,13 +287,39 @@ impl HealthCheck {
         Ok(metrics)
     }
 
+    // Query helpers
+    //
+    // OxiSQL's `Connection` trait (unlike `sqlx::Pool`) does not run a query
+    // directly; a connection must be checked out from the pool first via
+    // `DatabasePool::acquire`, then `Connection::query` is called on it. These
+    // helpers centralise that acquire+query+error-propagation boilerplate so
+    // each check below reads the same as its old `sqlx::query(..).fetch_one(..)`
+    // / `.fetch_all(..)` counterpart.
+
+    /// Acquire a connection and run `sql`, returning all result rows.
+    async fn fetch_rows(&self, sql: &str, params: &[&dyn ToSqlValue]) -> Result<Vec<Row>> {
+        let conn = self.pool.acquire().await?;
+        let rows = conn.query(sql, params).await?;
+        Ok(rows)
+    }
+
+    /// Acquire a connection and run `sql`, returning the first result row.
+    ///
+    /// Mirrors `sqlx`'s `fetch_one`: fails with [`OxiSqlError::Other`] if the
+    /// query produces no rows.
+    async fn fetch_one_row(&self, sql: &str, params: &[&dyn ToSqlValue]) -> Result<Row> {
+        let mut rows = self.fetch_rows(sql, params).await?;
+        if rows.is_empty() {
+            return Err(OxiSqlError::Other("query returned no rows".to_string()).into());
+        }
+        Ok(rows.remove(0))
+    }
+
     // Individual health checks
 
     async fn check_database_connectivity(&self) -> ComponentHealth {
         let start = Instant::now();
-        let result = sqlx::query("SELECT version()")
-            .fetch_one(self.pool.pool())
-            .await;
+        let result = self.fetch_one_row("SELECT version()", &[]).await;
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -369,20 +395,20 @@ impl HealthCheck {
         let mut missing_tables = Vec::new();
 
         for table in &self.config.required_tables {
-            let result = sqlx::query(
-                "SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_schema = 'public' AND table_name = $1
-                )",
-            )
-            .bind(table)
-            .fetch_one(self.pool.pool())
-            .await;
+            // NOTE: this used to query `information_schema.tables WHERE
+            // table_schema = 'public'`, which is Postgres-only syntax that
+            // always fails against the SQLite backend this crate actually
+            // runs on. Query SQLite's own system catalog instead.
+            let result = self
+                .fetch_rows(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = $1",
+                    &[table],
+                )
+                .await;
 
             match result {
-                Ok(row) => {
-                    let exists: bool = row.get(0);
-                    if !exists {
+                Ok(rows) => {
+                    if rows.is_empty() {
                         missing_tables.push(table.clone());
                     }
                 }
@@ -420,19 +446,24 @@ impl HealthCheck {
         let start = Instant::now();
 
         // Check if we're on a replica
-        let result = sqlx::query(
-            "SELECT CASE WHEN pg_is_in_recovery() THEN
-                EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp()))::bigint
-             ELSE 0 END as lag_seconds",
-        )
-        .fetch_one(self.pool.pool())
+        let result: Result<i64> = async {
+            let row = self
+                .fetch_one_row(
+                    "SELECT CASE WHEN pg_is_in_recovery() THEN
+                        EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp()))::bigint
+                     ELSE 0 END as lag_seconds",
+                    &[],
+                )
+                .await?;
+            let lag_secs: i64 = row.try_get("lag_seconds")?;
+            Ok(lag_secs)
+        }
         .await;
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
         match result {
-            Ok(row) => {
-                let lag_secs: i64 = row.get("lag_seconds");
+            Ok(lag_secs) => {
                 let mut metadata = HashMap::new();
                 metadata.insert("lag_seconds".to_string(), lag_secs.to_string());
 
@@ -474,21 +505,25 @@ impl HealthCheck {
     async fn check_disk_space(&self) -> ComponentHealth {
         let start = Instant::now();
 
-        let result = sqlx::query(
-            "SELECT
-                pg_database_size(current_database()) as db_size,
-                pg_size_pretty(pg_database_size(current_database())) as db_size_pretty",
-        )
-        .fetch_one(self.pool.pool())
+        let result: Result<(i64, String)> = async {
+            let row = self
+                .fetch_one_row(
+                    "SELECT
+                        pg_database_size(current_database()) as db_size,
+                        pg_size_pretty(pg_database_size(current_database())) as db_size_pretty",
+                    &[],
+                )
+                .await?;
+            let db_size: i64 = row.try_get("db_size")?;
+            let db_size_pretty: String = row.try_get("db_size_pretty")?;
+            Ok((db_size, db_size_pretty))
+        }
         .await;
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
         match result {
-            Ok(row) => {
-                let db_size: i64 = row.get("db_size");
-                let db_size_pretty: String = row.get("db_size_pretty");
-
+            Ok((db_size, db_size_pretty)) => {
                 let mut metadata = HashMap::new();
                 metadata.insert("database_size".to_string(), db_size_pretty.clone());
                 metadata.insert("database_size_bytes".to_string(), db_size.to_string());

@@ -70,20 +70,21 @@ impl DiscordConfig {
 // ---------------------------------------------------------------------------
 
 /// Discord communication provider that uses the Discord REST API directly via
-/// `reqwest`.  No third-party Discord SDK is required.
+/// `oxihttp`.  No third-party Discord SDK is required.
 ///
 /// All requests are authenticated with a Bot token supplied in the
 /// `Authorization: Bot <token>` header as required by the Discord API.
 pub struct DiscordProvider {
     cfg: DiscordConfig,
-    http: reqwest::Client,
+    http: oxihttp::HttpsClient,
 }
 
 impl DiscordProvider {
     /// Create a new `DiscordProvider` from the supplied configuration.
     pub fn new(cfg: DiscordConfig) -> Result<Self> {
-        let http = reqwest::Client::builder()
-            .build()
+        let http = oxihttp::Client::builder()
+            .with_tls()
+            .build_https()
             .map_err(|e| CommError::Http(format!("failed to build HTTP client: {e}")))?;
 
         Ok(Self { cfg, http })
@@ -180,24 +181,24 @@ impl super::MessageProvider for DiscordProvider {
 
                 let dm_response = self
                     .http
-                    .post(&dm_url)
-                    .header("Authorization", self.auth_header())
+                    .post(&dm_url)?
+                    .header("Authorization", &self.auth_header())?
                     .json(&CreateDmBody {
                         recipient_id: user_id,
-                    })
+                    })?
                     .send()
                     .await
                     .map_err(|e| CommError::Http(e.to_string()))?;
 
                 let dm_status = dm_response.status();
                 if !dm_status.is_success() {
-                    let body_text = dm_response.text().await.unwrap_or_default();
+                    let body_text = dm_response.body_text().await.unwrap_or_default();
                     return Err(CommError::Http(format!(
                         "Discord API {dm_status}: {body_text}"
                     )));
                 }
 
-                let dm_channel: DiscordDmChannel = dm_response.json().await.map_err(|e| {
+                let dm_channel: DiscordDmChannel = dm_response.body_json().await.map_err(|e| {
                     CommError::Serialization(format!("deserialize DM channel response: {e}"))
                 })?;
 
@@ -216,22 +217,22 @@ impl super::MessageProvider for DiscordProvider {
 
         let response = self
             .http
-            .post(&url)
-            .header("Authorization", self.auth_header())
-            .json(&SendMessageBody { content: &content })
+            .post(&url)?
+            .header("Authorization", &self.auth_header())?
+            .json(&SendMessageBody { content: &content })?
             .send()
             .await
             .map_err(|e| CommError::Http(e.to_string()))?;
 
         let status = response.status();
         if !status.is_success() {
-            let body_text = response.text().await.unwrap_or_default();
+            let body_text = response.body_text().await.unwrap_or_default();
             return Err(CommError::Http(format!(
                 "Discord API {status}: {body_text}"
             )));
         }
 
-        let discord_msg: DiscordMessage = response.json().await.map_err(|e| {
+        let discord_msg: DiscordMessage = response.body_json().await.map_err(|e| {
             CommError::Serialization(format!("deserialize Discord message response: {e}"))
         })?;
 
@@ -252,21 +253,21 @@ impl super::MessageProvider for DiscordProvider {
 
         let response = self
             .http
-            .get(&url)
-            .header("Authorization", self.auth_header())
+            .get(&url)?
+            .header("Authorization", &self.auth_header())?
             .send()
             .await
             .map_err(|e| CommError::Http(format!("GET guilds/{guild_id}/channels failed: {e}")))?;
 
         let status = response.status();
         if !status.is_success() {
-            let body_text = response.text().await.unwrap_or_default();
+            let body_text = response.body_text().await.unwrap_or_default();
             return Err(CommError::Http(format!(
                 "Discord API {status}: {body_text}"
             )));
         }
 
-        let discord_channels: Vec<DiscordChannel> = response.json().await.map_err(|e| {
+        let discord_channels: Vec<DiscordChannel> = response.body_json().await.map_err(|e| {
             CommError::Serialization(format!("deserialize guilds/{guild_id}/channels: {e}"))
         })?;
 

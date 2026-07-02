@@ -14,11 +14,9 @@
 //! 5. `signature = hex(HMAC(signing_key, string_to_sign))`
 //! 6. `Authorization = "AWS4-HMAC-SHA256 Credential={ak}/{scope}, SignedHeaders={headers}, Signature={signature}"`
 
-use hmac::{digest::KeyInit, Hmac, Mac};
-use sha2::{Digest, Sha256};
+use oxicrypto_hash::Sha256;
+use oxicrypto_mac::hmac_sha256_to_vec;
 use std::collections::HashMap;
-
-type HmacSha256 = Hmac<Sha256>;
 
 // ---------------------------------------------------------------------------
 // AwsCredentials
@@ -84,15 +82,12 @@ impl AwsCredentials {
 
 /// Compute `hex(sha256(data))`.
 fn hex_sha256(data: &[u8]) -> String {
-    let digest = Sha256::digest(data);
-    hex::encode(digest)
+    hex::encode(Sha256.hash_fixed(data))
 }
 
 /// Compute `HMAC-SHA256(key_bytes, data)` and return the raw bytes.
 fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
-    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC-SHA256 accepts any key length");
-    mac.update(data);
-    mac.finalize().into_bytes().to_vec()
+    hmac_sha256_to_vec(key, data).expect("HMAC-SHA256 accepts any key length")
 }
 
 /// Derive the SigV4 signing key from credentials and scope components.

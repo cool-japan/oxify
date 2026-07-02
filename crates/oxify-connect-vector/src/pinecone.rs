@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// Pinecone vector database provider
 pub struct PineconeProvider {
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     api_key: String,
     environment: String,
     index_name: String,
@@ -91,7 +91,10 @@ impl PineconeProvider {
     /// Create a new Pinecone provider
     pub fn new(api_key: String, environment: String, index_name: String) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: oxihttp::Client::builder()
+                .with_tls()
+                .build_https()
+                .expect("failed to build oxihttp HTTPS client for Pinecone"),
             api_key,
             environment,
             index_name,
@@ -122,17 +125,18 @@ impl VectorProvider for PineconeProvider {
 
         let response = self
             .client
-            .post(format!("{}/query", self.get_index_url()))
-            .header("Api-Key", &self.api_key)
-            .header("Content-Type", "application/json")
-            .json(&query)
+            .post(&format!("{}/query", self.get_index_url()))
+            .and_then(|request| request.header("Api-Key", &self.api_key))
+            .and_then(|request| request.header("Content-Type", "application/json"))
+            .and_then(|request| request.json(&query))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         let status = response.status();
         let body = response
-            .text()
+            .body_text()
             .await
             .map_err(|e| VectorError::QueryError(e.to_string()))?;
 
@@ -179,16 +183,17 @@ impl VectorProvider for PineconeProvider {
 
         let response = self
             .client
-            .post(format!("{}/vectors/upsert", self.get_index_url()))
-            .header("Api-Key", &self.api_key)
-            .header("Content-Type", "application/json")
-            .json(&upsert_request)
+            .post(&format!("{}/vectors/upsert", self.get_index_url()))
+            .and_then(|request| request.header("Api-Key", &self.api_key))
+            .and_then(|request| request.header("Content-Type", "application/json"))
+            .and_then(|request| request.json(&upsert_request))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         if !response.status().is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = response.body_text().await.unwrap_or_default();
             return Err(VectorError::DatabaseError(format!(
                 "Failed to insert: {}",
                 body
@@ -205,16 +210,17 @@ impl VectorProvider for PineconeProvider {
 
         let response = self
             .client
-            .post(format!("{}/vectors/delete", self.get_index_url()))
-            .header("Api-Key", &self.api_key)
-            .header("Content-Type", "application/json")
-            .json(&delete_request)
+            .post(&format!("{}/vectors/delete", self.get_index_url()))
+            .and_then(|request| request.header("Api-Key", &self.api_key))
+            .and_then(|request| request.header("Content-Type", "application/json"))
+            .and_then(|request| request.json(&delete_request))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         if !response.status().is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = response.body_text().await.unwrap_or_default();
             return Err(VectorError::DatabaseError(format!(
                 "Failed to delete: {}",
                 body
@@ -261,16 +267,17 @@ impl VectorProvider for PineconeProvider {
 
         let response = self
             .client
-            .post(format!("{}/vectors/upsert", self.get_index_url()))
-            .header("Api-Key", &self.api_key)
-            .header("Content-Type", "application/json")
-            .json(&upsert_request)
+            .post(&format!("{}/vectors/upsert", self.get_index_url()))
+            .and_then(|request| request.header("Api-Key", &self.api_key))
+            .and_then(|request| request.header("Content-Type", "application/json"))
+            .and_then(|request| request.json(&upsert_request))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         if !response.status().is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = response.body_text().await.unwrap_or_default();
             return Err(VectorError::DatabaseError(format!(
                 "Batch insert failed: {}",
                 body
@@ -289,11 +296,15 @@ impl VectorProvider for PineconeProvider {
 
         // For partial updates, we need to fetch the existing vector first
         if request.vector.is_none() || request.payload.is_none() {
+            let fetch_url = oxify_model::http_util::append_query_params(
+                &format!("{}/vectors/fetch", self.get_index_url()),
+                &[("ids", request.id.as_str())],
+            );
             let fetch_response = self
                 .client
-                .get(format!("{}/vectors/fetch", self.get_index_url()))
-                .header("Api-Key", &self.api_key)
-                .query(&[("ids", &request.id)])
+                .get(&fetch_url)
+                .and_then(|request| request.header("Api-Key", &self.api_key))
+                .map_err(|e| VectorError::ConnectionError(e.to_string()))?
                 .send()
                 .await
                 .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
@@ -306,7 +317,7 @@ impl VectorProvider for PineconeProvider {
             }
 
             let fetch_result: PineconeFetchResponse = fetch_response
-                .json()
+                .body_json()
                 .await
                 .map_err(|e| VectorError::QueryError(e.to_string()))?;
 
@@ -343,8 +354,9 @@ impl VectorProvider for PineconeProvider {
         // Get index stats
         let response = self
             .client
-            .get(format!("{}/describe_index_stats", self.get_index_url()))
-            .header("Api-Key", &self.api_key)
+            .get(&format!("{}/describe_index_stats", self.get_index_url()))
+            .and_then(|request| request.header("Api-Key", &self.api_key))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
@@ -357,7 +369,7 @@ impl VectorProvider for PineconeProvider {
         }
 
         let stats: PineconeIndexStats = response
-            .json()
+            .body_json()
             .await
             .map_err(|e| VectorError::QueryError(e.to_string()))?;
 

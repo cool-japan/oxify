@@ -13,6 +13,7 @@ use crate::{
     StreamingLlmProvider, Usage,
 };
 use async_trait::async_trait;
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
 // ===== Provider struct =====
@@ -24,7 +25,7 @@ use serde::{Deserialize, Serialize};
 pub struct ReplicateProvider {
     api_token: String,
     model: String,
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     /// Base URL — override for testing. Default: `https://api.replicate.com/v1`
     base_url: String,
     /// Milliseconds between polling attempts. Default: `250`
@@ -91,7 +92,10 @@ impl ReplicateProvider {
         Self {
             api_token,
             model,
-            client: reqwest::Client::new(),
+            client: oxihttp::Client::builder()
+                .with_tls()
+                .build_https()
+                .expect("failed to build oxihttp HTTPS client for Replicate"),
             base_url: "https://api.replicate.com/v1".to_string(),
             poll_interval_ms: 250,
             max_poll_attempts: 240,
@@ -158,11 +162,11 @@ impl ReplicateProvider {
         for attempt in 0..self.max_poll_attempts {
             let resp = self
                 .client
-                .get(get_url)
-                .header("Authorization", self.auth_header())
+                .get(get_url)?
+                .header("Authorization", &self.auth_header())?
                 .send()
                 .await?
-                .json::<PredictionResponse>()
+                .body_json::<PredictionResponse>()
                 .await
                 .map_err(|e| LlmError::SerializationError(e.to_string()))?;
 
@@ -203,7 +207,7 @@ impl ReplicateProvider {
     }
 
     /// Extract 429 retry-after duration from response headers.
-    fn retry_after_from_headers(headers: &reqwest::header::HeaderMap) -> LlmError {
+    fn retry_after_from_headers(headers: &oxihttp::HeaderMap) -> LlmError {
         let retry_after = headers
             .get("retry-after")
             .and_then(|v| v.to_str().ok())
@@ -231,9 +235,9 @@ impl LlmProvider for ReplicateProvider {
 
         let http_resp = self
             .client
-            .post(self.prediction_create_url())
-            .header("Authorization", self.auth_header())
-            .json(&body)
+            .post(&self.prediction_create_url())?
+            .header("Authorization", &self.auth_header())?
+            .json(&body)?
             .send()
             .await?;
 
@@ -243,12 +247,12 @@ impl LlmProvider for ReplicateProvider {
 
         if !http_resp.status().is_success() {
             let status = http_resp.status().as_u16();
-            let body_text = http_resp.text().await.unwrap_or_default();
+            let body_text = http_resp.body_text().await.unwrap_or_default();
             return Err(LlmError::ApiError(format!("HTTP {status}: {body_text}")));
         }
 
         let prediction: PredictionResponse = http_resp
-            .json()
+            .body_json()
             .await
             .map_err(|e| LlmError::SerializationError(e.to_string()))?;
 
@@ -277,7 +281,7 @@ impl LlmProvider for ReplicateProvider {
 
 /// State threaded through the SSE unfold for Replicate streaming.
 struct SseState {
-    stream: reqwest::Response,
+    stream: oxihttp::BodyStream,
     /// Partial SSE line buffer — bytes may arrive split across HTTP frames.
     buffer: String,
     /// Remembered event type from the last `event:` line.
@@ -302,9 +306,9 @@ impl StreamingLlmProvider for ReplicateProvider {
 
         let http_resp = self
             .client
-            .post(self.prediction_create_url())
-            .header("Authorization", self.auth_header())
-            .json(&body)
+            .post(&self.prediction_create_url())?
+            .header("Authorization", &self.auth_header())?
+            .json(&body)?
             .send()
             .await?;
 
@@ -314,12 +318,12 @@ impl StreamingLlmProvider for ReplicateProvider {
 
         if !http_resp.status().is_success() {
             let status = http_resp.status().as_u16();
-            let body_text = http_resp.text().await.unwrap_or_default();
+            let body_text = http_resp.body_text().await.unwrap_or_default();
             return Err(LlmError::ApiError(format!("HTTP {status}: {body_text}")));
         }
 
         let prediction: PredictionResponse = http_resp
-            .json()
+            .body_json()
             .await
             .map_err(|e| LlmError::SerializationError(e.to_string()))?;
 
@@ -363,15 +367,15 @@ impl StreamingLlmProvider for ReplicateProvider {
         // Connect to the SSE stream.
         let sse_resp = self
             .client
-            .get(&stream_url)
-            .header("Authorization", self.auth_header())
-            .header("Accept", "text/event-stream")
+            .get(&stream_url)?
+            .header("Authorization", &self.auth_header())?
+            .header("Accept", "text/event-stream")?
             .send()
             .await?;
 
         if !sse_resp.status().is_success() {
             let status = sse_resp.status().as_u16();
-            let body_text = sse_resp.text().await.unwrap_or_default();
+            let body_text = sse_resp.body_text().await.unwrap_or_default();
             return Err(LlmError::ApiError(format!(
                 "SSE HTTP {status}: {body_text}"
             )));
@@ -379,7 +383,7 @@ impl StreamingLlmProvider for ReplicateProvider {
 
         // Drive a stateful unfold over the byte stream.
         let initial_state = SseState {
-            stream: sse_resp,
+            stream: sse_resp.body_stream(),
             buffer: String::new(),
             pending_event: None,
             finished: false,
@@ -453,12 +457,12 @@ impl StreamingLlmProvider for ReplicateProvider {
                 }
 
                 // No complete line in buffer; fetch more bytes.
-                match state.stream.chunk().await {
-                    Ok(Some(bytes)) => {
+                match state.stream.next().await {
+                    Some(Ok(bytes)) => {
                         let text = String::from_utf8_lossy(&bytes);
                         state.buffer.push_str(&text);
                     }
-                    Ok(None) => {
+                    None => {
                         // Stream ended without an explicit `done` event.
                         if !state.finished {
                             state.finished = true;
@@ -474,7 +478,7 @@ impl StreamingLlmProvider for ReplicateProvider {
                         }
                         return Ok(None);
                     }
-                    Err(e) => return Err(LlmError::NetworkError(e)),
+                    Some(Err(e)) => return Err(LlmError::NetworkError(e)),
                 }
             }
         });

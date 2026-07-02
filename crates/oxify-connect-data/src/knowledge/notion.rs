@@ -8,6 +8,28 @@ use super::KnowledgeBaseExecutor;
 use crate::error::{DataError, Result};
 
 // ---------------------------------------------------------------------------
+// Header helper
+// ---------------------------------------------------------------------------
+
+/// Apply the standard Notion auth/version/content-type headers to a request
+/// builder chain.
+///
+/// This is a macro rather than a generic helper method because
+/// `oxihttp::RequestBuilder<C>`'s header methods are bounded on
+/// `hyper_util`'s sealed `Connect` trait, which cannot be named in a
+/// `where` clause from outside the `oxihttp`/`hyper_util` crates. Expanding
+/// inline at each call site keeps the connector type fully concrete
+/// (inferred from `self.http`) while still de-duplicating the header list.
+macro_rules! notion_headers {
+    ($self:expr, $builder:expr) => {
+        $builder
+            .header("Authorization", &format!("Bearer {}", $self.cfg.api_key))?
+            .header("Notion-Version", &$self.cfg.notion_version)?
+            .header("Content-Type", "application/json")?
+    };
+}
+
+// ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
 
@@ -71,32 +93,27 @@ impl NotionConfig {
 /// and databases.
 pub struct NotionProvider {
     cfg: NotionConfig,
-    http: reqwest::Client,
+    http: oxihttp::HttpsClient,
 }
 
 impl NotionProvider {
     /// Construct a provider from the given configuration.
-    #[must_use]
-    pub fn new(cfg: NotionConfig) -> Self {
-        Self {
-            cfg,
-            http: reqwest::Client::new(),
-        }
-    }
-
-    /// Attach the standard Notion auth and version headers to a request
-    /// builder.
-    fn apply_headers(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        builder
-            .header("Authorization", format!("Bearer {}", self.cfg.api_key))
-            .header("Notion-Version", &self.cfg.notion_version)
-            .header("Content-Type", "application/json")
+    ///
+    /// # Errors
+    /// Returns [`DataError::Config`] if the underlying HTTPS client cannot be
+    /// constructed (e.g. TLS trust-store initialization failure).
+    pub fn new(cfg: NotionConfig) -> Result<Self> {
+        let http = oxihttp::Client::builder()
+            .with_tls()
+            .build_https()
+            .map_err(|e| DataError::Config(format!("failed to build HTTP client: {e}")))?;
+        Ok(Self { cfg, http })
     }
 
     /// Map an HTTP status code to the appropriate [`DataError`] variant.
-    async fn map_error(resp: reqwest::Response) -> DataError {
+    async fn map_error(resp: oxihttp::Response) -> DataError {
         let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
+        let body = resp.body_text().await.unwrap_or_default();
         match status.as_u16() {
             401 | 403 => DataError::Auth(format!("HTTP {status}: {body}")),
             404 => DataError::NotFound(format!("HTTP {status}: {body}")),
@@ -119,16 +136,15 @@ impl KnowledgeBaseExecutor for NotionProvider {
         if let Some(ft) = filter_type {
             body["filter"] = json!({"value": ft, "property": "object"});
         }
-        let resp = self
-            .apply_headers(self.http.post(&url))
-            .json(&body)
+        let resp = notion_headers!(self, self.http.post(&url)?)
+            .json(&body)?
             .send()
             .await?;
 
         if !resp.status().is_success() {
             return Err(Self::map_error(resp).await);
         }
-        let data: Value = resp.json().await?;
+        let data: Value = resp.body_json().await?;
         let results = data
             .get("results")
             .and_then(Value::as_array)
@@ -140,12 +156,12 @@ impl KnowledgeBaseExecutor for NotionProvider {
     #[instrument(skip(self), fields(provider = "notion"))]
     async fn get_page(&self, page_id: &str) -> Result<Value> {
         let url = format!("{}/pages/{}", self.cfg.base_url, page_id);
-        let resp = self.apply_headers(self.http.get(&url)).send().await?;
+        let resp = notion_headers!(self, self.http.get(&url)?).send().await?;
 
         if !resp.status().is_success() {
             return Err(Self::map_error(resp).await);
         }
-        let page: Value = resp.json().await?;
+        let page: Value = resp.body_json().await?;
         Ok(page)
     }
 
@@ -170,16 +186,15 @@ impl KnowledgeBaseExecutor for NotionProvider {
                 }
             }]
         });
-        let resp = self
-            .apply_headers(self.http.post(&url))
-            .json(&body)
+        let resp = notion_headers!(self, self.http.post(&url)?)
+            .json(&body)?
             .send()
             .await?;
 
         if !resp.status().is_success() {
             return Err(Self::map_error(resp).await);
         }
-        let data: Value = resp.json().await?;
+        let data: Value = resp.body_json().await?;
         let id = data
             .get("id")
             .and_then(Value::as_str)
@@ -192,9 +207,8 @@ impl KnowledgeBaseExecutor for NotionProvider {
     async fn update_page(&self, page_id: &str, properties: Value) -> Result<()> {
         let url = format!("{}/pages/{}", self.cfg.base_url, page_id);
         let body = json!({"properties": properties});
-        let resp = self
-            .apply_headers(self.http.patch(&url))
-            .json(&body)
+        let resp = notion_headers!(self, self.http.patch(&url)?)
+            .json(&body)?
             .send()
             .await?;
 
@@ -223,16 +237,15 @@ impl KnowledgeBaseExecutor for NotionProvider {
         if let Some(ps) = page_size {
             body["page_size"] = json!(ps);
         }
-        let resp = self
-            .apply_headers(self.http.post(&url))
-            .json(&body)
+        let resp = notion_headers!(self, self.http.post(&url)?)
+            .json(&body)?
             .send()
             .await?;
 
         if !resp.status().is_success() {
             return Err(Self::map_error(resp).await);
         }
-        let data: Value = resp.json().await?;
+        let data: Value = resp.body_json().await?;
         let results = data
             .get("results")
             .and_then(Value::as_array)
@@ -244,12 +257,12 @@ impl KnowledgeBaseExecutor for NotionProvider {
     #[instrument(skip(self), fields(provider = "notion"))]
     async fn get_database(&self, database_id: &str) -> Result<Value> {
         let url = format!("{}/databases/{}", self.cfg.base_url, database_id);
-        let resp = self.apply_headers(self.http.get(&url)).send().await?;
+        let resp = notion_headers!(self, self.http.get(&url)?).send().await?;
 
         if !resp.status().is_success() {
             return Err(Self::map_error(resp).await);
         }
-        let db: Value = resp.json().await?;
+        let db: Value = resp.body_json().await?;
         Ok(db)
     }
 }
@@ -272,7 +285,7 @@ mod tests {
             notion_version: "2022-06-28".to_owned(),
             base_url,
         };
-        NotionProvider::new(cfg)
+        NotionProvider::new(cfg).expect("failed to build NotionProvider")
     }
 
     // ------------------------------------------------------------------

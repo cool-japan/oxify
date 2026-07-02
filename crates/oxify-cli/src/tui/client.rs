@@ -23,14 +23,17 @@ pub struct ExecutionSummary {
 /// Lightweight HTTP client that wraps the OxiFY REST API for the TUI.
 pub struct TuiApiClient {
     base_url: String,
-    http: reqwest::Client,
+    http: oxihttp::HttpsClient,
 }
 
 impl TuiApiClient {
     pub fn new(base_url: String) -> Self {
         Self {
             base_url,
-            http: reqwest::Client::new(),
+            http: oxihttp::Client::builder()
+                .with_tls()
+                .build_https()
+                .expect("failed to build oxihttp HTTPS client for TUI API"),
         }
     }
 
@@ -38,7 +41,14 @@ impl TuiApiClient {
     /// Returns an empty vec if the server is unreachable or returns a non-2xx response.
     pub async fn list_workflows(&self) -> Result<Vec<WorkflowSummary>> {
         let url = format!("{}/api/v1/workflows", self.base_url);
-        let resp = match self.http.get(&url).send().await {
+        let request = match self.http.get(&url) {
+            Ok(req) => req,
+            Err(e) => {
+                tracing::warn!("Failed to build request for workflows: {}", e);
+                return Ok(vec![]);
+            }
+        };
+        let resp = match request.send().await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!("Failed to reach API for workflows: {}", e);
@@ -46,7 +56,7 @@ impl TuiApiClient {
             }
         };
         if resp.status().is_success() {
-            let data: serde_json::Value = resp.json().await?;
+            let data: serde_json::Value = resp.body_json().await?;
             let arr = if data.is_array() {
                 data
             } else {
@@ -63,7 +73,14 @@ impl TuiApiClient {
     /// Returns an empty vec if the server is unreachable or returns a non-2xx response.
     pub async fn list_executions(&self) -> Result<Vec<ExecutionSummary>> {
         let url = format!("{}/api/v1/executions", self.base_url);
-        let resp = match self.http.get(&url).send().await {
+        let request = match self.http.get(&url) {
+            Ok(req) => req,
+            Err(e) => {
+                tracing::warn!("Failed to build request for executions: {}", e);
+                return Ok(vec![]);
+            }
+        };
+        let resp = match request.send().await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!("Failed to reach API for executions: {}", e);
@@ -71,7 +88,7 @@ impl TuiApiClient {
             }
         };
         if resp.status().is_success() {
-            let data: serde_json::Value = resp.json().await?;
+            let data: serde_json::Value = resp.body_json().await?;
             let arr = if data.is_array() {
                 data
             } else {

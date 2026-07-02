@@ -10,9 +10,49 @@ use crate::{
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+/// Build an authenticated request for the given HTTP method and URL.
+///
+/// This replaces the removed reqwest `Client::request(method, url)` generic
+/// dispatch by matching over [`oxihttp::Method`] and calling the corresponding
+/// verb method on the HTTPS client, then layering the optional `Authorization`
+/// bearer header and the mandatory `Content-Type: application/json` header.
+///
+/// It is a `macro_rules!` rather than a plain method because the concrete
+/// HTTPS request-builder type (`RequestBuilder<OxiHttpsConnector<HttpConnector>>`)
+/// is not nameable through the public `oxihttp` facade, and every
+/// `RequestBuilder<C>` method is bound by the un-re-exported hyper `Connect`
+/// trait, so no generic helper signature can be written. Expanding inline lets
+/// the connector type be inferred at each call site. The macro yields
+/// `Result<oxihttp::RequestBuilder<_>, oxihttp::OxiHttpError>`, so every call
+/// site propagates the error with `?` (via `map_err`).
+macro_rules! build_request {
+    ($self:expr, $method:expr, $url:expr) => {{
+        let dispatched = match $method.as_str() {
+            "GET" => $self.client.get($url),
+            "POST" => $self.client.post($url),
+            "PUT" => $self.client.put($url),
+            "DELETE" => $self.client.delete($url),
+            "PATCH" => $self.client.patch($url),
+            "HEAD" => $self.client.head($url),
+            other => Err(oxihttp::OxiHttpError::MethodNotAllowed {
+                method: other.to_string(),
+                path: ($url).to_string(),
+            }),
+        };
+        dispatched.and_then(|request| {
+            let request = if let Some(ref api_key) = $self.api_key {
+                request.header("Authorization", &format!("Bearer {}", api_key))?
+            } else {
+                request
+            };
+            request.header("Content-Type", "application/json")
+        })
+    }};
+}
+
 /// Weaviate vector database provider
 pub struct WeaviateProvider {
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     base_url: String,
     api_key: Option<String>,
 }
@@ -110,19 +150,13 @@ impl WeaviateProvider {
     /// * `api_key` - Optional API key for authentication
     pub fn new(base_url: String, api_key: Option<String>) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: oxihttp::Client::builder()
+                .with_tls()
+                .build_https()
+                .expect("failed to build oxihttp HTTPS client for Weaviate"),
             base_url,
             api_key,
         }
-    }
-
-    /// Build a request with optional authentication
-    fn build_request(&self, method: reqwest::Method, url: &str) -> reqwest::RequestBuilder {
-        let mut request = self.client.request(method, url);
-        if let Some(ref api_key) = self.api_key {
-            request = request.header("Authorization", format!("Bearer {}", api_key));
-        }
-        request.header("Content-Type", "application/json")
     }
 
     /// Convert collection name to Weaviate class name (capitalized)
@@ -237,16 +271,16 @@ impl VectorProvider for WeaviateProvider {
         let url = format!("{}/v1/graphql", self.base_url);
         let graphql_query = WeaviateGraphQLQuery { query };
 
-        let response = self
-            .build_request(reqwest::Method::POST, &url)
-            .json(&graphql_query)
+        let response = build_request!(self, oxihttp::Method::POST, &url)
+            .and_then(|request| request.json(&graphql_query))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         let status = response.status();
         let body = response
-            .text()
+            .body_text()
             .await
             .map_err(|e| VectorError::QueryError(e.to_string()))?;
 
@@ -326,15 +360,15 @@ impl VectorProvider for WeaviateProvider {
 
         let url = format!("{}/v1/objects", self.base_url);
 
-        let response = self
-            .build_request(reqwest::Method::POST, &url)
-            .json(&object)
+        let response = build_request!(self, oxihttp::Method::POST, &url)
+            .and_then(|request| request.json(&object))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         if !response.status().is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = response.body_text().await.unwrap_or_default();
             return Err(VectorError::DatabaseError(format!(
                 "Failed to insert: {}",
                 body
@@ -351,8 +385,8 @@ impl VectorProvider for WeaviateProvider {
         for id in &request.ids {
             let url = format!("{}/v1/objects/{}/{}", self.base_url, class_name, id);
 
-            let response = self
-                .build_request(reqwest::Method::DELETE, &url)
+            let response = build_request!(self, oxihttp::Method::DELETE, &url)
+                .map_err(|e| VectorError::ConnectionError(e.to_string()))?
                 .send()
                 .await
                 .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
@@ -378,15 +412,15 @@ impl VectorProvider for WeaviateProvider {
 
         let url = format!("{}/v1/schema", self.base_url);
 
-        let response = self
-            .build_request(reqwest::Method::POST, &url)
-            .json(&class_config)
+        let response = build_request!(self, oxihttp::Method::POST, &url)
+            .and_then(|request| request.json(&class_config))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         if !response.status().is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = response.body_text().await.unwrap_or_default();
             return Err(VectorError::DatabaseError(format!(
                 "Failed to create collection: {}",
                 body
@@ -400,8 +434,8 @@ impl VectorProvider for WeaviateProvider {
         let class_name = Self::to_class_name(name);
         let url = format!("{}/v1/schema/{}", self.base_url, class_name);
 
-        let response = self
-            .build_request(reqwest::Method::GET, &url)
+        let response = build_request!(self, oxihttp::Method::GET, &url)
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
@@ -434,15 +468,15 @@ impl VectorProvider for WeaviateProvider {
 
         let url = format!("{}/v1/batch/objects", self.base_url);
 
-        let response = self
-            .build_request(reqwest::Method::POST, &url)
-            .json(&batch_request)
+        let response = build_request!(self, oxihttp::Method::POST, &url)
+            .and_then(|request| request.json(&batch_request))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         if !response.status().is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = response.body_text().await.unwrap_or_default();
             return Err(VectorError::DatabaseError(format!(
                 "Batch insert failed: {}",
                 body
@@ -464,10 +498,11 @@ impl VectorProvider for WeaviateProvider {
         // For partial updates, fetch existing object first
         if request.vector.is_none() || request.payload.is_none() {
             let get_url = format!("{}/v1/objects/{}/{}", self.base_url, class_name, request.id);
+            let get_url =
+                oxify_model::http_util::append_query_params(&get_url, &[("include", "vector")]);
 
-            let get_response = self
-                .build_request(reqwest::Method::GET, &get_url)
-                .query(&[("include", "vector")])
+            let get_response = build_request!(self, oxihttp::Method::GET, &get_url)
+                .map_err(|e| VectorError::ConnectionError(e.to_string()))?
                 .send()
                 .await
                 .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
@@ -480,7 +515,7 @@ impl VectorProvider for WeaviateProvider {
             }
 
             let existing: WeaviateObjectResponse = get_response
-                .json()
+                .body_json()
                 .await
                 .map_err(|e| VectorError::QueryError(e.to_string()))?;
 
@@ -505,15 +540,15 @@ impl VectorProvider for WeaviateProvider {
                 self.base_url, update_object.class, request.id
             );
 
-            let response = self
-                .build_request(reqwest::Method::PUT, &url)
-                .json(&update_object)
+            let response = build_request!(self, oxihttp::Method::PUT, &url)
+                .and_then(|request| request.json(&update_object))
+                .map_err(|e| VectorError::ConnectionError(e.to_string()))?
                 .send()
                 .await
                 .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
             if !response.status().is_success() {
-                let body = response.text().await.unwrap_or_default();
+                let body = response.body_text().await.unwrap_or_default();
                 return Err(VectorError::DatabaseError(format!(
                     "Update failed: {}",
                     body
@@ -533,15 +568,15 @@ impl VectorProvider for WeaviateProvider {
                 self.base_url, update_object.class, request.id
             );
 
-            let response = self
-                .build_request(reqwest::Method::PUT, &url)
-                .json(&update_object)
+            let response = build_request!(self, oxihttp::Method::PUT, &url)
+                .and_then(|request| request.json(&update_object))
+                .map_err(|e| VectorError::ConnectionError(e.to_string()))?
                 .send()
                 .await
                 .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
             if !response.status().is_success() {
-                let body = response.text().await.unwrap_or_default();
+                let body = response.body_text().await.unwrap_or_default();
                 return Err(VectorError::DatabaseError(format!(
                     "Update failed: {}",
                     body
@@ -560,8 +595,8 @@ impl VectorProvider for WeaviateProvider {
         // Get schema info
         let schema_url = format!("{}/v1/schema/{}", self.base_url, class_name);
 
-        let schema_response = self
-            .build_request(reqwest::Method::GET, &schema_url)
+        let schema_response = build_request!(self, oxihttp::Method::GET, &schema_url)
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
@@ -574,7 +609,7 @@ impl VectorProvider for WeaviateProvider {
         }
 
         let _schema: WeaviateSchemaResponse = schema_response
-            .json()
+            .body_json()
             .await
             .map_err(|e| VectorError::QueryError(e.to_string()))?;
 
@@ -595,16 +630,16 @@ impl VectorProvider for WeaviateProvider {
         let graphql_url = format!("{}/v1/graphql", self.base_url);
         let graphql_query = WeaviateGraphQLQuery { query: count_query };
 
-        let count_response = self
-            .build_request(reqwest::Method::POST, &graphql_url)
-            .json(&graphql_query)
+        let count_response = build_request!(self, oxihttp::Method::POST, &graphql_url)
+            .and_then(|request| request.json(&graphql_query))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         let vector_count: usize = if count_response.status().is_success() {
             let count_result: serde_json::Value = count_response
-                .json()
+                .body_json()
                 .await
                 .map_err(|e| VectorError::QueryError(e.to_string()))?;
 
@@ -636,6 +671,69 @@ mod tests {
             "MyCollection"
         );
         assert_eq!(WeaviateProvider::to_class_name("Test"), "Test");
+    }
+
+    /// Regression guard for the `build_request!` verb-dispatch + auth-header
+    /// logic introduced by the reqwest -> oxihttp migration.
+    ///
+    /// Drives a real `collection_exists` (GET) and `insert` (POST) against a
+    /// mock HTTP server and asserts that both verbs are dispatched correctly
+    /// and that the `Authorization: Bearer ...` and `Content-Type` headers
+    /// applied by `build_request!` reach the server (the mocks only match when
+    /// those headers are present).
+    #[tokio::test]
+    async fn test_build_request_get_and_post_against_mock() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        // GET path exercised by `collection_exists` — the class name is the
+        // capitalized collection name ("testvectors" -> "Testvectors").
+        Mock::given(method("GET"))
+            .and(path("/v1/schema/Testvectors"))
+            .and(header("authorization", "Bearer test-key"))
+            .and(header("content-type", "application/json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "class": "Testvectors",
+                "vectorIndexConfig": {}
+            })))
+            .mount(&server)
+            .await;
+
+        // POST path exercised by `insert`.
+        Mock::given(method("POST"))
+            .and(path("/v1/objects"))
+            .and(header("authorization", "Bearer test-key"))
+            .and(header("content-type", "application/json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "test_1"
+            })))
+            .mount(&server)
+            .await;
+
+        let provider = WeaviateProvider::new(server.uri(), Some("test-key".to_string()));
+
+        // GET dispatch through build_request!.
+        let exists = provider
+            .collection_exists("testvectors")
+            .await
+            .expect("collection_exists should succeed against the mock server");
+        assert!(
+            exists,
+            "mocked schema GET should report the class as existing"
+        );
+
+        // POST dispatch through build_request! (with a JSON body).
+        provider
+            .insert(InsertRequest {
+                collection: "testvectors".to_string(),
+                id: "test_1".to_string(),
+                vector: vec![0.1, 0.2, 0.3],
+                payload: serde_json::json!({ "text": "hello" }),
+            })
+            .await
+            .expect("insert should succeed against the mock server");
     }
 
     #[tokio::test]

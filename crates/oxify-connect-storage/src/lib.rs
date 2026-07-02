@@ -5,8 +5,12 @@
 //!
 //! * **In-memory** (feature `memory`, enabled by default) — ideal for unit
 //!   tests and local development where you do not want real network I/O.
-//! * **Amazon S3 / MinIO** (feature `aws`) — backed by the [`object_store`]
-//!   crate; supports any S3-compatible endpoint.
+//! * **Amazon S3 / MinIO** (feature `aws`), **Google Cloud Storage**
+//!   (feature `gcs`), **Azure Blob Storage** (feature `azure`), and the
+//!   **local filesystem** (feature `local`) — each backed by the pure-Rust
+//!   `oxistore-blob` family of backends (`oxistore-blob-s3`,
+//!   `oxistore-blob-gcs`, `oxistore-blob-azure`, and `oxistore-blob`'s
+//!   `LocalBlobStore`) rather than the `object_store` crate.
 //!
 //! # Quick start
 //!

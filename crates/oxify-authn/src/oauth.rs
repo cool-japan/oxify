@@ -17,7 +17,7 @@ use tokio::sync::RwLock;
 pub struct OAuth2Service {
     config: Arc<OAuth2Config>,
     active_states: Arc<RwLock<HashMap<String, OAuth2State>>>,
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
 }
 
 /// `OAuth2` state for authorization flow
@@ -66,18 +66,24 @@ struct OAuth2TokenResponse {
 
 impl OAuth2Service {
     /// Create new `OAuth2` service
-    #[must_use]
-    pub fn new(config: OAuth2Config) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .unwrap_or_default();
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AuthError::OAuthError`] if the underlying HTTPS client cannot
+    /// be constructed (e.g. TLS trust-store initialization failure).
+    pub fn new(config: OAuth2Config) -> Result<Self> {
+        let client = oxihttp::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .read_timeout(std::time::Duration::from_secs(30))
+            .with_tls()
+            .build_https()
+            .map_err(|e| AuthError::OAuthError(format!("Failed to build HTTP client: {e}")))?;
 
-        Self {
+        Ok(Self {
             config: Arc::new(config),
             active_states: Arc::new(RwLock::new(HashMap::new())),
             client,
-        }
+        })
     }
 
     /// Generate authorization URL for `OAuth2` flow
@@ -164,23 +170,30 @@ impl OAuth2Service {
             params.push(("code_verifier", code_verifier));
         }
 
+        let form_body = params
+            .into_iter()
+            .fold(oxihttp::FormBody::new(), |form, (key, value)| {
+                form.field(key, value)
+            });
+
         let response = self
             .client
             .post(&self.config.token_url)
-            .form(&params)
+            .map_err(|e| AuthError::OAuthError(format!("Token exchange failed: {e}")))?
+            .form(&form_body)
             .send()
             .await
             .map_err(|e| AuthError::OAuthError(format!("Token exchange failed: {e}")))?;
 
         if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
+            let error_text = response.body_text().await.unwrap_or_default();
             return Err(AuthError::OAuthError(format!(
                 "Token exchange failed: {error_text}"
             )));
         }
 
         let token_response: OAuth2TokenResponse = response
-            .json()
+            .body_json()
             .await
             .map_err(|e| AuthError::OAuthError(format!("Failed to parse token: {e}")))?;
 
@@ -200,7 +213,9 @@ impl OAuth2Service {
         let response = self
             .client
             .get(&self.config.user_info_url)
-            .bearer_auth(access_token)
+            .map_err(|e| AuthError::OAuthError(format!("UserInfo request failed: {e}")))?
+            .bearer_token(access_token)
+            .map_err(|e| AuthError::OAuthError(format!("UserInfo request failed: {e}")))?
             .send()
             .await
             .map_err(|e| AuthError::OAuthError(format!("UserInfo request failed: {e}")))?;
@@ -213,7 +228,7 @@ impl OAuth2Service {
         }
 
         response
-            .json()
+            .body_json()
             .await
             .map_err(|e| AuthError::OAuthError(format!("Failed to parse user info: {e}")))
     }
@@ -230,14 +245,21 @@ impl OAuth2Service {
         let params = vec![
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token),
-            ("client_id", &self.config.client_id),
-            ("client_secret", &self.config.client_secret),
+            ("client_id", self.config.client_id.as_str()),
+            ("client_secret", self.config.client_secret.as_str()),
         ];
+
+        let form_body = params
+            .into_iter()
+            .fold(oxihttp::FormBody::new(), |form, (key, value)| {
+                form.field(key, value)
+            });
 
         let response = self
             .client
             .post(&self.config.token_url)
-            .form(&params)
+            .map_err(|e| AuthError::OAuthError(format!("Token refresh failed: {e}")))?
+            .form(&form_body)
             .send()
             .await
             .map_err(|e| AuthError::OAuthError(format!("Token refresh failed: {e}")))?;
@@ -250,7 +272,7 @@ impl OAuth2Service {
         }
 
         let token_response: OAuth2TokenResponse = response
-            .json()
+            .body_json()
             .await
             .map_err(|e| AuthError::OAuthError(format!("Failed to parse refresh: {e}")))?;
 
@@ -321,8 +343,8 @@ fn generate_code_verifier() -> String {
 /// Generate code challenge for PKCE (S256 method)
 fn generate_code_challenge(code_verifier: &str) -> String {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-    use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(code_verifier.as_bytes());
+    use oxicrypto_hash::Sha256;
+    let digest = Sha256.hash_fixed(code_verifier.as_bytes());
     URL_SAFE_NO_PAD.encode(digest)
 }
 
@@ -393,14 +415,14 @@ mod tests {
     #[tokio::test]
     async fn test_oauth2_service_creation() {
         let config = create_test_config();
-        let service = OAuth2Service::new(config);
+        let service = OAuth2Service::new(config).expect("failed to build OAuth2Service");
         assert_eq!(service.config.provider, "test");
     }
 
     #[tokio::test]
     async fn test_authorization_url() {
         let config = create_test_config();
-        let service = OAuth2Service::new(config);
+        let service = OAuth2Service::new(config).expect("failed to build OAuth2Service");
 
         let (url, state) = service
             .generate_authorization_url("http://localhost/callback", false)

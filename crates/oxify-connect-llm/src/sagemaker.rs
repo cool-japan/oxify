@@ -8,7 +8,7 @@ pub struct SageMakerProvider {
     region: String,
     endpoint_name: String,
     model_hint: String,
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     credentials: Option<AwsCredentials>,
     base_url: String,
 }
@@ -39,7 +39,10 @@ impl SageMakerProvider {
             region,
             endpoint_name,
             model_hint: "tgi".to_string(),
-            client: reqwest::Client::new(),
+            client: oxihttp::Client::builder()
+                .with_tls()
+                .build_https()
+                .expect("failed to build oxihttp HTTPS client for AWS SageMaker"),
             credentials: None,
             base_url,
         }
@@ -71,7 +74,10 @@ impl SageMakerProvider {
             region,
             endpoint_name,
             model_hint: "tgi".to_string(),
-            client: reqwest::Client::new(),
+            client: oxihttp::Client::builder()
+                .with_tls()
+                .build_https()
+                .expect("failed to build oxihttp HTTPS client for AWS SageMaker"),
             credentials: Some(credentials),
             base_url,
         })
@@ -119,13 +125,13 @@ impl SageMakerProvider {
 
         let mut req_builder = self
             .client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json")
+            .post(&url)?
+            .header("Content-Type", "application/json")?
+            .header("Accept", "application/json")?
             .body(body);
 
         for (k, v) in &sig_headers {
-            req_builder = req_builder.header(k.as_str(), v.as_str());
+            req_builder = req_builder.header(k.as_str(), v.as_str())?;
         }
 
         let response = req_builder.send().await?;
@@ -141,7 +147,7 @@ impl SageMakerProvider {
             return Err(LlmError::RateLimited(retry_after));
         }
 
-        let body_text = response.text().await?;
+        let body_text = response.body_text().await?;
 
         if !status.is_success() {
             return Err(LlmError::ApiError(format!(

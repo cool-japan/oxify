@@ -14,7 +14,7 @@ use std::time::Duration;
 pub struct MistralProvider {
     api_key: String,
     model: String,
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     base_url: String,
 }
 
@@ -59,7 +59,10 @@ impl MistralProvider {
         Self {
             api_key,
             model,
-            client: reqwest::Client::new(),
+            client: oxihttp::Client::builder()
+                .with_tls()
+                .build_https()
+                .expect("failed to build oxihttp HTTPS client for Mistral"),
             base_url: "https://api.mistral.ai/v1".to_string(),
         }
     }
@@ -104,10 +107,10 @@ impl LlmProvider for MistralProvider {
 
         let response = self
             .client
-            .post(format!("{}/chat/completions", self.base_url))
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&mistral_request)
+            .post(&format!("{}/chat/completions", self.base_url))?
+            .header("Authorization", &format!("Bearer {}", self.api_key))?
+            .header("Content-Type", "application/json")?
+            .json(&mistral_request)?
             .send()
             .await?;
 
@@ -125,7 +128,7 @@ impl LlmProvider for MistralProvider {
             return Err(LlmError::RateLimited(retry_after));
         }
 
-        let body = response.text().await?;
+        let body = response.body_text().await?;
 
         if !status.is_success() {
             return Err(LlmError::ApiError(format!("HTTP {}: {}", status, body)));
@@ -200,10 +203,10 @@ impl StreamingLlmProvider for MistralProvider {
 
         let response = self
             .client
-            .post(format!("{}/chat/completions", self.base_url))
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&mistral_request)
+            .post(&format!("{}/chat/completions", self.base_url))?
+            .header("Authorization", &format!("Bearer {}", self.api_key))?
+            .header("Content-Type", "application/json")?
+            .json(&mistral_request)?
             .send()
             .await?;
 
@@ -221,11 +224,11 @@ impl StreamingLlmProvider for MistralProvider {
         }
 
         if !status.is_success() {
-            let body = response.text().await?;
+            let body = response.body_text().await?;
             return Err(LlmError::ApiError(format!("HTTP {}: {}", status, body)));
         }
 
-        let stream = response.bytes_stream();
+        let stream = response.body_stream();
 
         let parsed_stream = stream.filter_map(|chunk_result| async move {
             match chunk_result {
@@ -314,10 +317,10 @@ impl EmbeddingProvider for MistralProvider {
 
         let response = self
             .client
-            .post(format!("{}/embeddings", self.base_url))
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&mistral_request)
+            .post(&format!("{}/embeddings", self.base_url))?
+            .header("Authorization", &format!("Bearer {}", self.api_key))?
+            .header("Content-Type", "application/json")?
+            .json(&mistral_request)?
             .send()
             .await?;
 
@@ -335,7 +338,7 @@ impl EmbeddingProvider for MistralProvider {
             return Err(LlmError::RateLimited(retry_after));
         }
 
-        let body = response.text().await?;
+        let body = response.body_text().await?;
 
         if !status.is_success() {
             return Err(LlmError::ApiError(format!("HTTP {}: {}", status, body)));

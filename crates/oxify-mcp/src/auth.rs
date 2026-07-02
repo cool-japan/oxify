@@ -24,7 +24,7 @@
 
 use crate::{McpError, McpTransport, Result};
 use async_trait::async_trait;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use oxihttp::{HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -299,7 +299,10 @@ impl OAuth2Auth {
 
     /// Request a new access token from the OAuth2 server
     pub async fn request_token(&mut self) -> Result<()> {
-        let client = reqwest::Client::new();
+        let client = oxihttp::Client::builder()
+            .with_tls()
+            .build_https()
+            .map_err(|e| McpError::ServerError(format!("Failed to build HTTP client: {}", e)))?;
         let mut params: Vec<(String, String)> = Vec::new();
 
         match self.grant_type {
@@ -338,9 +341,16 @@ impl OAuth2Auth {
             }
         }
 
+        let form_body = params
+            .into_iter()
+            .fold(oxihttp::FormBody::new(), |form, (key, value)| {
+                form.field(key, value)
+            });
+
         let response = client
             .post(&self.token_url)
-            .form(&params)
+            .map_err(|e| McpError::ServerError(format!("OAuth2 token request failed: {}", e)))?
+            .form(&form_body)
             .send()
             .await
             .map_err(|e| McpError::ServerError(format!("OAuth2 token request failed: {}", e)))?;
@@ -352,7 +362,7 @@ impl OAuth2Auth {
             )));
         }
 
-        let token_response: Value = response.json().await.map_err(|e| {
+        let token_response: Value = response.body_json().await.map_err(|e| {
             McpError::ProtocolError(format!("Failed to parse OAuth2 token response: {}", e))
         })?;
 
@@ -542,13 +552,13 @@ impl AuthConfig {
                 let header_value = HeaderValue::from_str(&auth.header_value()).map_err(|e| {
                     McpError::InvalidRequest(format!("Invalid header value: {}", e))
                 })?;
-                headers.insert(reqwest::header::AUTHORIZATION, header_value);
+                headers.insert(HeaderName::from_static("authorization"), header_value);
             }
             AuthMethod::Bearer(auth) => {
                 let header_value = HeaderValue::from_str(&auth.header_value()).map_err(|e| {
                     McpError::InvalidRequest(format!("Invalid header value: {}", e))
                 })?;
-                headers.insert(reqwest::header::AUTHORIZATION, header_value);
+                headers.insert(HeaderName::from_static("authorization"), header_value);
             }
             AuthMethod::CustomHeader(auth) => {
                 for (name, value) in &auth.headers {
@@ -566,7 +576,7 @@ impl AuthConfig {
                     let header_value = HeaderValue::from_str(&header_value_str).map_err(|e| {
                         McpError::InvalidRequest(format!("Invalid header value: {}", e))
                     })?;
-                    headers.insert(reqwest::header::AUTHORIZATION, header_value);
+                    headers.insert(HeaderName::from_static("authorization"), header_value);
                 }
             }
         }
@@ -583,7 +593,7 @@ impl Default for AuthConfig {
 
 /// HTTP transport with authentication support
 pub struct AuthenticatedHttpTransport {
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     base_url: String,
     auth: AuthConfig,
     request_id: u64,
@@ -598,10 +608,12 @@ impl AuthenticatedHttpTransport {
     pub fn new(base_url: impl Into<String>, auth: AuthConfig) -> Result<Self> {
         let headers = auth.build_headers()?;
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
+        let client = oxihttp::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .read_timeout(std::time::Duration::from_secs(30))
             .default_headers(headers)
-            .build()
+            .with_tls()
+            .build_https()
             .map_err(|e| McpError::ServerError(format!("Failed to build HTTP client: {}", e)))?;
 
         Ok(Self {
@@ -622,10 +634,12 @@ impl AuthenticatedHttpTransport {
     /// Set timeout
     pub fn with_timeout(mut self, timeout: std::time::Duration) -> Result<Self> {
         let headers = self.auth.build_headers()?;
-        self.client = reqwest::Client::builder()
-            .timeout(timeout)
+        self.client = oxihttp::Client::builder()
+            .connect_timeout(timeout)
+            .read_timeout(timeout)
             .default_headers(headers)
-            .build()
+            .with_tls()
+            .build_https()
             .map_err(|e| McpError::ServerError(format!("Failed to rebuild HTTP client: {}", e)))?;
         Ok(self)
     }
@@ -649,26 +663,28 @@ impl McpTransport for AuthenticatedHttpTransport {
         let response = self
             .client
             .post(&self.base_url)
+            .map_err(|e| McpError::ServerError(format!("HTTP request failed: {}", e)))?
             .json(&request)
+            .map_err(|e| McpError::ServerError(format!("HTTP request failed: {}", e)))?
             .send()
             .await
             .map_err(|e| McpError::ServerError(format!("HTTP request failed: {}", e)))?;
 
         // Check for auth errors
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if response.status() == oxihttp::StatusCode::UNAUTHORIZED {
             return Err(McpError::ServerError(
                 "Authentication failed: Invalid or missing credentials".to_string(),
             ));
         }
 
-        if response.status() == reqwest::StatusCode::FORBIDDEN {
+        if response.status() == oxihttp::StatusCode::FORBIDDEN {
             return Err(McpError::ServerError(
                 "Authorization failed: Insufficient permissions".to_string(),
             ));
         }
 
         let response_json: Value = response
-            .json()
+            .body_json()
             .await
             .map_err(|e| McpError::ProtocolError(format!("Failed to parse response: {}", e)))?;
 

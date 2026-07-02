@@ -185,7 +185,7 @@ struct FcmSendRequestTopic<'a> {
 #[derive(Debug)]
 pub struct FirebaseFcmProvider {
     cfg: FirebaseFcmConfig,
-    http: reqwest::Client,
+    http: oxihttp::HttpsClient,
     service_account: ServiceAccount,
     token_cache: RwLock<Option<CachedToken>>,
 }
@@ -207,8 +207,9 @@ impl FirebaseFcmProvider {
         // sequences instead of real newline characters.  Normalise here.
         service_account.private_key = service_account.private_key.replace("\\n", "\n");
 
-        let http = reqwest::Client::builder()
-            .build()
+        let http = oxihttp::Client::builder()
+            .with_tls()
+            .build_https()
             .map_err(|e| CommError::Http(format!("failed to build HTTP client: {e}")))?;
 
         Ok(Self {
@@ -304,8 +305,8 @@ impl FirebaseFcmProvider {
 
         let response = self
             .http
-            .post(&self.cfg.token_url)
-            .header("Content-Type", "application/x-www-form-urlencoded")
+            .post(&self.cfg.token_url)?
+            .header("Content-Type", "application/x-www-form-urlencoded")?
             .body(form_body)
             .send()
             .await
@@ -313,14 +314,14 @@ impl FirebaseFcmProvider {
 
         let status = response.status();
         if !status.is_success() {
-            let body_text = response.text().await.unwrap_or_default();
+            let body_text = response.body_text().await.unwrap_or_default();
             return Err(CommError::Provider(format!(
                 "OAuth2 token exchange failed with HTTP {status}: {body_text}"
             )));
         }
 
         let token_resp: TokenResponse = response
-            .json()
+            .body_json()
             .await
             .map_err(|e| CommError::Serialization(format!("parse token response: {e}")))?;
 
@@ -382,15 +383,15 @@ impl super::MessageProvider for FirebaseFcmProvider {
                 };
                 let resp = self
                     .http
-                    .post(&url)
-                    .header("Authorization", format!("Bearer {token}"))
-                    .header("Content-Type", "application/json")
-                    .json(&payload)
+                    .post(&url)?
+                    .header("Authorization", &format!("Bearer {token}"))?
+                    .header("Content-Type", "application/json")?
+                    .json(&payload)?
                     .send()
                     .await
                     .map_err(|e| CommError::Http(format!("FCM send request failed: {e}")))?;
                 let s = resp.status();
-                let t = resp.text().await.unwrap_or_default();
+                let t = resp.body_text().await.unwrap_or_default();
                 (s, t)
             }
             Recipient::Channel(topic) => {
@@ -403,22 +404,22 @@ impl super::MessageProvider for FirebaseFcmProvider {
                 };
                 let resp = self
                     .http
-                    .post(&url)
-                    .header("Authorization", format!("Bearer {token}"))
-                    .header("Content-Type", "application/json")
-                    .json(&payload)
+                    .post(&url)?
+                    .header("Authorization", &format!("Bearer {token}"))?
+                    .header("Content-Type", "application/json")?
+                    .json(&payload)?
                     .send()
                     .await
                     .map_err(|e| CommError::Http(format!("FCM send request failed: {e}")))?;
                 let s = resp.status();
-                let t = resp.text().await.unwrap_or_default();
+                let t = resp.body_text().await.unwrap_or_default();
                 (s, t)
             }
             // Safety: Email is rejected before this match is reached.
             Recipient::Email(_) => unreachable!("email recipient rejected above"),
         };
 
-        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        if status == oxihttp::StatusCode::UNAUTHORIZED || status == oxihttp::StatusCode::FORBIDDEN {
             return Err(CommError::Provider(format!(
                 "Firebase FCM auth error HTTP {status}: {response_text}"
             )));

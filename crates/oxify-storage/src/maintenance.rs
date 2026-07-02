@@ -27,8 +27,8 @@
 //! ```
 
 use crate::{DatabasePool, Result};
+use oxisql_core::{Connection, OxiSqlError, Row};
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use tracing::info;
 
 /// Maintenance configuration
@@ -109,13 +109,15 @@ impl MaintenanceService {
 
     /// VACUUM the database
     pub async fn vacuum(&self) -> Result<()> {
-        sqlx::query("VACUUM").execute(self.pool.pool()).await?;
+        let conn = self.pool.acquire().await?;
+        conn.execute("VACUUM", &[]).await?;
         Ok(())
     }
 
     /// ANALYZE the database
     pub async fn analyze(&self) -> Result<()> {
-        sqlx::query("ANALYZE").execute(self.pool.pool()).await?;
+        let conn = self.pool.acquire().await?;
+        conn.execute("ANALYZE", &[]).await?;
         Ok(())
     }
 
@@ -128,21 +130,21 @@ impl MaintenanceService {
 
     /// ANALYZE a specific table
     pub async fn analyze_table(&self, table_name: &str) -> Result<()> {
-        // For dynamic table names, we use Box::leak to get a static string
-        // This is safe because table names are short-lived
-        let query: &'static str = Box::leak(format!("ANALYZE {table_name}").into_boxed_str());
-        sqlx::query(query).execute(self.pool.pool()).await?;
+        // `Connection::execute` borrows the SQL string, so the dynamic table
+        // name can be interpolated into an owned `String` (no `Box::leak`
+        // static-lifetime workaround needed as with the old sqlx API).
+        let conn = self.pool.acquire().await?;
+        let query = format!("ANALYZE {table_name}");
+        conn.execute(&query, &[]).await?;
         Ok(())
     }
 
     /// Get statistics for a specific table
     pub async fn get_table_stats(&self, table_name: &str) -> Result<TableStats> {
-        // For dynamic table names, we use Box::leak to get a static string
-        let query: &'static str =
-            Box::leak(format!("SELECT COUNT(*) as count FROM {table_name}").into_boxed_str());
-        let row = sqlx::query(query).fetch_one(self.pool.pool()).await?;
+        let query = format!("SELECT COUNT(*) as count FROM {table_name}");
+        let row = self.fetch_one(&query).await?;
 
-        let row_count: i64 = row.get("count");
+        let row_count: i64 = row.try_get("count")?;
 
         Ok(TableStats {
             table_name: table_name.to_string(),
@@ -152,13 +154,18 @@ impl MaintenanceService {
 
     /// List all user tables
     pub async fn list_tables(&self) -> Result<Vec<String>> {
-        let rows = sqlx::query(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-        )
-        .fetch_all(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+                &[],
+            )
+            .await?;
 
-        let tables: Vec<String> = rows.into_iter().map(|r| r.get("name")).collect();
+        let mut tables = Vec::with_capacity(rows.len());
+        for row in &rows {
+            tables.push(row.try_get::<String>("name")?);
+        }
 
         Ok(tables)
     }
@@ -167,13 +174,13 @@ impl MaintenanceService {
     ///
     /// Note: For SQLite, this returns the page count * page size
     pub async fn get_database_size(&self) -> Result<i64> {
-        let row = sqlx::query(
-            "SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()",
-        )
-        .fetch_one(self.pool.pool())
-        .await?;
+        let row = self
+            .fetch_one(
+                "SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()",
+            )
+            .await?;
 
-        let size: i64 = row.get("size");
+        let size: i64 = row.try_get("size")?;
         Ok(size)
     }
 
@@ -185,33 +192,35 @@ impl MaintenanceService {
 
     /// Get index information
     pub async fn get_index_info(&self) -> Result<Vec<IndexBloatInfo>> {
-        let rows = sqlx::query(
-            "SELECT tbl_name as table_name, name as index_name
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                "SELECT tbl_name as table_name, name as index_name
              FROM sqlite_master
              WHERE type='index' AND name NOT LIKE 'sqlite_%'
              ORDER BY tbl_name, name",
-        )
-        .fetch_all(self.pool.pool())
-        .await?;
+                &[],
+            )
+            .await?;
 
-        let indexes: Vec<IndexBloatInfo> = rows
-            .into_iter()
-            .map(|r| IndexBloatInfo {
-                table_name: r.get("table_name"),
-                index_name: r.get("index_name"),
-            })
-            .collect();
+        let mut indexes = Vec::with_capacity(rows.len());
+        for row in &rows {
+            indexes.push(IndexBloatInfo {
+                table_name: row.try_get("table_name")?,
+                index_name: row.try_get("index_name")?,
+            });
+        }
 
         Ok(indexes)
     }
 
     /// Check database integrity
     pub async fn integrity_check(&self) -> Result<bool> {
-        let row = sqlx::query("SELECT integrity_check FROM pragma_integrity_check()")
-            .fetch_one(self.pool.pool())
+        let row = self
+            .fetch_one("SELECT integrity_check FROM pragma_integrity_check()")
             .await?;
 
-        let result: String = row.get("integrity_check");
+        let result: String = row.try_get("integrity_check")?;
         Ok(result == "ok")
     }
 
@@ -224,12 +233,28 @@ impl MaintenanceService {
 
     /// Get freelist count (unused pages)
     pub async fn get_freelist_count(&self) -> Result<i64> {
-        let row = sqlx::query("SELECT freelist_count FROM pragma_freelist_count()")
-            .fetch_one(self.pool.pool())
+        let row = self
+            .fetch_one("SELECT freelist_count FROM pragma_freelist_count()")
             .await?;
 
-        let count: i64 = row.get("freelist_count");
+        let count: i64 = row.try_get("freelist_count")?;
         Ok(count)
+    }
+
+    /// Acquire a connection, run `sql`, and return the first result row.
+    ///
+    /// OxiSQL's `Connection` trait exposes only a `query` returning all rows
+    /// (there is no `fetch_one` equivalent), so this centralises the
+    /// acquire + "take the first row or fail" pattern shared by the several
+    /// single-row PRAGMA/aggregate queries above. Fails with
+    /// [`OxiSqlError::Other`] if the query produced no rows.
+    async fn fetch_one(&self, sql: &str) -> Result<Row> {
+        let conn = self.pool.acquire().await?;
+        let mut rows = conn.query(sql, &[]).await?;
+        if rows.is_empty() {
+            return Err(OxiSqlError::Other("query returned no rows".to_string()).into());
+        }
+        Ok(rows.remove(0))
     }
 }
 

@@ -2,11 +2,11 @@
 //!
 //! Enabled via the `aws` Cargo feature.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use object_store::{aws::AmazonS3Builder, path::Path as StoragePath, ObjectStore, ObjectStoreExt};
+use oxistore_blob::{BlobError, BlobStore};
+use oxistore_blob_s3::{S3BlobStore, S3BlobStoreBuilder, S3Credentials};
 use tracing::{debug, instrument};
 
 use super::ObjectStoreProvider;
@@ -65,35 +65,56 @@ impl S3Config {
 /// Object store provider backed by Amazon S3 (or an S3-compatible service such
 /// as MinIO, Ceph, or Cloudflare R2).
 pub struct S3StoreProvider {
-    store: Arc<dyn ObjectStore>,
+    store: S3BlobStore,
     region: String,
 }
 
 impl S3StoreProvider {
     /// Build an [`S3StoreProvider`] from the supplied [`S3Config`].
+    ///
+    /// # Credentials
+    ///
+    /// When both `access_key_id` and `secret_access_key` are present in the
+    /// supplied [`S3Config`], they are used directly.  Otherwise credentials
+    /// are read from the standard AWS environment variables
+    /// (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) via
+    /// [`S3Credentials::from_env`].
+    ///
+    /// **Capability change:** unlike the previous `object_store`-based
+    /// implementation, the pure-Rust `oxistore-blob-s3` backend does **not**
+    /// resolve ambient IAM instance-profile / container credentials.  Only
+    /// explicit credentials or the AWS environment variables are supported;
+    /// this is an intentional, documented change.
     pub fn new(cfg: S3Config) -> Result<Self> {
-        let mut builder = AmazonS3Builder::new()
-            .with_region(&cfg.region)
-            .with_bucket_name(&cfg.bucket);
+        let region = cfg.region.clone();
 
-        if let Some(key) = cfg.access_key_id {
-            builder = builder.with_access_key_id(&key);
-        }
-        if let Some(secret) = cfg.secret_access_key {
-            builder = builder.with_secret_access_key(&secret);
-        }
-        if let Some(endpoint) = cfg.endpoint {
-            builder = builder.with_endpoint(&endpoint);
-        }
+        let credentials = if let (Some(access_key), Some(secret_key)) =
+            (cfg.access_key_id, cfg.secret_access_key)
+        {
+            S3Credentials::new(access_key, secret_key, None)
+        } else {
+            S3Credentials::from_env().map_err(|e| StorageError::Config(e.to_string()))?
+        };
 
-        let store = builder
+        // Synthesize a standard regional AWS endpoint when the caller did not
+        // supply a custom one.  A custom endpoint (MinIO, Ceph, R2, …) implies
+        // path-style addressing; the synthesized AWS default uses virtual-host
+        // style, so `path_style` is only enabled for an explicit endpoint.
+        let (endpoint, path_style) = match cfg.endpoint {
+            Some(custom) => (custom, true),
+            None => (format!("https://s3.{region}.amazonaws.com"), false),
+        };
+
+        let store = S3BlobStoreBuilder::new()
+            .endpoint(endpoint)
+            .region(&region)
+            .bucket(&cfg.bucket)
+            .credentials(credentials)
+            .path_style(path_style)
             .build()
             .map_err(|e| StorageError::Config(e.to_string()))?;
 
-        Ok(Self {
-            store: Arc::new(store),
-            region: cfg.region,
-        })
+        Ok(Self { store, region })
     }
 
     /// Expose the underlying region string.
@@ -101,18 +122,14 @@ impl S3StoreProvider {
         &self.region
     }
 
-    /// Convert a string key to an [`object_store`] [`Path`][StoragePath].
-    fn to_path(key: &str) -> StoragePath {
-        StoragePath::from(key)
-    }
-
-    /// Map an [`object_store::Error`] to our [`StorageError`] with context.
-    fn map_store_error(err: object_store::Error, bucket: &str, key: &str) -> StorageError {
+    /// Map a [`BlobError`] to our [`StorageError`] with bucket/key context.
+    fn map_store_error(err: BlobError, bucket: &str, key: &str) -> StorageError {
         match err {
-            object_store::Error::NotFound { .. } => StorageError::NotFound {
+            BlobError::NotFound(_) => StorageError::NotFound {
                 bucket: bucket.to_string(),
                 key: key.to_string(),
             },
+            // `BlobError` is `#[non_exhaustive]`, so a wildcard arm is mandatory.
             other => StorageError::Provider(other.to_string()),
         }
     }
@@ -137,9 +154,8 @@ impl ObjectStoreProvider for S3StoreProvider {
         _meta: ObjectMeta,
     ) -> Result<PutResult> {
         debug!(bucket, key, bytes = data.len(), "S3 put_object");
-        let path = Self::to_path(key);
         self.store
-            .put(&path, data.into())
+            .put(key, data)
             .await
             .map_err(|e| Self::map_store_error(e, bucket, key))?;
 
@@ -153,15 +169,9 @@ impl ObjectStoreProvider for S3StoreProvider {
     #[instrument(skip(self), fields(bucket, key))]
     async fn get_object(&self, bucket: &str, key: &str) -> Result<ObjectData> {
         debug!(bucket, key, "S3 get_object");
-        let path = Self::to_path(key);
-        let result = self
+        let data = self
             .store
-            .get(&path)
-            .await
-            .map_err(|e| Self::map_store_error(e, bucket, key))?;
-
-        let data = result
-            .bytes()
+            .get(key)
             .await
             .map_err(|e| Self::map_store_error(e, bucket, key))?;
 
@@ -175,9 +185,8 @@ impl ObjectStoreProvider for S3StoreProvider {
     #[instrument(skip(self), fields(bucket, key))]
     async fn delete_object(&self, bucket: &str, key: &str) -> Result<()> {
         debug!(bucket, key, "S3 delete_object");
-        let path = Self::to_path(key);
         self.store
-            .delete(&path)
+            .delete(key)
             .await
             .map_err(|e| Self::map_store_error(e, bucket, key))?;
         Ok(())
@@ -190,24 +199,31 @@ impl ObjectStoreProvider for S3StoreProvider {
         prefix: Option<&str>,
         max: usize,
     ) -> Result<Vec<ObjectListing>> {
-        use futures::StreamExt as _;
-
         debug!(bucket, prefix, max, "S3 list_objects");
 
-        let prefix_path = prefix.map(StoragePath::from);
-        let mut stream = self.store.list(prefix_path.as_ref());
+        // `oxistore-blob-s3` exposes only an eager, key-only `list`; there is no
+        // metadata-bearing or bounded/paginated variant.  Fetch the full key
+        // list, then issue a bounded number of `head` calls (capped at `max`)
+        // to gather sizes.  Keys removed between `list` and `head` (a natural
+        // race) are silently skipped.
+        let prefix_str = prefix.unwrap_or("");
+        let keys = self
+            .store
+            .list(prefix_str)
+            .await
+            .map_err(|e| Self::map_store_error(e, bucket, prefix_str))?;
 
         let mut results = Vec::new();
-        while let Some(item) = stream.next().await {
-            let meta = item.map_err(|e| StorageError::Provider(e.to_string()))?;
-            results.push(ObjectListing {
-                key: meta.location.to_string(),
-                size: meta.size,
-                last_modified: Some(meta.last_modified),
-                etag: meta.e_tag,
-            });
-            if results.len() >= max {
-                break;
+        for key in keys.into_iter().take(max) {
+            match self.store.head(&key).await {
+                Ok(meta) => results.push(ObjectListing {
+                    key: meta.key,
+                    size: meta.size,
+                    last_modified: None,
+                    etag: None,
+                }),
+                Err(BlobError::NotFound(_)) => continue,
+                Err(e) => return Err(Self::map_store_error(e, bucket, &key)),
             }
         }
 
@@ -221,12 +237,14 @@ impl ObjectStoreProvider for S3StoreProvider {
         _ttl: Duration,
         _op: PresignOp,
     ) -> Result<String> {
-        // The `object_store` 0.11 public API does not expose presigned-URL
-        // generation on the `ObjectStore` trait.  Presigned URLs are available
-        // through provider-specific extensions that are not yet stabilised.
+        // The underlying `S3BlobStore` provides real, offline SigV4
+        // `presign_get` / `presign_put` inherent methods.  Wiring them through
+        // this trait method is a deliberate future enhancement, out of scope
+        // for the object_store -> oxistore-blob migration.
         Err(StorageError::Unsupported(
-            "S3 presigned URLs require signed URL support not yet available in the public \
-             object_store trait surface; implement via the aws-sdk-s3 crate directly if needed"
+            "S3 presigned URLs are not yet wired through the ObjectStoreProvider trait; \
+             S3BlobStore::presign_get / presign_put exist and could back this in a future \
+             enhancement"
                 .to_string(),
         ))
     }

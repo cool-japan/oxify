@@ -56,17 +56,19 @@ impl Default for JiraConfig {
 
 /// MCP server backed by the Jira REST API v3
 pub struct JiraServer {
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     cfg: JiraConfig,
 }
 
 impl JiraServer {
     /// Create a new Jira server using the supplied configuration.
     pub fn new(cfg: JiraConfig) -> Result<Self> {
-        let client = reqwest::Client::builder()
+        let client = oxihttp::Client::builder()
             .user_agent(&cfg.user_agent)
-            .timeout(std::time::Duration::from_secs(cfg.timeout_secs))
-            .build()
+            .connect_timeout(std::time::Duration::from_secs(cfg.timeout_secs))
+            .read_timeout(std::time::Duration::from_secs(cfg.timeout_secs))
+            .with_tls()
+            .build_https()
             .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
         Ok(Self { client, cfg })
     }
@@ -81,7 +83,9 @@ impl JiraServer {
         let response = self
             .client
             .get(url)
+            .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
             .basic_auth(&self.cfg.email, Some(&self.cfg.api_token))
+            .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
@@ -89,7 +93,7 @@ impl JiraServer {
         let status = response.status();
         if !status.is_success() {
             let body = response
-                .text()
+                .body_text()
                 .await
                 .unwrap_or_else(|_| "<unreadable body>".to_string());
             return Err(McpError::ToolExecutionError(format!(
@@ -99,7 +103,7 @@ impl JiraServer {
         }
 
         response
-            .json::<Value>()
+            .body_json::<Value>()
             .await
             .map_err(|e| McpError::ToolExecutionError(e.to_string()))
     }
@@ -109,8 +113,11 @@ impl JiraServer {
         let response = self
             .client
             .post(url)
+            .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
             .basic_auth(&self.cfg.email, Some(&self.cfg.api_token))
+            .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
             .json(&body)
+            .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
@@ -118,7 +125,7 @@ impl JiraServer {
         let status = response.status();
         if !status.is_success() {
             let text = response
-                .text()
+                .body_text()
                 .await
                 .unwrap_or_else(|_| "<unreadable body>".to_string());
             return Err(McpError::ToolExecutionError(format!(
@@ -128,7 +135,7 @@ impl JiraServer {
         }
 
         response
-            .json::<Value>()
+            .body_json::<Value>()
             .await
             .map_err(|e| McpError::ToolExecutionError(e.to_string()))
     }
@@ -270,8 +277,11 @@ impl McpServer for JiraServer {
                 let response = self
                     .client
                     .post(&url)
+                    .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
                     .basic_auth(&self.cfg.email, Some(&self.cfg.api_token))
+                    .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
                     .json(&payload)
+                    .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
                     .send()
                     .await
                     .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
@@ -279,7 +289,7 @@ impl McpServer for JiraServer {
                 let status = response.status();
                 if !status.is_success() {
                     let text = response
-                        .text()
+                        .body_text()
                         .await
                         .unwrap_or_else(|_| "<unreadable body>".to_string());
                     return Err(McpError::ToolExecutionError(format!(
@@ -437,11 +447,6 @@ impl McpServer for JiraServer {
 mod tests {
     use super::*;
 
-    /// Install the ring-based rustls crypto provider once per test process.
-    fn install_crypto_provider() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    }
-
     #[test]
     fn test_config_from_env_missing_env_errors() {
         std::env::remove_var("JIRA_SITE");
@@ -451,7 +456,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_tools_returns_eight() {
-        install_crypto_provider();
         let cfg = JiraConfig::default();
         let server = JiraServer::new(cfg).unwrap();
         let tools = server.list_tools().await.unwrap();
@@ -460,7 +464,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_call_tool_unknown_returns_error() {
-        install_crypto_provider();
         let cfg = JiraConfig::default();
         let server = JiraServer::new(cfg).unwrap();
         let result = server.call_tool("nonexistent", serde_json::json!({})).await;
@@ -469,7 +472,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_issue_missing_key() {
-        install_crypto_provider();
         let cfg = JiraConfig::default();
         let server = JiraServer::new(cfg).unwrap();
         let result = server.call_tool("get_issue", serde_json::json!({})).await;
@@ -482,7 +484,6 @@ mod tests {
 
     #[test]
     fn test_list_tools_all_names_unique() {
-        install_crypto_provider();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let tools = runtime.block_on(async {
             let server = JiraServer::new(JiraConfig::default()).unwrap();
@@ -507,7 +508,6 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_search_issues_live() {
-        install_crypto_provider();
         let cfg = JiraConfig::from_env()
             .expect("JIRA_SITE, JIRA_EMAIL, JIRA_API_TOKEN must be set for live test");
         let server = JiraServer::new(cfg).unwrap();

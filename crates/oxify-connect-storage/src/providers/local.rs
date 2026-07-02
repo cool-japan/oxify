@@ -1,19 +1,15 @@
 //! Local filesystem object store provider.
 //!
-//! Enabled via the `local` Cargo feature.  All operations are sandboxed to a
-//! configurable root directory; the root is passed to
-//! [`object_store::local::LocalFileSystem::new_with_prefix`] which prevents
-//! path traversal outside the sandbox.
+//! Enabled via the `local` Cargo feature.  All operations are stored under a
+//! configurable root directory via the pure-Rust [`LocalBlobStore`] backend,
+//! which rejects keys containing `..` components and therefore prevents path
+//! traversal outside the root.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures::StreamExt as _;
-use object_store::{
-    local::LocalFileSystem, path::Path as StoragePath, ObjectStore, ObjectStoreExt,
-};
+use oxistore_blob::{BlobError, BlobStore, LocalBlobStore};
 use tracing::{debug, instrument};
 
 use super::ObjectStoreProvider;
@@ -78,15 +74,17 @@ impl LocalFsConfig {
 
 /// Object store provider backed by the local filesystem.
 ///
-/// All paths are sandboxed to [`LocalFsConfig::root_path`] via
-/// [`LocalFileSystem::new_with_prefix`].  The `bucket` argument in each
-/// operation is treated as a sub-directory under the root, and `key` as the
-/// relative path within that sub-directory, so the on-disk layout is
-/// `<root>/<bucket>/<key>`.
+/// All blobs are stored under [`LocalFsConfig::root_path`] via the pure-Rust
+/// [`LocalBlobStore`] backend.  The `bucket` argument in each operation is
+/// treated as a sub-directory under the root, and `key` as the relative path
+/// within that sub-directory, so the on-disk layout is `<root>/<bucket>/<key>`.
 pub struct LocalFsProvider {
-    /// The underlying [`object_store`] store, sandboxed to `root_path`.
-    store: Arc<dyn ObjectStore>,
+    /// The underlying pure-Rust blob store rooted at `root_path`.
+    store: LocalBlobStore,
     /// The root directory of this provider instance.
+    ///
+    /// Retained separately because [`LocalBlobStore`] does not expose a public
+    /// accessor for its internal base path.
     root_path: PathBuf,
 }
 
@@ -97,23 +95,23 @@ impl LocalFsProvider {
     /// exist, the directory tree is created with
     /// [`std::fs::create_dir_all`].
     ///
+    /// Construction of the underlying [`LocalBlobStore`] is infallible; its
+    /// base directory is otherwise created lazily on the first write.
+    ///
     /// # Errors
     ///
-    /// Returns [`StorageError::Config`] when:
-    /// - The root directory does not exist and `create_if_missing` is `false`.
-    /// - The directory cannot be created.
-    /// - The path cannot be canonicalized by [`LocalFileSystem::new_with_prefix`].
+    /// Returns [`StorageError::Config`] when `create_if_missing` is `true` but
+    /// the root directory cannot be created.
     pub fn new(cfg: LocalFsConfig) -> Result<Self> {
         if cfg.create_if_missing {
             std::fs::create_dir_all(&cfg.root_path)
                 .map_err(|e| StorageError::Config(format!("cannot create root dir: {e}")))?;
         }
 
-        let store = LocalFileSystem::new_with_prefix(&cfg.root_path)
-            .map_err(|e| StorageError::Config(e.to_string()))?;
+        let store = LocalBlobStore::new(&cfg.root_path);
 
         Ok(Self {
-            store: Arc::new(store),
+            store,
             root_path: cfg.root_path,
         })
     }
@@ -123,23 +121,25 @@ impl LocalFsProvider {
         &self.root_path
     }
 
-    /// Build the [`StoragePath`] for a `(bucket, key)` pair.
+    /// Build the blob-store key for a `(bucket, key)` pair.
     ///
-    /// The resulting path is `{bucket}/{key}` which, when interpreted by the
-    /// sandboxed [`LocalFileSystem`], maps to `<root>/<bucket>/<key>` on disk.
+    /// The resulting key is `{bucket}/{key}` which, since [`LocalBlobStore`]
+    /// treats `/` as a nested-directory separator, maps to
+    /// `<root>/<bucket>/<key>` on disk — the same layout as before.
     #[inline]
-    fn to_path(bucket: &str, key: &str) -> StoragePath {
-        StoragePath::from(format!("{bucket}/{key}"))
+    fn blob_key(bucket: &str, key: &str) -> String {
+        format!("{bucket}/{key}")
     }
 
-    /// Map an [`object_store::Error`] to our [`StorageError`] with bucket/key
-    /// context attached.
-    fn map_store_error(err: object_store::Error, bucket: &str, key: &str) -> StorageError {
+    /// Map a [`BlobError`] to our [`StorageError`] with bucket/key context
+    /// attached.
+    fn map_store_error(err: BlobError, bucket: &str, key: &str) -> StorageError {
         match err {
-            object_store::Error::NotFound { .. } => StorageError::NotFound {
+            BlobError::NotFound(_) => StorageError::NotFound {
                 bucket: bucket.to_string(),
                 key: key.to_string(),
             },
+            // `BlobError` is `#[non_exhaustive]`, so a wildcard arm is mandatory.
             other => StorageError::Provider(other.to_string()),
         }
     }
@@ -168,9 +168,9 @@ impl ObjectStoreProvider for LocalFsProvider {
         _meta: ObjectMeta,
     ) -> Result<PutResult> {
         debug!(bucket, key, bytes = data.len(), "LocalFs put_object");
-        let path = Self::to_path(bucket, key);
+        let blob_key = Self::blob_key(bucket, key);
         self.store
-            .put(&path, data.into())
+            .put(&blob_key, data)
             .await
             .map_err(|e| Self::map_store_error(e, bucket, key))?;
 
@@ -187,15 +187,10 @@ impl ObjectStoreProvider for LocalFsProvider {
     #[instrument(skip(self), fields(bucket, key))]
     async fn get_object(&self, bucket: &str, key: &str) -> Result<ObjectData> {
         debug!(bucket, key, "LocalFs get_object");
-        let path = Self::to_path(bucket, key);
-        let result = self
+        let blob_key = Self::blob_key(bucket, key);
+        let data = self
             .store
-            .get(&path)
-            .await
-            .map_err(|e| Self::map_store_error(e, bucket, key))?;
-
-        let data = result
-            .bytes()
+            .get(&blob_key)
             .await
             .map_err(|e| Self::map_store_error(e, bucket, key))?;
 
@@ -212,9 +207,9 @@ impl ObjectStoreProvider for LocalFsProvider {
     #[instrument(skip(self), fields(bucket, key))]
     async fn delete_object(&self, bucket: &str, key: &str) -> Result<()> {
         debug!(bucket, key, "LocalFs delete_object");
-        let path = Self::to_path(bucket, key);
+        let blob_key = Self::blob_key(bucket, key);
         self.store
-            .delete(&path)
+            .delete(&blob_key)
             .await
             .map_err(|e| Self::map_store_error(e, bucket, key))
     }
@@ -237,23 +232,25 @@ impl ObjectStoreProvider for LocalFsProvider {
             Some(p) => format!("{bucket}/{p}"),
             None => format!("{bucket}/"),
         };
-        let prefix_path = StoragePath::from(prefix_str);
 
-        let mut stream = self.store.list(Some(&prefix_path));
-        let mut results = Vec::new();
+        // Unlike the cloud backends, `LocalBlobStore` overrides `list_meta_page`
+        // with an efficient single directory walk, so bounded metadata (capped
+        // at `max`) can be fetched directly in one call.
+        let metas = self
+            .store
+            .list_meta_page(&prefix_str, None, max)
+            .await
+            .map_err(|e| StorageError::Provider(e.to_string()))?;
 
-        while let Some(item) = stream.next().await {
-            let meta = item.map_err(|e| StorageError::Provider(e.to_string()))?;
-            results.push(ObjectListing {
-                key: meta.location.to_string(),
+        let results = metas
+            .into_iter()
+            .map(|meta| ObjectListing {
+                key: meta.key,
                 size: meta.size,
-                last_modified: Some(meta.last_modified),
-                etag: meta.e_tag,
-            });
-            if results.len() >= max {
-                break;
-            }
-        }
+                last_modified: None,
+                etag: None,
+            })
+            .collect();
 
         Ok(results)
     }

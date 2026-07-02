@@ -2,10 +2,23 @@
 
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
+use oxify_model::http_util::append_query_params;
 use oxify_model::Workflow;
-use reqwest::Client;
+use oxihttp::HttpsClient;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+/// Build a fresh oxihttp HTTPS-capable client for the deploy commands.
+///
+/// The client transparently handles both `http://` and `https://` server
+/// URLs, since deployment targets default to a local `http://` server but
+/// may be pointed at a remote `https://` endpoint.
+fn build_client() -> Result<HttpsClient> {
+    oxihttp::Client::builder()
+        .with_tls()
+        .build_https()
+        .context("Failed to build HTTP client")
+}
 
 #[derive(Debug, Args)]
 pub struct DeployArgs {
@@ -210,14 +223,14 @@ async fn deploy_workflow(
     }
 
     // Create HTTP client
-    let client = Client::new();
+    let client = build_client()?;
     let url = format!("{}/api/v1/workflows", server);
 
     // Build request
-    let mut req = client.post(&url).json(&workflow);
+    let mut req = client.post(&url)?.json(&workflow)?;
 
     if let Some(token) = token {
-        req = req.bearer_auth(token);
+        req = req.bearer_token(&token)?;
     }
 
     // Send request
@@ -227,7 +240,7 @@ async fn deploy_workflow(
     if !response.status().is_success() {
         let status = response.status();
         let error_text = response
-            .text()
+            .body_text()
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         anyhow::bail!("Deployment failed with status {}: {}", status, error_text);
@@ -254,17 +267,18 @@ async fn undeploy_workflow(
         println!("   Force mode: enabled");
     }
 
-    let client = Client::new();
-    let url = format!("{}/api/v1/workflows/{}", server, workflow);
+    let client = build_client()?;
+    let base_url = format!("{}/api/v1/workflows/{}", server, workflow);
+    let url = if force {
+        append_query_params(&base_url, &[("force", "true")])
+    } else {
+        base_url
+    };
 
-    let mut req = client.delete(&url);
+    let mut req = client.delete(&url)?;
 
     if let Some(token) = token {
-        req = req.bearer_auth(token);
-    }
-
-    if force {
-        req = req.query(&[("force", "true")]);
+        req = req.bearer_token(&token)?;
     }
 
     let response = req.send().await.context("Failed to connect to server")?;
@@ -272,7 +286,7 @@ async fn undeploy_workflow(
     if !response.status().is_success() {
         let status = response.status();
         let error_text = response
-            .text()
+            .body_text()
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         anyhow::bail!("Undeployment failed with status {}: {}", status, error_text);
@@ -288,17 +302,17 @@ async fn check_status(
     server: String,
     token: Option<String>,
 ) -> Result<()> {
-    let client = Client::new();
+    let client = build_client()?;
 
     if let Some(workflow_id) = workflow {
         // Check specific workflow
         println!("📊 Checking status for: {}", workflow_id);
 
         let url = format!("{}/api/v1/workflows/{}", server, workflow_id);
-        let mut req = client.get(&url);
+        let mut req = client.get(&url)?;
 
         if let Some(token) = token {
-            req = req.bearer_auth(token);
+            req = req.bearer_token(&token)?;
         }
 
         let response = req.send().await.context("Failed to connect to server")?;
@@ -307,7 +321,7 @@ async fn check_status(
             anyhow::bail!("Failed to get workflow status: {}", response.status());
         }
 
-        let info: DeploymentInfo = response.json().await?;
+        let info: DeploymentInfo = response.body_json().await?;
         print_deployment_info(&info, true);
     } else {
         // Check all workflows
@@ -321,13 +335,13 @@ async fn check_status(
 async fn list_deployments(server: String, token: Option<String>, verbose: bool) -> Result<()> {
     println!("📋 Listing deployments from: {}", server);
 
-    let client = Client::new();
+    let client = build_client()?;
     let url = format!("{}/api/v1/workflows", server);
 
-    let mut req = client.get(&url);
+    let mut req = client.get(&url)?;
 
     if let Some(token) = token {
-        req = req.bearer_auth(token);
+        req = req.bearer_token(&token)?;
     }
 
     let response = req.send().await.context("Failed to connect to server")?;
@@ -336,7 +350,7 @@ async fn list_deployments(server: String, token: Option<String>, verbose: bool) 
         anyhow::bail!("Failed to list deployments: {}", response.status());
     }
 
-    let deployments: Vec<DeploymentInfo> = response.json().await?;
+    let deployments: Vec<DeploymentInfo> = response.body_json().await?;
 
     if deployments.is_empty() {
         println!("   No deployments found.");
@@ -371,17 +385,18 @@ async fn update_deployment(
 
     let workflow: Workflow = serde_json::from_str(&content)?;
 
-    let client = Client::new();
-    let url = format!("{}/api/v1/workflows/{}", server, workflow.metadata.id);
+    let client = build_client()?;
+    let base_url = format!("{}/api/v1/workflows/{}", server, workflow.metadata.id);
+    let url = if new_version {
+        append_query_params(&base_url, &[("new_version", "true")])
+    } else {
+        base_url
+    };
 
-    let mut req = client.put(&url).json(&workflow);
+    let mut req = client.put(&url)?.json(&workflow)?;
 
     if let Some(token) = token {
-        req = req.bearer_auth(token);
-    }
-
-    if new_version {
-        req = req.query(&[("new_version", "true")]);
+        req = req.bearer_token(&token)?;
     }
 
     let response = req.send().await.context("Failed to connect to server")?;

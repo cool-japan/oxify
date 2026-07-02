@@ -70,26 +70,28 @@ impl Default for GitLabConfig {
 
 /// MCP server backed by the GitLab REST API v4
 pub struct GitLabServer {
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     cfg: GitLabConfig,
 }
 
 impl GitLabServer {
     /// Create a new GitLab server using the supplied configuration.
     pub fn new(cfg: GitLabConfig) -> Result<Self> {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = oxihttp::HeaderMap::new();
         if !cfg.token.is_empty() {
             headers.insert(
                 "PRIVATE-TOKEN",
-                reqwest::header::HeaderValue::from_str(&cfg.token)
+                oxihttp::HeaderValue::from_str(&cfg.token)
                     .map_err(|e| McpError::InvalidRequest(e.to_string()))?,
             );
         }
-        let client = reqwest::Client::builder()
+        let client = oxihttp::Client::builder()
             .user_agent(&cfg.user_agent)
-            .timeout(std::time::Duration::from_secs(cfg.timeout_secs))
+            .connect_timeout(std::time::Duration::from_secs(cfg.timeout_secs))
+            .read_timeout(std::time::Duration::from_secs(cfg.timeout_secs))
             .default_headers(headers)
-            .build()
+            .with_tls()
+            .build_https()
             .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
         Ok(Self { client, cfg })
     }
@@ -100,6 +102,7 @@ impl GitLabServer {
         let response = self
             .client
             .get(&url)
+            .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
@@ -107,7 +110,7 @@ impl GitLabServer {
         let status = response.status();
         if !status.is_success() {
             let body = response
-                .text()
+                .body_text()
                 .await
                 .unwrap_or_else(|_| "<unreadable body>".to_string());
             return Err(McpError::ToolExecutionError(format!(
@@ -117,7 +120,7 @@ impl GitLabServer {
         }
 
         response
-            .json::<Value>()
+            .body_json::<Value>()
             .await
             .map_err(|e| McpError::ToolExecutionError(e.to_string()))
     }
@@ -128,7 +131,9 @@ impl GitLabServer {
         let response = self
             .client
             .post(&url)
+            .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
             .json(&body)
+            .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
@@ -136,7 +141,7 @@ impl GitLabServer {
         let status = response.status();
         if !status.is_success() {
             let text = response
-                .text()
+                .body_text()
                 .await
                 .unwrap_or_else(|_| "<unreadable body>".to_string());
             return Err(McpError::ToolExecutionError(format!(
@@ -146,7 +151,7 @@ impl GitLabServer {
         }
 
         response
-            .json::<Value>()
+            .body_json::<Value>()
             .await
             .map_err(|e| McpError::ToolExecutionError(e.to_string()))
     }
@@ -491,15 +496,6 @@ impl McpServer for GitLabServer {
 mod tests {
     use super::*;
 
-    /// Install the ring-based rustls crypto provider once per test process.
-    /// reqwest's TLS stack needs a process-level provider to be set before the
-    /// TLS connector is created.  Calling this helper at the start of every
-    /// test that constructs a `GitLabServer` avoids panics when no provider
-    /// has been registered.
-    fn install_crypto_provider() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    }
-
     #[test]
     fn test_config_from_env_missing_token_errors() {
         std::env::remove_var("GITLAB_TOKEN");
@@ -509,7 +505,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_tools_returns_eight() {
-        install_crypto_provider();
         let cfg = GitLabConfig::default();
         let server = GitLabServer::new(cfg).unwrap();
         let tools = server.list_tools().await.unwrap();
@@ -518,7 +513,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_call_tool_unknown_returns_error() {
-        install_crypto_provider();
         let cfg = GitLabConfig::default();
         let server = GitLabServer::new(cfg).unwrap();
         let result = server.call_tool("nonexistent", serde_json::json!({})).await;
@@ -527,7 +521,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_issues_missing_project_no_default() {
-        install_crypto_provider();
         let cfg = GitLabConfig {
             token: "fake".to_string(),
             ..Default::default()
@@ -543,7 +536,6 @@ mod tests {
 
     #[test]
     fn test_list_tools_all_names_unique() {
-        install_crypto_provider();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let tools = runtime.block_on(async {
             let server = GitLabServer::new(GitLabConfig::default()).unwrap();
@@ -567,7 +559,6 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_create_issue_live() {
-        install_crypto_provider();
         let cfg = GitLabConfig::from_env().expect("GITLAB_TOKEN must be set for live test");
         let server = GitLabServer::new(cfg).unwrap();
         let result = server

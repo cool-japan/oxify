@@ -1,10 +1,11 @@
 //! Workflow version history storage
 
+use crate::row_ext::row_to;
 use crate::{DatabasePool, Result};
 use chrono::{DateTime, Utc};
 use oxify_model::{Workflow, WorkflowId};
+use oxisql_core::Connection;
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use uuid::Uuid;
 
 /// Workflow version record
@@ -24,6 +25,19 @@ pub struct WorkflowVersion {
     pub created_at: DateTime<Utc>,
     /// User who created this version (if available)
     pub created_by: Option<String>,
+}
+
+/// Raw `workflow_versions` row shape, mapped from an [`oxisql_core::Row`] via
+/// [`row_to!`] before the string/JSON fields are parsed into
+/// [`WorkflowVersion`].
+struct VersionRow {
+    id: String,
+    workflow_id: String,
+    version: i32,
+    description: Option<String>,
+    definition: String,
+    created_at: String,
+    created_by: Option<String>,
 }
 
 /// Workflow version storage layer
@@ -50,20 +64,32 @@ impl WorkflowVersionStore {
         let version = self.get_next_version(&workflow_id).await?;
         let definition = serde_json::to_string(workflow)?;
 
-        sqlx::query(
+        let id_str = id.to_string();
+        let workflow_id_str = workflow_id.to_string();
+        // Written explicitly (rather than relying on the column's
+        // `DEFAULT (datetime('now'))`) so the stored value is RFC 3339, which
+        // is what `get_versions`/`get_version` parse it back with via
+        // `DateTime::parse_from_rfc3339`. SQLite's `datetime('now')` produces
+        // a bare "YYYY-MM-DD HH:MM:SS" string that RFC 3339 parsing rejects.
+        let created_at = Utc::now().to_rfc3339();
+
+        let conn = self.pool.acquire().await?;
+        conn.execute(
             r"
             INSERT INTO workflow_versions
-            (id, workflow_id, version, description, definition, created_by)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (id, workflow_id, version, description, definition, created_at, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ",
+            &[
+                &id_str,
+                &workflow_id_str,
+                &version,
+                &description,
+                &definition,
+                &created_at,
+                &created_by,
+            ],
         )
-        .bind(id.to_string())
-        .bind(workflow_id.to_string())
-        .bind(version)
-        .bind(description)
-        .bind(definition)
-        .bind(created_by)
-        .execute(self.pool.pool())
         .await?;
 
         Ok(id)
@@ -71,41 +97,50 @@ impl WorkflowVersionStore {
 
     /// Get version history for a workflow
     pub async fn get_versions(&self, workflow_id: &WorkflowId) -> Result<Vec<WorkflowVersion>> {
-        let rows = sqlx::query(
-            r"
-            SELECT id, workflow_id, version, description, definition, created_at, created_by
-            FROM workflow_versions
-            WHERE workflow_id = ?
-            ORDER BY version DESC
-            ",
-        )
-        .bind(workflow_id.to_string())
-        .fetch_all(self.pool.pool())
-        .await?;
+        let workflow_id_str = workflow_id.to_string();
+
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                r"
+                SELECT id, workflow_id, version, description, definition, created_at, created_by
+                FROM workflow_versions
+                WHERE workflow_id = $1
+                ORDER BY version DESC
+                ",
+                &[&workflow_id_str],
+            )
+            .await?;
 
         let versions = rows
-            .into_iter()
-            .filter_map(|row| {
-                let id_str: String = row.get("id");
-                let workflow_id_str: String = row.get("workflow_id");
-                let definition: String = row.get("definition");
-                let created_at_str: String = row.get("created_at");
+            .iter()
+            .map(row_to!(VersionRow {
+                id: "id",
+                workflow_id: "workflow_id",
+                version: "version",
+                description: "description",
+                definition: "definition",
+                created_at: "created_at",
+                created_by: "created_by",
+            }))
+            .filter_map(|raw| {
+                let raw = raw.ok()?;
 
-                let id = Uuid::parse_str(&id_str).ok()?;
-                let workflow_id = Uuid::parse_str(&workflow_id_str).ok()?;
-                let workflow: Workflow = serde_json::from_str(&definition).ok()?;
-                let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+                let id = Uuid::parse_str(&raw.id).ok()?;
+                let workflow_id = Uuid::parse_str(&raw.workflow_id).ok()?;
+                let workflow: Workflow = serde_json::from_str(&raw.definition).ok()?;
+                let created_at = DateTime::parse_from_rfc3339(&raw.created_at)
                     .map(|dt| dt.with_timezone(&Utc))
                     .ok()?;
 
                 Some(WorkflowVersion {
                     id,
                     workflow_id,
-                    version: row.get("version"),
-                    description: row.get("description"),
+                    version: raw.version,
+                    description: raw.description,
                     workflow,
                     created_at,
-                    created_by: row.get("created_by"),
+                    created_by: raw.created_by,
                 })
             })
             .collect();
@@ -119,95 +154,122 @@ impl WorkflowVersionStore {
         workflow_id: &WorkflowId,
         version: i32,
     ) -> Result<Option<WorkflowVersion>> {
-        let row = sqlx::query(
-            r"
-            SELECT id, workflow_id, version, description, definition, created_at, created_by
-            FROM workflow_versions
-            WHERE workflow_id = ? AND version = ?
-            ",
-        )
-        .bind(workflow_id.to_string())
-        .bind(version)
-        .fetch_optional(self.pool.pool())
-        .await?;
+        let workflow_id_str = workflow_id.to_string();
 
-        match row {
-            Some(row) => {
-                let id_str: String = row.get("id");
-                let workflow_id_str: String = row.get("workflow_id");
-                let definition: String = row.get("definition");
-                let created_at_str: String = row.get("created_at");
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                r"
+                SELECT id, workflow_id, version, description, definition, created_at, created_by
+                FROM workflow_versions
+                WHERE workflow_id = $1 AND version = $2
+                ",
+                &[&workflow_id_str, &version],
+            )
+            .await?;
 
-                let id = Uuid::parse_str(&id_str)
-                    .map_err(|e| crate::StorageError::validation(format!("Invalid UUID: {}", e)))?;
-                let workflow_id = Uuid::parse_str(&workflow_id_str)
-                    .map_err(|e| crate::StorageError::validation(format!("Invalid UUID: {}", e)))?;
-                let workflow: Workflow = serde_json::from_str(&definition)?;
-                let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .map_err(|e| crate::StorageError::validation(format!("Invalid date: {}", e)))?;
+        let Some(row) = rows.first() else {
+            return Ok(None);
+        };
 
-                Ok(Some(WorkflowVersion {
-                    id,
-                    workflow_id,
-                    version: row.get("version"),
-                    description: row.get("description"),
-                    workflow,
-                    created_at,
-                    created_by: row.get("created_by"),
-                }))
-            }
-            None => Ok(None),
-        }
+        let raw = row_to!(VersionRow {
+            id: "id",
+            workflow_id: "workflow_id",
+            version: "version",
+            description: "description",
+            definition: "definition",
+            created_at: "created_at",
+            created_by: "created_by",
+        })(row)?;
+
+        let id = Uuid::parse_str(&raw.id)
+            .map_err(|e| crate::StorageError::validation(format!("Invalid UUID: {}", e)))?;
+        let workflow_id = Uuid::parse_str(&raw.workflow_id)
+            .map_err(|e| crate::StorageError::validation(format!("Invalid UUID: {}", e)))?;
+        let workflow: Workflow = serde_json::from_str(&raw.definition)?;
+        let created_at = DateTime::parse_from_rfc3339(&raw.created_at)
+            .map(|dt| dt.with_timezone(&Utc))
+            .map_err(|e| crate::StorageError::validation(format!("Invalid date: {}", e)))?;
+
+        Ok(Some(WorkflowVersion {
+            id,
+            workflow_id,
+            version: raw.version,
+            description: raw.description,
+            workflow,
+            created_at,
+            created_by: raw.created_by,
+        }))
     }
 
     /// Get the next version number for a workflow
     async fn get_next_version(&self, workflow_id: &WorkflowId) -> Result<i32> {
-        let row = sqlx::query(
-            r"
-            SELECT COALESCE(MAX(version), 0) + 1 as next_version
-            FROM workflow_versions
-            WHERE workflow_id = ?
-            ",
-        )
-        .bind(workflow_id.to_string())
-        .fetch_one(self.pool.pool())
-        .await?;
+        let workflow_id_str = workflow_id.to_string();
 
-        let next_version: i32 = row.get("next_version");
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                r"
+                SELECT COALESCE(MAX(version), 0) + 1 as next_version
+                FROM workflow_versions
+                WHERE workflow_id = $1
+                ",
+                &[&workflow_id_str],
+            )
+            .await?;
+
+        let row = rows.first().ok_or_else(|| {
+            crate::StorageError::Database(oxisql_core::OxiSqlError::Other(
+                "aggregate query for next version returned no rows".to_string(),
+            ))
+        })?;
+
+        let next_version: i32 = row.try_get("next_version")?;
         Ok(next_version)
     }
 
     /// Get the latest version number for a workflow
     pub async fn get_latest_version(&self, workflow_id: &WorkflowId) -> Result<Option<i32>> {
-        let row = sqlx::query(
-            r"
-            SELECT MAX(version) as latest_version
-            FROM workflow_versions
-            WHERE workflow_id = ?
-            ",
-        )
-        .bind(workflow_id.to_string())
-        .fetch_one(self.pool.pool())
-        .await?;
+        let workflow_id_str = workflow_id.to_string();
 
-        let latest_version: Option<i32> = row.get("latest_version");
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                r"
+                SELECT MAX(version) as latest_version
+                FROM workflow_versions
+                WHERE workflow_id = $1
+                ",
+                &[&workflow_id_str],
+            )
+            .await?;
+
+        let row = rows.first().ok_or_else(|| {
+            crate::StorageError::Database(oxisql_core::OxiSqlError::Other(
+                "aggregate query for latest version returned no rows".to_string(),
+            ))
+        })?;
+
+        let latest_version: Option<i32> = row.try_get("latest_version")?;
         Ok(latest_version)
     }
 
     /// Delete all versions for a workflow
     pub async fn delete_all_versions(&self, workflow_id: &WorkflowId) -> Result<u64> {
-        let result = sqlx::query(
-            r"
-            DELETE FROM workflow_versions
-            WHERE workflow_id = ?
-            ",
-        )
-        .bind(workflow_id.to_string())
-        .execute(self.pool.pool())
-        .await?;
+        let workflow_id_str = workflow_id.to_string();
 
-        Ok(result.rows_affected())
+        let conn = self.pool.acquire().await?;
+        let rows_affected = conn
+            .execute(
+                r"
+                DELETE FROM workflow_versions
+                WHERE workflow_id = $1
+                ",
+                &[&workflow_id_str],
+            )
+            .await?;
+
+        Ok(rows_affected)
     }
 
     /// Compare two versions of a workflow
@@ -266,26 +328,31 @@ impl WorkflowVersionStore {
         // Update the main workflows table with the version's definition
         let workflow_json = serde_json::to_string(&version.workflow)?;
         let now = Utc::now().to_rfc3339();
+        let workflow_id_str = workflow_id.to_string();
 
-        let result = sqlx::query(
-            r"
-            UPDATE workflows
-            SET name = ?,
-                description = ?,
-                definition = ?,
-                updated_at = ?
-            WHERE id = ?
-            ",
-        )
-        .bind(&version.workflow.metadata.name)
-        .bind(&version.workflow.metadata.description)
-        .bind(workflow_json)
-        .bind(now)
-        .bind(workflow_id.to_string())
-        .execute(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows_affected = conn
+            .execute(
+                r"
+                UPDATE workflows
+                SET name = $1,
+                    description = $2,
+                    definition = $3,
+                    updated_at = $4
+                WHERE id = $5
+                ",
+                &[
+                    &version.workflow.metadata.name,
+                    &version.workflow.metadata.description,
+                    &workflow_json,
+                    &now,
+                    &workflow_id_str,
+                ],
+            )
+            .await?;
+        drop(conn);
 
-        if result.rows_affected() == 0 {
+        if rows_affected == 0 {
             return Ok(false);
         }
 
@@ -307,18 +374,20 @@ impl WorkflowVersionStore {
         workflow_id: &WorkflowId,
         before_version: i32,
     ) -> Result<u64> {
-        let result = sqlx::query(
-            r"
-            DELETE FROM workflow_versions
-            WHERE workflow_id = ? AND version < ?
-            ",
-        )
-        .bind(workflow_id.to_string())
-        .bind(before_version)
-        .execute(self.pool.pool())
-        .await?;
+        let workflow_id_str = workflow_id.to_string();
 
-        Ok(result.rows_affected())
+        let conn = self.pool.acquire().await?;
+        let rows_affected = conn
+            .execute(
+                r"
+                DELETE FROM workflow_versions
+                WHERE workflow_id = $1 AND version < $2
+                ",
+                &[&workflow_id_str, &before_version],
+            )
+            .await?;
+
+        Ok(rows_affected)
     }
 }
 
@@ -341,16 +410,21 @@ mod tests {
 
     #[allow(dead_code)]
     async fn setup_test_pool() -> Result<DatabasePool> {
+        // `:memory:` SQLite databases are per-connection in oxisql's pool
+        // (each pool slot opens its own isolated in-memory database), so the
+        // pool is pinned to a single connection here to guarantee that the
+        // schema applied by `migrate()` is visible to every subsequent
+        // `pool.acquire()` call made by the store in this test.
         let config = crate::DatabaseConfig {
             database_url: std::env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite::memory:".to_string()),
-            ..Default::default()
+            max_connections: 1,
+            min_connections: 1,
         };
         DatabasePool::new(config).await
     }
 
     #[tokio::test]
-    #[ignore] // Requires database
     async fn test_version_history() -> Result<()> {
         let pool = setup_test_pool().await?;
         pool.migrate().await?;

@@ -28,7 +28,9 @@
 //! let data = connector.post("/users", json!({"name": "John"})).await?;
 //! ```
 
-use reqwest::{Client, Method, StatusCode};
+use hyper_util::client::legacy::connect::HttpConnector;
+use oxify_model::http_util::append_query_params;
+use oxihttp::{Client, HttpsClient, Method, OxiHttpsConnector, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -36,6 +38,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::RwLock;
+
+/// Request builder type produced by the HTTPS-capable oxihttp client used by
+/// this connector. Named explicitly so private helpers such as `apply_auth`
+/// can take and return it without leaking the connector generic into public
+/// signatures.
+type HttpsRequestBuilder = oxihttp::RequestBuilder<OxiHttpsConnector<HttpConnector>>;
 
 /// REST connector errors
 #[derive(Error, Debug)]
@@ -322,7 +330,7 @@ impl RestResponse {
 /// Generic REST API Connector
 pub struct RestConnector {
     config: RestConfig,
-    client: Client,
+    client: HttpsClient,
     cache: Arc<RwLock<HashMap<String, CacheEntry>>>,
     rate_limiter: Arc<RwLock<RateLimiterState>>,
     oauth_token: Arc<RwLock<Option<(String, Instant)>>>,
@@ -331,10 +339,13 @@ pub struct RestConnector {
 impl RestConnector {
     /// Create a new REST connector
     pub fn new(config: RestConfig) -> Self {
+        let timeout = Duration::from_secs(config.timeout_secs);
         let client = Client::builder()
-            .timeout(Duration::from_secs(config.timeout_secs))
-            .build()
-            .unwrap_or_default();
+            .with_tls()
+            .connect_timeout(timeout)
+            .read_timeout(timeout)
+            .build_https()
+            .expect("failed to build oxihttp HTTPS client for REST connector");
 
         Self {
             config,
@@ -474,29 +485,66 @@ impl RestConnector {
         body: Option<Value>,
         query_params: Option<HashMap<String, String>>,
     ) -> Result<RestResponse, RestConnectorError> {
-        let url = format!("{}{}", self.config.base_url, path);
         let start = Instant::now();
 
-        let mut request = self.client.request(method.clone(), &url);
+        // oxihttp exposes no builder-level query API, so every query parameter
+        // must be folded into the URL before the request builder is created.
+        // This includes the API-key-as-query-parameter auth case, which the old
+        // reqwest code handled inside `apply_auth` via `.query(...)`.
+        let mut query_pairs: Vec<(String, String)> = Vec::new();
+        if let Some(params) = query_params {
+            for (key, value) in params {
+                query_pairs.push((key, value));
+            }
+        }
+        if let AuthConfig::ApiKey {
+            key,
+            value,
+            in_header: false,
+        } = &self.config.auth
+        {
+            query_pairs.push((key.clone(), value.clone()));
+        }
+
+        let base_url = format!("{}{}", self.config.base_url, path);
+        let url = if query_pairs.is_empty() {
+            base_url
+        } else {
+            append_query_params(&base_url, &query_pairs)
+        };
+
+        // Build the method-specific request builder.
+        let build_result = match method.as_str() {
+            "GET" => self.client.get(&url),
+            "POST" => self.client.post(&url),
+            "PUT" => self.client.put(&url),
+            "PATCH" => self.client.patch(&url),
+            "DELETE" => self.client.delete(&url),
+            "HEAD" => self.client.head(&url),
+            other => {
+                return Err(RestConnectorError::RequestFailed(format!(
+                    "Unsupported HTTP method: {other}"
+                )));
+            }
+        };
+        let mut request =
+            build_result.map_err(|e| RestConnectorError::RequestFailed(e.to_string()))?;
 
         // Add default headers
         for (key, value) in &self.config.default_headers {
-            request = request.header(key.as_str(), value.as_str());
+            request = request
+                .header(key.as_str(), value.as_str())
+                .map_err(|e| RestConnectorError::RequestFailed(e.to_string()))?;
         }
 
-        // Add authentication
+        // Add authentication (header-based; query-based API keys handled above)
         request = self.apply_auth(request).await?;
 
-        // Add query parameters
-        if let Some(params) = query_params {
-            request = request.query(&params);
-        }
-
-        // Add body
+        // Add body (oxihttp's `json` sets the Content-Type header automatically)
         if let Some(body) = body {
             request = request
-                .header("Content-Type", "application/json")
-                .json(&body);
+                .json(&body)
+                .map_err(|e| RestConnectorError::SerializationError(e.to_string()))?;
         }
 
         // Execute request
@@ -513,7 +561,7 @@ impl RestConnector {
             .collect();
 
         let body_text = response
-            .text()
+            .body_text()
             .await
             .map_err(|e| RestConnectorError::ResponseParsingError(e.to_string()))?;
 
@@ -550,27 +598,38 @@ impl RestConnector {
     }
 
     /// Apply authentication to the request
+    ///
+    /// Header-based auth (Bearer, Basic, header API key, OAuth2, Custom) is
+    /// applied to the request builder here. The API-key-as-query-parameter case
+    /// is folded into the URL in `execute_request`, because oxihttp exposes no
+    /// builder-level query API.
     async fn apply_auth(
         &self,
-        request: reqwest::RequestBuilder,
-    ) -> Result<reqwest::RequestBuilder, RestConnectorError> {
+        request: HttpsRequestBuilder,
+    ) -> Result<HttpsRequestBuilder, RestConnectorError> {
         match &self.config.auth {
             AuthConfig::None => Ok(request),
-            AuthConfig::Bearer { token } => Ok(request.bearer_auth(token)),
+            AuthConfig::Bearer { token } => request
+                .bearer_token(token)
+                .map_err(|e| RestConnectorError::AuthenticationFailed(e.to_string())),
             AuthConfig::ApiKey {
                 key,
                 value,
                 in_header,
             } => {
                 if *in_header {
-                    Ok(request.header(key.as_str(), value.as_str()))
+                    request
+                        .header(key.as_str(), value.as_str())
+                        .map_err(|e| RestConnectorError::AuthenticationFailed(e.to_string()))
                 } else {
-                    Ok(request.query(&[(key.as_str(), value.as_str())]))
+                    // API key travels as a query parameter, which is appended to
+                    // the URL before this request builder is constructed.
+                    Ok(request)
                 }
             }
-            AuthConfig::Basic { username, password } => {
-                Ok(request.basic_auth(username, Some(password)))
-            }
+            AuthConfig::Basic { username, password } => request
+                .basic_auth(username, Some(password.as_str()))
+                .map_err(|e| RestConnectorError::AuthenticationFailed(e.to_string())),
             AuthConfig::OAuth2 {
                 client_id,
                 client_secret,
@@ -582,21 +641,30 @@ impl RestConnector {
                     let token_guard = self.oauth_token.read().await;
                     if let Some((token, expires)) = token_guard.as_ref() {
                         if *expires > Instant::now() {
-                            return Ok(request.bearer_auth(token));
+                            return request.bearer_token(token).map_err(|e| {
+                                RestConnectorError::AuthenticationFailed(e.to_string())
+                            });
                         }
                     }
                 }
 
                 // Get a new token
+                let form_body = oxihttp::FormBody::new()
+                    .field("grant_type", "client_credentials")
+                    .field("client_id", client_id.as_str())
+                    .field("client_secret", client_secret.as_str())
+                    .field("scope", scopes.join(" "));
+
                 let token_response = self
                     .client
                     .post(token_url)
-                    .form(&[
-                        ("grant_type", "client_credentials"),
-                        ("client_id", client_id),
-                        ("client_secret", client_secret),
-                        ("scope", &scopes.join(" ")),
-                    ])
+                    .map_err(|e| {
+                        RestConnectorError::AuthenticationFailed(format!(
+                            "Failed to get OAuth2 token: {}",
+                            e
+                        ))
+                    })?
+                    .form(&form_body)
                     .send()
                     .await
                     .map_err(|e| {
@@ -606,7 +674,7 @@ impl RestConnector {
                         ))
                     })?;
 
-                let token_data: Value = token_response.json().await.map_err(|e| {
+                let token_data: Value = token_response.body_json().await.map_err(|e| {
                     RestConnectorError::AuthenticationFailed(format!(
                         "Failed to parse token response: {}",
                         e
@@ -637,11 +705,13 @@ impl RestConnector {
                     ));
                 }
 
-                Ok(request.bearer_auth(access_token))
+                request
+                    .bearer_token(&access_token)
+                    .map_err(|e| RestConnectorError::AuthenticationFailed(e.to_string()))
             }
-            AuthConfig::Custom { header, value } => {
-                Ok(request.header(header.as_str(), value.as_str()))
-            }
+            AuthConfig::Custom { header, value } => request
+                .header(header.as_str(), value.as_str())
+                .map_err(|e| RestConnectorError::AuthenticationFailed(e.to_string())),
         }
     }
 

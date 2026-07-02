@@ -2,6 +2,7 @@
 name = "oxify-authz"
 version = "0.2.0"
 edition = "2021"
+rust-version.workspace = true
 authors = ["OxiFY Contributors"]
 license = "Apache-2.0"
 description = "ReBAC (Relationship-Based Access Control) authorization engine - Google Zanzibar implementation"

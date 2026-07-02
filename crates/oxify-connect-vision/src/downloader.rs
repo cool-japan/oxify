@@ -8,7 +8,7 @@
 
 use crate::errors::{Result, VisionError};
 use futures::StreamExt;
-use sha2::{Digest, Sha256};
+use oxicrypto_hash::Sha256;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
@@ -192,15 +192,18 @@ impl DownloaderConfig {
 pub struct ModelDownloader {
     config: DownloaderConfig,
     progress_callback: Option<ProgressCallback>,
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
 }
 
 impl ModelDownloader {
     /// Create a new model downloader.
     pub fn new(config: DownloaderConfig) -> Result<Self> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(config.timeout_secs))
-            .build()
+        let timeout = std::time::Duration::from_secs(config.timeout_secs);
+        let client = oxihttp::Client::builder()
+            .with_tls()
+            .connect_timeout(timeout)
+            .read_timeout(timeout)
+            .build_https()
             .map_err(|e| VisionError::config(format!("Failed to create HTTP client: {}", e)))?;
 
         Ok(Self {
@@ -353,6 +356,7 @@ impl ModelDownloader {
         let response = self
             .client
             .get(url)
+            .map_err(|e| VisionError::config(format!("Download request failed: {}", e)))?
             .send()
             .await
             .map_err(|e| VisionError::config(format!("Download request failed: {}", e)))?;
@@ -365,7 +369,7 @@ impl ModelDownloader {
         }
 
         let total_bytes = response.content_length();
-        let mut stream = response.bytes_stream();
+        let mut stream = response.body_stream();
         let mut file = tokio::fs::File::create(dest_path)
             .await
             .map_err(|e| VisionError::config(format!("Failed to create file: {}", e)))?;
@@ -436,9 +440,7 @@ async fn verify_checksum(path: &Path, expected: &str) -> Result<bool> {
         .await
         .map_err(|e| VisionError::config(format!("Failed to read file for checksum: {}", e)))?;
 
-    let mut hasher = Sha256::new();
-    hasher.update(&data);
-    let hash = hasher.finalize();
+    let hash = Sha256.hash_fixed(&data);
     let hash_hex = hex::encode(hash);
 
     Ok(hash_hex.eq_ignore_ascii_case(expected))
@@ -451,9 +453,7 @@ pub async fn compute_checksum(path: &Path) -> Result<String> {
         .await
         .map_err(|e| VisionError::config(format!("Failed to read file: {}", e)))?;
 
-    let mut hasher = Sha256::new();
-    hasher.update(&data);
-    let hash = hasher.finalize();
+    let hash = Sha256.hash_fixed(&data);
 
     Ok(hex::encode(hash))
 }

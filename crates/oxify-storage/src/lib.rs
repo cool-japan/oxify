@@ -6,7 +6,9 @@
 //!
 //! ## Connection Pooling Strategy
 //!
-//! The storage layer uses `sqlx::SqlitePool` for connection management with the following strategy:
+//! The storage layer uses the Pure-Rust OxiSQL SQLite pool
+//! (`oxisql_pool::sqlite::SqliteCompatPool`, Limbo backend) for connection
+//! management with the following strategy:
 //!
 //! ### Configuration
 //! - **Max Connections**: Configurable (default: 10) - Upper limit of connections in pool
@@ -49,11 +51,16 @@ pub mod maintenance;
 // pub mod maintenance_scheduler; // Disabled - complex
 pub mod metrics_exporter;
 // mod metrics_store;     // Disabled - needs major conversion
-pub mod migration_runner;
+// migration_runner (hand-rolled schema_migrations tracker + Postgres-only
+// sql/002_schema_constraints.sql) was retired during the sqlx -> oxisql
+// migration; migrations now run through oxisql-migrate against the
+// `migrations/` directory. See pool::DatabasePool::migrate.
 pub mod migrations;
 mod models;
 pub mod pagination;
 mod pool;
+/// Internal row-mapping helpers (`RowExt` + `row_to!`) shared by store modules.
+mod row_ext;
 // pub mod pool_tuner;    // Disabled - complex
 pub mod query_builder;
 // pub mod query_profiler; // Disabled - complex
@@ -70,7 +77,7 @@ pub mod soft_delete;
 // pub mod transaction;   // Disabled - uses Postgres Transaction
 mod user_store;
 pub mod validation;
-// pub mod vector_cache;  // Disabled - complex
+pub mod vector_cache;
 // pub mod webhook_delivery; // Disabled - complex
 // pub mod webhook_retry; // Disabled - complex
 // mod webhook_store;     // Disabled - needs major conversion
@@ -111,13 +118,12 @@ pub use maintenance::{
     IndexBloatInfo, MaintenanceConfig, MaintenanceResults, MaintenanceService, TableStats,
 };
 pub use metrics_exporter::{Metric, MetricType, MetricsExporter, MetricsFormat};
-pub use migration_runner::{Migration, MigrationRunner, MigrationStatus};
 pub use models::{ExecutionRow, UserPermissionRow, UserRoleRow, UserRow, WorkflowRow};
 pub use pagination::{
     CursorDirection, PageInfo, PaginationBuilder, PaginationRequest, PaginationResponse,
     PaginationStrategy,
 };
-pub use pool::{DatabasePool, PoolHealth, PoolMetrics, PoolStats};
+pub use pool::{DatabasePool, PoolHealth, PoolMetrics, PoolStats, PooledConnection};
 // #[cfg(feature = "redis-cache")]
 // pub use redis_cache::{RedisCache, RedisCacheConfig, TwoLevelCache};
 #[cfg(feature = "redis-cache")]

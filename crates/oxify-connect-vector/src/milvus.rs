@@ -10,9 +10,49 @@ use crate::{
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+/// Build an authenticated request for the given HTTP method and URL.
+///
+/// This replaces the removed reqwest `Client::request(method, url)` generic
+/// dispatch by matching over [`oxihttp::Method`] and calling the corresponding
+/// verb method on the HTTPS client, then layering the optional `Authorization`
+/// bearer header and the mandatory `Content-Type: application/json` header.
+///
+/// It is a `macro_rules!` rather than a plain method because the concrete
+/// HTTPS request-builder type (`RequestBuilder<OxiHttpsConnector<HttpConnector>>`)
+/// is not nameable through the public `oxihttp` facade, and every
+/// `RequestBuilder<C>` method is bound by the un-re-exported hyper `Connect`
+/// trait, so no generic helper signature can be written. Expanding inline lets
+/// the connector type be inferred at each call site. The macro yields
+/// `Result<oxihttp::RequestBuilder<_>, oxihttp::OxiHttpError>`, so every call
+/// site propagates the error with `?` (via `map_err`).
+macro_rules! build_request {
+    ($self:expr, $method:expr, $url:expr) => {{
+        let dispatched = match $method.as_str() {
+            "GET" => $self.client.get($url),
+            "POST" => $self.client.post($url),
+            "PUT" => $self.client.put($url),
+            "DELETE" => $self.client.delete($url),
+            "PATCH" => $self.client.patch($url),
+            "HEAD" => $self.client.head($url),
+            other => Err(oxihttp::OxiHttpError::MethodNotAllowed {
+                method: other.to_string(),
+                path: ($url).to_string(),
+            }),
+        };
+        dispatched.and_then(|request| {
+            let request = if let Some(ref token) = $self.token {
+                request.header("Authorization", &format!("Bearer {}", token))?
+            } else {
+                request
+            };
+            request.header("Content-Type", "application/json")
+        })
+    }};
+}
+
 /// Milvus vector database provider
 pub struct MilvusProvider {
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     base_url: String,
     token: Option<String>,
 }
@@ -112,19 +152,13 @@ impl MilvusProvider {
     /// * `token` - Optional authentication token
     pub fn new(base_url: String, token: Option<String>) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: oxihttp::Client::builder()
+                .with_tls()
+                .build_https()
+                .expect("failed to build oxihttp HTTPS client for Milvus"),
             base_url,
             token,
         }
-    }
-
-    /// Build a request with optional authentication
-    fn build_request(&self, method: reqwest::Method, url: &str) -> reqwest::RequestBuilder {
-        let mut request = self.client.request(method, url);
-        if let Some(ref token) = self.token {
-            request = request.header("Authorization", format!("Bearer {}", token));
-        }
-        request.header("Content-Type", "application/json")
     }
 
     /// Convert JSON filter to Milvus filter expression
@@ -168,16 +202,16 @@ impl VectorProvider for MilvusProvider {
 
         let url = format!("{}/v2/vectordb/entities/search", self.base_url);
 
-        let response = self
-            .build_request(reqwest::Method::POST, &url)
-            .json(&search_request)
+        let response = build_request!(self, oxihttp::Method::POST, &url)
+            .and_then(|request| request.json(&search_request))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         let status = response.status();
         let body = response
-            .text()
+            .body_text()
             .await
             .map_err(|e| VectorError::QueryError(e.to_string()))?;
 
@@ -244,16 +278,16 @@ impl VectorProvider for MilvusProvider {
 
         let url = format!("{}/v2/vectordb/entities/insert", self.base_url);
 
-        let response = self
-            .build_request(reqwest::Method::POST, &url)
-            .json(&insert_request)
+        let response = build_request!(self, oxihttp::Method::POST, &url)
+            .and_then(|request| request.json(&insert_request))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         let status = response.status();
         let body = response
-            .text()
+            .body_text()
             .await
             .map_err(|e| VectorError::QueryError(e.to_string()))?;
 
@@ -294,16 +328,16 @@ impl VectorProvider for MilvusProvider {
 
         let url = format!("{}/v2/vectordb/entities/delete", self.base_url);
 
-        let response = self
-            .build_request(reqwest::Method::POST, &url)
-            .json(&delete_request)
+        let response = build_request!(self, oxihttp::Method::POST, &url)
+            .and_then(|request| request.json(&delete_request))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         let status = response.status();
         let body = response
-            .text()
+            .body_text()
             .await
             .map_err(|e| VectorError::QueryError(e.to_string()))?;
 
@@ -336,16 +370,16 @@ impl VectorProvider for MilvusProvider {
 
         let url = format!("{}/v2/vectordb/collections/create", self.base_url);
 
-        let response = self
-            .build_request(reqwest::Method::POST, &url)
-            .json(&create_request)
+        let response = build_request!(self, oxihttp::Method::POST, &url)
+            .and_then(|request| request.json(&create_request))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         let status = response.status();
         let body = response
-            .text()
+            .body_text()
             .await
             .map_err(|e| VectorError::QueryError(e.to_string()))?;
 
@@ -375,8 +409,8 @@ impl VectorProvider for MilvusProvider {
             self.base_url, name
         );
 
-        let response = self
-            .build_request(reqwest::Method::GET, &url)
+        let response = build_request!(self, oxihttp::Method::GET, &url)
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
@@ -386,7 +420,7 @@ impl VectorProvider for MilvusProvider {
         }
 
         let body = response
-            .text()
+            .body_text()
             .await
             .map_err(|e| VectorError::QueryError(e.to_string()))?;
 
@@ -421,16 +455,16 @@ impl VectorProvider for MilvusProvider {
 
         let url = format!("{}/v2/vectordb/entities/insert", self.base_url);
 
-        let response = self
-            .build_request(reqwest::Method::POST, &url)
-            .json(&insert_request)
+        let response = build_request!(self, oxihttp::Method::POST, &url)
+            .and_then(|request| request.json(&insert_request))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         let status = response.status();
         let body = response
-            .text()
+            .body_text()
             .await
             .map_err(|e| VectorError::QueryError(e.to_string()))?;
 
@@ -477,9 +511,9 @@ impl VectorProvider for MilvusProvider {
 
             let url = format!("{}/v2/vectordb/entities/query", self.base_url);
 
-            let get_response = self
-                .build_request(reqwest::Method::POST, &url)
-                .json(&get_request)
+            let get_response = build_request!(self, oxihttp::Method::POST, &url)
+                .and_then(|request| request.json(&get_request))
+                .map_err(|e| VectorError::ConnectionError(e.to_string()))?
                 .send()
                 .await
                 .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
@@ -492,7 +526,7 @@ impl VectorProvider for MilvusProvider {
             }
 
             let get_body = get_response
-                .text()
+                .body_text()
                 .await
                 .map_err(|e| VectorError::QueryError(e.to_string()))?;
 
@@ -558,15 +592,15 @@ impl VectorProvider for MilvusProvider {
             self.base_url, name
         );
 
-        let response = self
-            .build_request(reqwest::Method::GET, &url)
+        let response = build_request!(self, oxihttp::Method::GET, &url)
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         let status = response.status();
         let body = response
-            .text()
+            .body_text()
             .await
             .map_err(|e| VectorError::QueryError(e.to_string()))?;
 

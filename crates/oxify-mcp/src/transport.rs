@@ -126,7 +126,7 @@ impl McpTransport for StdioTransport {
 
 /// HTTP transport for remote MCP servers
 pub struct HttpTransport {
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     base_url: String,
     request_id: u64,
     /// Maximum response size in bytes (default: 10MB)
@@ -138,11 +138,23 @@ impl HttpTransport {
     const DEFAULT_MAX_RESPONSE_SIZE: usize = 10 * 1024 * 1024;
 
     /// Create a new HTTP transport
+    ///
+    /// # Panics
+    ///
+    /// Panics if the underlying `oxihttp` HTTPS client cannot be constructed
+    /// (e.g. TLS trust-store initialization failure). This is treated as an
+    /// unrecoverable startup condition; this constructor's signature (`-> Self`,
+    /// not `-> Result<Self>`) is relied upon by other crates in the workspace
+    /// (e.g. `oxify-engine`), so the fallible path cannot be threaded through
+    /// without a wider ripple. Unlike the old reqwest-based fallback, this does
+    /// NOT silently swallow the error — it surfaces it loudly via `.expect()`.
     pub fn new(base_url: String) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+        let client = oxihttp::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .read_timeout(std::time::Duration::from_secs(30))
+            .with_tls()
+            .build_https()
+            .expect("failed to build oxihttp HTTPS client for MCP HTTP transport");
 
         Self {
             client,
@@ -159,11 +171,18 @@ impl HttpTransport {
     }
 
     /// Set timeout
+    ///
+    /// # Panics
+    ///
+    /// See [`HttpTransport::new`] for why this panics rather than propagating
+    /// a `Result` on client-construction failure.
     pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
-        self.client = reqwest::Client::builder()
-            .timeout(timeout)
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+        self.client = oxihttp::Client::builder()
+            .connect_timeout(timeout)
+            .read_timeout(timeout)
+            .with_tls()
+            .build_https()
+            .expect("failed to rebuild oxihttp HTTPS client for MCP HTTP transport");
         self
     }
 }
@@ -181,13 +200,15 @@ impl McpTransport for HttpTransport {
         let response = self
             .client
             .post(&self.base_url)
+            .map_err(|e| McpError::ServerError(format!("HTTP request failed: {}", e)))?
             .json(&request)
+            .map_err(|e| McpError::ServerError(format!("HTTP request failed: {}", e)))?
             .send()
             .await
             .map_err(|e| McpError::ServerError(format!("HTTP request failed: {}", e)))?;
 
         let response_json: Value = response
-            .json()
+            .body_json()
             .await
             .map_err(|e| McpError::ProtocolError(format!("Failed to parse response: {}", e)))?;
 

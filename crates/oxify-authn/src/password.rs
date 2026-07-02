@@ -12,11 +12,26 @@
 //! - Common password checking
 
 use crate::types::{AuthError, Result};
-use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
-    Argon2,
+use oxicrypto_core::CryptoError;
+use oxicrypto_kdf::{
+    argon2id_derive, argon2id_to_phc_string, argon2id_verify_phc, generate_salt_16, Argon2Params,
+    Argon2idHasher,
 };
 use serde::{Deserialize, Serialize};
+
+/// Argon2id parameters matching the legacy argon2 0.5 crate default (m=19456 KiB, t=2, p=1).
+/// Deliberately NOT using `Argon2Params::interactive()` (m=65536) here -- this migration is
+/// scoped to swapping the hashing library only, keeping verification cost byte-for-byte
+/// compatible with hashes already stored in the database. Raising cost is a separate,
+/// independent follow-up change.
+const LEGACY_COMPATIBLE_PARAMS: Argon2Params = Argon2Params {
+    m_cost: 19_456,
+    t_cost: 2,
+    p_cost: 1,
+};
+
+/// Output length (in bytes) of the derived Argon2id hash.
+const HASH_LEN: usize = 32;
 
 /// Password policy configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,7 +172,7 @@ pub enum PolicyViolation {
 
 /// Password manager for hashing and verifying passwords
 pub struct PasswordManager {
-    argon2: Argon2<'static>,
+    hasher: Argon2idHasher,
     policy: PasswordPolicy,
 }
 
@@ -166,7 +181,7 @@ impl PasswordManager {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            argon2: Argon2::default(),
+            hasher: Argon2idHasher::new(LEGACY_COMPATIBLE_PARAMS),
             policy: PasswordPolicy::default(),
         }
     }
@@ -175,7 +190,7 @@ impl PasswordManager {
     #[must_use]
     pub fn with_policy(policy: PasswordPolicy) -> Self {
         Self {
-            argon2: Argon2::default(),
+            hasher: Argon2idHasher::new(LEGACY_COMPATIBLE_PARAMS),
             policy,
         }
     }
@@ -186,28 +201,25 @@ impl PasswordManager {
         &self.policy
     }
 
-    /// Hash a password using Argon2
+    /// Hash a password using Argon2id
     pub fn hash_password(&self, password: &str) -> Result<String> {
-        let salt = SaltString::generate(&mut OsRng);
-        let password_hash = self
-            .argon2
-            .hash_password(password.as_bytes(), &salt)
+        let salt = generate_salt_16()
+            .map_err(|e| AuthError::InternalError(format!("Failed to generate salt: {e}")))?;
+        let mut hash = [0u8; HASH_LEN];
+        argon2id_derive(password.as_bytes(), &salt, self.hasher.params, &mut hash)
             .map_err(|e| AuthError::InternalError(format!("Failed to hash password: {e}")))?;
-
-        Ok(password_hash.to_string())
+        argon2id_to_phc_string(&self.hasher, &salt, &hash)
+            .map_err(|e| AuthError::InternalError(format!("Failed to encode password hash: {e}")))
     }
 
     /// Verify a password against a hash
     pub fn verify_password(&self, password: &str, hash: &str) -> Result<bool> {
-        let parsed_hash = PasswordHash::new(hash)
-            .map_err(|e| AuthError::InternalError(format!("Invalid password hash: {e}")))?;
-
-        match self
-            .argon2
-            .verify_password(password.as_bytes(), &parsed_hash)
-        {
+        match argon2id_verify_phc(hash, password.as_bytes()) {
             Ok(()) => Ok(true),
-            Err(_) => Ok(false),
+            Err(CryptoError::InvalidTag) => Ok(false),
+            Err(e) => Err(AuthError::InternalError(format!(
+                "Invalid password hash: {e}"
+            ))),
         }
     }
 

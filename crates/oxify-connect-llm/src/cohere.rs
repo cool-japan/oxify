@@ -14,7 +14,7 @@ use std::time::Duration;
 pub struct CohereProvider {
     api_key: String,
     model: String,
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     base_url: String,
 }
 
@@ -53,7 +53,10 @@ impl CohereProvider {
         Self {
             api_key,
             model,
-            client: reqwest::Client::new(),
+            client: oxihttp::Client::builder()
+                .with_tls()
+                .build_https()
+                .expect("failed to build oxihttp HTTPS client for Cohere"),
             base_url: "https://api.cohere.ai/v1".to_string(),
         }
     }
@@ -83,10 +86,10 @@ impl LlmProvider for CohereProvider {
 
         let response = self
             .client
-            .post(format!("{}/chat", self.base_url))
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&cohere_request)
+            .post(&format!("{}/chat", self.base_url))?
+            .header("Authorization", &format!("Bearer {}", self.api_key))?
+            .header("Content-Type", "application/json")?
+            .json(&cohere_request)?
             .send()
             .await?;
 
@@ -104,7 +107,7 @@ impl LlmProvider for CohereProvider {
             return Err(LlmError::RateLimited(retry_after));
         }
 
-        let body = response.text().await?;
+        let body = response.body_text().await?;
 
         if !status.is_success() {
             return Err(LlmError::ApiError(format!("HTTP {}: {}", status, body)));
@@ -182,10 +185,10 @@ impl StreamingLlmProvider for CohereProvider {
 
         let response = self
             .client
-            .post(format!("{}/chat", self.base_url))
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&cohere_request)
+            .post(&format!("{}/chat", self.base_url))?
+            .header("Authorization", &format!("Bearer {}", self.api_key))?
+            .header("Content-Type", "application/json")?
+            .json(&cohere_request)?
             .send()
             .await?;
 
@@ -204,11 +207,11 @@ impl StreamingLlmProvider for CohereProvider {
         }
 
         if !status.is_success() {
-            let body = response.text().await?;
+            let body = response.body_text().await?;
             return Err(LlmError::ApiError(format!("HTTP {}: {}", status, body)));
         }
 
-        let stream = response.bytes_stream();
+        let stream = response.body_stream();
         let model_name = self.model.clone();
 
         let parsed_stream = stream.filter_map(move |chunk_result| {
@@ -304,10 +307,10 @@ impl EmbeddingProvider for CohereProvider {
 
         let response = self
             .client
-            .post(format!("{}/embed", self.base_url))
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&cohere_request)
+            .post(&format!("{}/embed", self.base_url))?
+            .header("Authorization", &format!("Bearer {}", self.api_key))?
+            .header("Content-Type", "application/json")?
+            .json(&cohere_request)?
             .send()
             .await?;
 
@@ -325,7 +328,7 @@ impl EmbeddingProvider for CohereProvider {
             return Err(LlmError::RateLimited(retry_after));
         }
 
-        let body = response.text().await?;
+        let body = response.body_text().await?;
 
         if !status.is_success() {
             return Err(LlmError::ApiError(format!("HTTP {}: {}", status, body)));

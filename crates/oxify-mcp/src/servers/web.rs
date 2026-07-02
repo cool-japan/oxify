@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 /// Built-in MCP server for web operations
 pub struct WebServer {
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     /// Maximum response size in bytes (default: 10MB)
     max_response_size: usize,
 }
@@ -15,11 +15,13 @@ impl WebServer {
     /// Create a new web server
     pub fn new() -> Self {
         Self {
-            client: reqwest::Client::builder()
+            client: oxihttp::Client::builder()
                 .user_agent("OxiFY-MCP/0.1.0")
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .expect("reqwest::Client::builder() with default settings should not fail"),
+                .connect_timeout(std::time::Duration::from_secs(30))
+                .read_timeout(std::time::Duration::from_secs(30))
+                .with_tls()
+                .build_https()
+                .expect("oxihttp::Client::builder() with default settings should not fail"),
             max_response_size: 10 * 1024 * 1024, // 10MB
         }
     }
@@ -49,6 +51,7 @@ impl McpServer for WebServer {
                 let response = self
                     .client
                     .get(url)
+                    .map_err(|e| crate::McpError::ToolExecutionError(e.to_string()))?
                     .send()
                     .await
                     .map_err(|e| crate::McpError::ToolExecutionError(e.to_string()))?;
@@ -61,7 +64,7 @@ impl McpServer for WebServer {
                     .collect();
 
                 let body = response
-                    .text()
+                    .body_text()
                     .await
                     .map_err(|e| crate::McpError::ToolExecutionError(e.to_string()))?;
 
@@ -91,7 +94,9 @@ impl McpServer for WebServer {
                 let response = self
                     .client
                     .post(url)
+                    .map_err(|e| crate::McpError::ToolExecutionError(e.to_string()))?
                     .header("Content-Type", content_type)
+                    .map_err(|e| crate::McpError::ToolExecutionError(e.to_string()))?
                     .body(body.to_string())
                     .send()
                     .await
@@ -99,7 +104,7 @@ impl McpServer for WebServer {
 
                 let status = response.status().as_u16();
                 let response_body = response
-                    .text()
+                    .body_text()
                     .await
                     .map_err(|e| crate::McpError::ToolExecutionError(e.to_string()))?;
 
@@ -118,12 +123,13 @@ impl McpServer for WebServer {
                 let response = self
                     .client
                     .get(url)
+                    .map_err(|e| crate::McpError::ToolExecutionError(e.to_string()))?
                     .send()
                     .await
                     .map_err(|e| crate::McpError::ToolExecutionError(e.to_string()))?;
 
                 let html = response
-                    .text()
+                    .body_text()
                     .await
                     .map_err(|e| crate::McpError::ToolExecutionError(e.to_string()))?;
 

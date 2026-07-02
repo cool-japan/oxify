@@ -398,7 +398,8 @@ impl IdpClient {
             ],
         };
 
-        let oauth_service = OAuth2Service::new(oauth_config);
+        let oauth_service =
+            OAuth2Service::new(oauth_config).map_err(|e| IdpError::Provider(e.to_string()))?;
 
         Ok(Self {
             config,
@@ -430,10 +431,15 @@ impl IdpClient {
     /// Get user information
     pub async fn get_user_info(&self, access_token: &str) -> Result<IdpUserInfo> {
         // Make HTTP request to userinfo endpoint
-        let client = reqwest::Client::new();
+        let client = oxihttp::Client::builder()
+            .with_tls()
+            .build_https()
+            .map_err(|e| IdpError::Http(e.to_string()))?;
         let response = client
             .get(&self.config.userinfo_url)
-            .bearer_auth(access_token)
+            .map_err(|e| IdpError::Http(e.to_string()))?
+            .bearer_token(access_token)
+            .map_err(|e| IdpError::Http(e.to_string()))?
             .send()
             .await
             .map_err(|e| IdpError::Http(e.to_string()))?;
@@ -446,7 +452,7 @@ impl IdpClient {
         }
 
         let user_data: serde_json::Value = response
-            .json()
+            .body_json()
             .await
             .map_err(|e| IdpError::Parse(e.to_string()))?;
 
@@ -600,9 +606,13 @@ pub async fn discover_oidc(issuer: &str) -> Result<OidcDiscovery> {
         format!("{issuer}/.well-known/openid-configuration")
     };
 
-    let client = reqwest::Client::new();
+    let client = oxihttp::Client::builder()
+        .with_tls()
+        .build_https()
+        .map_err(|e| IdpError::DiscoveryFailed(e.to_string()))?;
     let response = client
         .get(&discovery_url)
+        .map_err(|e| IdpError::DiscoveryFailed(e.to_string()))?
         .send()
         .await
         .map_err(|e| IdpError::DiscoveryFailed(e.to_string()))?;
@@ -615,7 +625,7 @@ pub async fn discover_oidc(issuer: &str) -> Result<OidcDiscovery> {
     }
 
     response
-        .json()
+        .body_json()
         .await
         .map_err(|e| IdpError::Parse(e.to_string()))
 }

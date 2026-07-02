@@ -58,6 +58,10 @@ pub enum VisionError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// HTTP client/transport error (oxihttp).
+    #[error("HTTP error: {0}")]
+    Http(#[from] oxihttp::OxiHttpError),
+
     /// Other error.
     #[error("{0}")]
     Other(String),

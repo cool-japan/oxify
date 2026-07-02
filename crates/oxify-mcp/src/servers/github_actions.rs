@@ -1,6 +1,6 @@
 //! GitHub Actions MCP server — provides CI/CD operations via the GitHub REST API
 //!
-//! This server uses raw `reqwest` calls (no octocrab) following the same
+//! This server uses raw `oxihttp` calls (no octocrab) following the same
 //! pattern as [`super::gitlab`].
 
 use crate::{McpError, McpServer, Result};
@@ -59,37 +59,39 @@ impl Default for GitHubActionsConfig {
 
 /// MCP server that exposes GitHub Actions CI/CD operations.
 ///
-/// All HTTP calls use raw `reqwest` — no octocrab dependency.
+/// All HTTP calls use raw `oxihttp` — no octocrab dependency.
 pub struct GitHubActionsServer {
     cfg: GitHubActionsConfig,
-    http: reqwest::Client,
+    http: oxihttp::HttpsClient,
 }
 
 impl GitHubActionsServer {
     /// Create a new server using the supplied configuration.
     ///
-    /// The underlying `reqwest::Client` is pre-loaded with the three headers
+    /// The underlying `oxihttp::HttpsClient` is pre-loaded with the three headers
     /// that the GitHub REST API v2022-11-28 requires on every request:
     /// `Accept`, `X-GitHub-Api-Version`, and `User-Agent`.
     pub fn new(cfg: GitHubActionsConfig) -> Result<Self> {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = oxihttp::HeaderMap::new();
         headers.insert(
-            reqwest::header::ACCEPT,
-            reqwest::header::HeaderValue::from_static("application/vnd.github+json"),
+            oxihttp::HeaderName::from_static("accept"),
+            oxihttp::HeaderValue::from_static("application/vnd.github+json"),
         );
         headers.insert(
             "X-GitHub-Api-Version",
-            reqwest::header::HeaderValue::from_static("2022-11-28"),
+            oxihttp::HeaderValue::from_static("2022-11-28"),
         );
         headers.insert(
-            reqwest::header::USER_AGENT,
-            reqwest::header::HeaderValue::from_static("oxify-mcp/0.2"),
+            oxihttp::HeaderName::from_static("user-agent"),
+            oxihttp::HeaderValue::from_static("oxify-mcp/0.2"),
         );
 
-        let http = reqwest::Client::builder()
+        let http = oxihttp::Client::builder()
             .default_headers(headers)
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .read_timeout(std::time::Duration::from_secs(30))
+            .with_tls()
+            .build_https()
             .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
 
         Ok(Self { cfg, http })
@@ -128,14 +130,17 @@ impl GitHubActionsServer {
     }
 
     /// Map a non-success HTTP status to the appropriate [`McpError`] variant.
+    ///
+    /// `url` is passed in explicitly because `oxihttp::Response` (unlike
+    /// `reqwest::Response`) does not retain the request URL it was produced from.
     async fn map_error_response(
         &self,
-        status: reqwest::StatusCode,
-        response: reqwest::Response,
+        url: &str,
+        status: oxihttp::StatusCode,
+        response: oxihttp::Response,
     ) -> McpError {
-        let url = response.url().to_string();
         let body = response
-            .text()
+            .body_text()
             .await
             .unwrap_or_else(|_| "<unreadable body>".to_string());
 
@@ -153,18 +158,20 @@ impl GitHubActionsServer {
         let response = self
             .http
             .get(url)
-            .header(reqwest::header::AUTHORIZATION, self.auth_header())
+            .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
+            .header("Authorization", &self.auth_header())
+            .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
 
         let status = response.status();
         if !status.is_success() {
-            return Err(self.map_error_response(status, response).await);
+            return Err(self.map_error_response(url, status, response).await);
         }
 
         response
-            .json::<Value>()
+            .body_json::<Value>()
             .await
             .map_err(|e| McpError::ToolExecutionError(e.to_string()))
     }
@@ -178,18 +185,21 @@ impl GitHubActionsServer {
         let response = self
             .http
             .post(url)
-            .header(reqwest::header::AUTHORIZATION, self.auth_header())
+            .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
+            .header("Authorization", &self.auth_header())
+            .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
             .json(body)
+            .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
 
         let status = response.status();
         if !status.is_success() {
-            return Err(self.map_error_response(status, response).await);
+            return Err(self.map_error_response(url, status, response).await);
         }
 
-        let text = response.text().await.unwrap_or_else(|_| String::new());
+        let text = response.body_text().await.unwrap_or_else(|_| String::new());
         Ok((status.as_u16(), text))
     }
 }
@@ -614,15 +624,8 @@ mod tests {
     use wiremock::matchers::{body_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    /// Install the ring-based rustls crypto provider once per test process so
-    /// that reqwest's TLS stack does not panic when no provider has been set.
-    fn install_crypto_provider() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    }
-
     /// Build a [`GitHubActionsServer`] whose base URL points at `mock_uri`.
     fn server_with_mock(mock_uri: &str) -> GitHubActionsServer {
-        install_crypto_provider();
         let cfg = GitHubActionsConfig {
             token: "ghs_test_token".to_string(),
             default_owner: Some("cool-japan".to_string()),
@@ -636,7 +639,6 @@ mod tests {
 
     #[tokio::test]
     async fn list_tools_returns_eight() {
-        install_crypto_provider();
         let server = GitHubActionsServer::new(GitHubActionsConfig::default()).unwrap();
         let tools = server.list_tools().await.unwrap();
         assert_eq!(tools.len(), 8, "expected exactly 8 tools");
@@ -900,7 +902,6 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_tool() {
-        install_crypto_provider();
         let server = GitHubActionsServer::new(GitHubActionsConfig::default()).unwrap();
         let result = server.call_tool("does_not_exist", json!({})).await;
         assert!(result.is_err());

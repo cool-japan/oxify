@@ -48,6 +48,19 @@ impl EncryptionService {
         key
     }
 
+    /// Derive a 32-byte encryption key from the master key and a per-secret salt.
+    ///
+    /// Uses PBKDF2-HMAC-SHA256 with 100_000 iterations. This is the single
+    /// SHA-256-based key-derivation seam shared by [`Self::encrypt`] and
+    /// [`Self::decrypt`]. It is deliberately isolated so that golden regression
+    /// tests can capture its exact byte output prior to migrating the SHA-256
+    /// backend, allowing that migration to be proven byte-identical.
+    fn derive_key(&self, salt: &[u8]) -> [u8; 32] {
+        let mut derived_key = [0u8; 32];
+        pbkdf2::pbkdf2_hmac::<sha2::Sha256>(&self.master_key, salt, 100_000, &mut derived_key);
+        derived_key
+    }
+
     /// Encrypt a plaintext value
     pub fn encrypt(&self, plaintext: &str) -> Result<(Vec<u8>, EncryptionMetadata)> {
         use aes_gcm::{
@@ -64,8 +77,7 @@ impl EncryptionService {
         rand::rng().fill(&mut salt[..]);
 
         // Derive encryption key from master key and salt using PBKDF2
-        let mut derived_key = [0u8; 32];
-        pbkdf2::pbkdf2_hmac::<sha2::Sha256>(&self.master_key, &salt, 100_000, &mut derived_key);
+        let derived_key = self.derive_key(&salt);
 
         // Create cipher
         let cipher = Aes256Gcm::new(&derived_key.into());
@@ -113,8 +125,7 @@ impl EncryptionService {
             .context("Failed to decode IV")?;
 
         // Derive decryption key
-        let mut derived_key = [0u8; 32];
-        pbkdf2::pbkdf2_hmac::<sha2::Sha256>(&self.master_key, &salt, 100_000, &mut derived_key);
+        let derived_key = self.derive_key(&salt);
 
         // Create cipher
         let cipher = Aes256Gcm::new(&derived_key.into());
@@ -184,6 +195,89 @@ mod tests {
 
         assert_eq!(decrypted1, plaintext);
         assert_eq!(decrypted2, plaintext);
+    }
+
+    /// Golden regression test: captures the exact PRE-migration (sha2-based)
+    /// PBKDF2-HMAC-SHA256 key-derivation output for a fixed master key and a
+    /// fixed salt. [`EncryptionService::derive_key`] derives the AES key via
+    /// `pbkdf2::pbkdf2_hmac::<sha2::Sha256>` with 100_000 iterations; this is
+    /// the only SHA-256-based construction in this file. After the SHA-256
+    /// backend is migrated, this literal MUST remain byte-identical, proving
+    /// the migration did not alter derived-key bytes. This is a fixed-input /
+    /// fixed-output guard (NOT a self-consistent round trip).
+    #[test]
+    fn test_golden_derive_key_pbkdf2() {
+        let service = EncryptionService::new(b"golden-master-key".to_vec());
+        let derived_key = service.derive_key(b"golden-salt");
+        assert_eq!(
+            hex::encode(derived_key),
+            "ac979c2a69312101eb577afe3b1f197ca4941336c5c3c7656c1bb7ffabfd8316",
+            "PBKDF2-HMAC-SHA256 derived key must match the pre-migration golden value"
+        );
+    }
+
+    /// Golden regression test: captures the exact PRE-migration AES-256-GCM
+    /// ciphertext and authentication tag for a fixed 32-byte key, a fixed
+    /// 12-byte nonce, and a fixed plaintext. This mirrors the cipher
+    /// construction used by [`EncryptionService::encrypt`] and locks the
+    /// primitive against any accidental behavioral change during the SHA-256
+    /// migration. (AES-256-GCM itself is not SHA-256-based, so it is expected
+    /// to be unaffected; this guard makes that expectation enforceable.)
+    #[test]
+    fn test_golden_encrypt_aes_gcm() {
+        use aes_gcm::{
+            aead::{Aead, KeyInit},
+            Aes256Gcm, Nonce,
+        };
+        let key = *b"0123456789abcdef0123456789abcdef";
+        let nonce_bytes = *b"golden-nonce";
+        let plaintext = b"golden-plaintext-value";
+        let cipher = Aes256Gcm::new(&key.into());
+        let nonce = Nonce::from(nonce_bytes);
+        let out = cipher
+            .encrypt(&nonce, plaintext.as_ref())
+            .expect("aes-gcm encryption of fixed golden input must succeed");
+        let (ciphertext, tag) = out.split_at(out.len() - 16);
+        assert_eq!(
+            hex::encode(ciphertext),
+            "6329becba284eaa9fa4ab0b2321a3b51ab4075b9e669",
+            "AES-256-GCM ciphertext must match the pre-migration golden value"
+        );
+        assert_eq!(
+            hex::encode(tag),
+            "9cc1f50490e6f90c1eb2b0927c18edb9",
+            "AES-256-GCM authentication tag must match the pre-migration golden value"
+        );
+    }
+
+    /// Golden regression test: decrypts the fixed PRE-migration ciphertext and
+    /// tag captured by [`test_golden_encrypt_aes_gcm`] using the same fixed key
+    /// and nonce, asserting the exact original plaintext. This locks the
+    /// AES-256-GCM decrypt primitive used by [`EncryptionService::decrypt`]
+    /// against fixed hardcoded inputs, so a byte-level change in the cipher
+    /// output/behavior is caught (not merely a self-consistent round trip).
+    #[test]
+    fn test_golden_decrypt_aes_gcm() {
+        use aes_gcm::{
+            aead::{Aead, KeyInit},
+            Aes256Gcm, Nonce,
+        };
+        let key = *b"0123456789abcdef0123456789abcdef";
+        let nonce_bytes = *b"golden-nonce";
+        let mut combined = hex::decode("6329becba284eaa9fa4ab0b2321a3b51ab4075b9e669")
+            .expect("golden ciphertext hex must decode");
+        let tag =
+            hex::decode("9cc1f50490e6f90c1eb2b0927c18edb9").expect("golden tag hex must decode");
+        combined.extend_from_slice(&tag);
+        let cipher = Aes256Gcm::new(&key.into());
+        let nonce = Nonce::from(nonce_bytes);
+        let plaintext = cipher
+            .decrypt(&nonce, combined.as_ref())
+            .expect("aes-gcm decryption of fixed golden ciphertext must succeed");
+        assert_eq!(
+            plaintext, b"golden-plaintext-value",
+            "decrypted plaintext must match the fixed golden input"
+        );
     }
 
     #[test]

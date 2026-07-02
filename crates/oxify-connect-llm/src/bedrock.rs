@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 pub struct BedrockProvider {
     region: String,
     model_id: String,
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     credentials: Option<AwsCredentials>,
 }
 
@@ -93,7 +93,10 @@ impl BedrockProvider {
         Self {
             region,
             model_id,
-            client: reqwest::Client::new(),
+            client: oxihttp::Client::builder()
+                .with_tls()
+                .build_https()
+                .expect("failed to build oxihttp HTTPS client for AWS Bedrock"),
             credentials: None,
         }
     }
@@ -108,7 +111,10 @@ impl BedrockProvider {
         Self {
             region,
             model_id,
-            client: reqwest::Client::new(),
+            client: oxihttp::Client::builder()
+                .with_tls()
+                .build_https()
+                .expect("failed to build oxihttp HTTPS client for AWS Bedrock"),
             credentials: Some(AwsCredentials::new(access_key_id, secret_access_key)),
         }
     }
@@ -125,7 +131,10 @@ impl BedrockProvider {
         Ok(Self {
             region,
             model_id,
-            client: reqwest::Client::new(),
+            client: oxihttp::Client::builder()
+                .with_tls()
+                .build_https()
+                .expect("failed to build oxihttp HTTPS client for AWS Bedrock"),
             credentials: Some(credentials),
         })
     }
@@ -187,27 +196,27 @@ impl LlmProvider for BedrockProvider {
 
         let mut req_builder = self
             .client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json")
+            .post(&url)?
+            .header("Content-Type", "application/json")?
+            .header("Accept", "application/json")?
             .body(body_bytes);
 
         for (k, v) in &sig_headers {
-            req_builder = req_builder.header(k.as_str(), v.as_str());
+            req_builder = req_builder.header(k.as_str(), v.as_str())?;
         }
 
         let response = req_builder.send().await?;
         let status = response.status();
 
         if !status.is_success() {
-            let error_body = response.text().await?;
+            let error_body = response.body_text().await?;
             return Err(LlmError::ApiError(format!(
                 "AWS Bedrock error (HTTP {}): {}",
                 status, error_body
             )));
         }
 
-        let response_body = response.text().await?;
+        let response_body = response.body_text().await?;
         let bedrock_response: BedrockResponse = serde_json::from_str(&response_body)
             .map_err(|e| LlmError::SerializationError(e.to_string()))?;
 

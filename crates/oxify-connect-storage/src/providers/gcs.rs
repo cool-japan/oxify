@@ -2,13 +2,11 @@
 //!
 //! Enabled via the `gcs` Cargo feature.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use object_store::{
-    gcp::GoogleCloudStorageBuilder, path::Path as StoragePath, ObjectStore, ObjectStoreExt,
-};
+use oxistore_blob::{BlobError, BlobStore};
+use oxistore_blob_gcs::{GcsBlobStore, GcsConfig as GcsBlobConfig, GcsServiceAccount};
 use tracing::{debug, instrument};
 
 use super::ObjectStoreProvider;
@@ -58,28 +56,38 @@ impl GcsConfig {
 
 /// Object store provider backed by Google Cloud Storage.
 pub struct GcsStoreProvider {
-    store: Arc<dyn ObjectStore>,
+    store: GcsBlobStore,
 }
 
 impl GcsStoreProvider {
     /// Build a [`GcsStoreProvider`] from the supplied [`GcsConfig`].
+    ///
+    /// Credentials are resolved in the same precedence order as the previous
+    /// implementation: a service-account **file path** takes priority, then an
+    /// inline JSON key, and finally Application Default Credentials sourced
+    /// from `GOOGLE_APPLICATION_CREDENTIALS` via [`GcsServiceAccount::from_env`].
     pub fn new(cfg: GcsConfig) -> Result<Self> {
-        let mut builder = GoogleCloudStorageBuilder::new().with_bucket_name(&cfg.bucket);
+        let credentials = if let Some(path) = &cfg.service_account_key_path {
+            GcsServiceAccount::from_json_file(path)
+                .map_err(|e| StorageError::Config(e.to_string()))?
+        } else if let Some(json) = &cfg.service_account_key_json {
+            GcsServiceAccount::from_json_str(json)
+                .map_err(|e| StorageError::Config(e.to_string()))?
+        } else {
+            GcsServiceAccount::from_env().map_err(|e| StorageError::Config(e.to_string()))?
+        };
 
-        if let Some(path) = &cfg.service_account_key_path {
-            builder = builder.with_service_account_path(path);
-        }
-        if let Some(json) = &cfg.service_account_key_json {
-            builder = builder.with_service_account_key(json);
-        }
+        let config = GcsBlobConfig {
+            bucket: cfg.bucket,
+            credentials,
+            timeout: Duration::from_secs(30),
+            endpoint: None,
+            oauth_endpoint: None,
+        };
 
-        let store = builder
-            .build()
-            .map_err(|e| StorageError::Config(e.to_string()))?;
+        let store = GcsBlobStore::new(config).map_err(|e| StorageError::Config(e.to_string()))?;
 
-        Ok(Self {
-            store: Arc::new(store),
-        })
+        Ok(Self { store })
     }
 
     /// Build a [`GcsStoreProvider`] by reading configuration from the
@@ -88,18 +96,14 @@ impl GcsStoreProvider {
         Self::new(GcsConfig::from_env()?)
     }
 
-    /// Convert a string key to an [`object_store`] [`Path`][StoragePath].
-    fn to_path(key: &str) -> StoragePath {
-        StoragePath::from(key)
-    }
-
-    /// Map an [`object_store::Error`] to our [`StorageError`] with context.
-    fn map_store_error(err: object_store::Error, bucket: &str, key: &str) -> StorageError {
+    /// Map a [`BlobError`] to our [`StorageError`] with bucket/key context.
+    fn map_store_error(err: BlobError, bucket: &str, key: &str) -> StorageError {
         match err {
-            object_store::Error::NotFound { .. } => StorageError::NotFound {
+            BlobError::NotFound(_) => StorageError::NotFound {
                 bucket: bucket.to_string(),
                 key: key.to_string(),
             },
+            // `BlobError` is `#[non_exhaustive]`, so a wildcard arm is mandatory.
             other => StorageError::Provider(other.to_string()),
         }
     }
@@ -124,9 +128,8 @@ impl ObjectStoreProvider for GcsStoreProvider {
         _meta: ObjectMeta,
     ) -> Result<PutResult> {
         debug!(bucket, key, bytes = data.len(), "GCS put_object");
-        let path = Self::to_path(key);
         self.store
-            .put(&path, data.into())
+            .put(key, data)
             .await
             .map_err(|e| Self::map_store_error(e, bucket, key))?;
 
@@ -140,15 +143,9 @@ impl ObjectStoreProvider for GcsStoreProvider {
     #[instrument(skip(self), fields(bucket, key))]
     async fn get_object(&self, bucket: &str, key: &str) -> Result<ObjectData> {
         debug!(bucket, key, "GCS get_object");
-        let path = Self::to_path(key);
-        let result = self
+        let data = self
             .store
-            .get(&path)
-            .await
-            .map_err(|e| Self::map_store_error(e, bucket, key))?;
-
-        let data = result
-            .bytes()
+            .get(key)
             .await
             .map_err(|e| Self::map_store_error(e, bucket, key))?;
 
@@ -162,9 +159,8 @@ impl ObjectStoreProvider for GcsStoreProvider {
     #[instrument(skip(self), fields(bucket, key))]
     async fn delete_object(&self, bucket: &str, key: &str) -> Result<()> {
         debug!(bucket, key, "GCS delete_object");
-        let path = Self::to_path(key);
         self.store
-            .delete(&path)
+            .delete(key)
             .await
             .map_err(|e| Self::map_store_error(e, bucket, key))?;
         Ok(())
@@ -177,24 +173,31 @@ impl ObjectStoreProvider for GcsStoreProvider {
         prefix: Option<&str>,
         max: usize,
     ) -> Result<Vec<ObjectListing>> {
-        use futures::StreamExt as _;
-
         debug!(bucket, prefix, max, "GCS list_objects");
 
-        let prefix_path = prefix.map(StoragePath::from);
-        let mut stream = self.store.list(prefix_path.as_ref());
+        // `oxistore-blob-gcs` exposes only an eager, key-only `list`; there is
+        // no metadata-bearing or bounded/paginated variant.  Fetch the full key
+        // list, then issue a bounded number of `head` calls (capped at `max`)
+        // to gather sizes.  Keys removed between `list` and `head` (a natural
+        // race) are silently skipped.
+        let prefix_str = prefix.unwrap_or("");
+        let keys = self
+            .store
+            .list(prefix_str)
+            .await
+            .map_err(|e| Self::map_store_error(e, bucket, prefix_str))?;
 
         let mut results = Vec::new();
-        while let Some(item) = stream.next().await {
-            let meta = item.map_err(|e| StorageError::Provider(e.to_string()))?;
-            results.push(ObjectListing {
-                key: meta.location.to_string(),
-                size: meta.size,
-                last_modified: Some(meta.last_modified),
-                etag: meta.e_tag,
-            });
-            if results.len() >= max {
-                break;
+        for key in keys.into_iter().take(max) {
+            match self.store.head(&key).await {
+                Ok(meta) => results.push(ObjectListing {
+                    key: meta.key,
+                    size: meta.size,
+                    last_modified: None,
+                    etag: None,
+                }),
+                Err(BlobError::NotFound(_)) => continue,
+                Err(e) => return Err(Self::map_store_error(e, bucket, &key)),
             }
         }
 
@@ -208,9 +211,11 @@ impl ObjectStoreProvider for GcsStoreProvider {
         _ttl: Duration,
         _op: PresignOp,
     ) -> Result<String> {
+        // `oxistore-blob-gcs` has no presigned-URL / signed-URL capability at
+        // all, so this operation is genuinely unsupported by the backend.
         Err(StorageError::Unsupported(
-            "GCS presigned URLs require signed URL support not yet available in the public \
-             object_store trait surface"
+            "GCS presigned URLs are not supported: the pure-Rust oxistore-blob-gcs backend \
+             exposes no signed-URL generation"
                 .to_string(),
         ))
     }

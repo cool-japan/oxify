@@ -1,11 +1,10 @@
 //! Database model types for SQLite
 
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 
 /// Database row for workflows (SQLite compatible)
 /// Note: tags is stored as JSON string, not array
-#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowRow {
     pub id: String,
     pub name: String,
@@ -18,7 +17,7 @@ pub struct WorkflowRow {
 }
 
 /// Database row for executions (SQLite compatible)
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone)]
 pub struct ExecutionRow {
     pub id: String,
     pub workflow_id: String,
@@ -32,7 +31,7 @@ pub struct ExecutionRow {
 }
 
 /// Database row for users (SQLite compatible)
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone)]
 pub struct UserRow {
     pub id: String,
     pub username: String,
@@ -47,7 +46,7 @@ pub struct UserRow {
 }
 
 /// Database row for user roles
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone)]
 pub struct UserRoleRow {
     pub user_id: String,
     pub role: String,
@@ -55,7 +54,7 @@ pub struct UserRoleRow {
 }
 
 /// Database row for user permissions
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone)]
 pub struct UserPermissionRow {
     pub user_id: String,
     pub permission: String,

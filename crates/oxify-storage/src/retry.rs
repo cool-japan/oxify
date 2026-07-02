@@ -213,8 +213,12 @@ mod tests {
                 async move {
                     let count = c.fetch_add(1, Ordering::SeqCst);
                     if count < 2 {
-                        // Simulate transient error
-                        Err(StorageError::Database(sqlx::Error::PoolTimedOut))
+                        // Simulate transient error. `ConnectionPool` is classified
+                        // as retryable by `StorageError::is_retryable`, mirroring the
+                        // old sqlx `PoolTimedOut` behaviour.
+                        Err(StorageError::Database(
+                            oxisql_core::OxiSqlError::ConnectionPool("pool timed out".to_string()),
+                        ))
                     } else {
                         Ok(42)
                     }
@@ -246,8 +250,10 @@ mod tests {
                 let c = counter_clone.clone();
                 async move {
                     c.fetch_add(1, Ordering::SeqCst);
-                    // Always fail with transient error
-                    Err::<i32, _>(StorageError::Database(sqlx::Error::PoolTimedOut))
+                    // Always fail with transient (retryable) error.
+                    Err::<i32, _>(StorageError::Database(
+                        oxisql_core::OxiSqlError::ConnectionPool("pool timed out".to_string()),
+                    ))
                 }
             },
             config,

@@ -11,8 +11,8 @@
 //! - Dependency vulnerability scanning
 
 use crate::plugin_manifest::{PluginManifest, ResourceRequirements};
+use oxicrypto_hash::Sha256;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
@@ -247,11 +247,7 @@ impl PluginSecurityScanner {
     fn calculate_file_hash(&self, path: &Path) -> Result<String, SecurityError> {
         let bytes = std::fs::read(path).map_err(|e| SecurityError::IoError(e.to_string()))?;
 
-        let mut hasher = Sha256::new();
-        hasher.update(&bytes);
-        let result = hasher.finalize();
-
-        Ok(hex::encode(result))
+        Ok(hex::encode(Sha256.hash_fixed(&bytes)))
     }
 
     /// Scan content for malicious patterns

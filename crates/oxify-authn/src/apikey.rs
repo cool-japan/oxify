@@ -506,10 +506,8 @@ impl ApiKeyManager {
 
     /// Hash an API key for storage
     fn hash_key(key: &str) -> String {
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(key.as_bytes());
-        hex::encode(hasher.finalize())
+        use oxicrypto_hash::Sha256;
+        hex::encode(Sha256.hash_fixed(key.as_bytes()))
     }
 }
 

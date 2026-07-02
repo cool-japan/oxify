@@ -90,7 +90,7 @@ struct TextractBlock {
 pub struct TextractProvider {
     region: String,
     credentials: AwsCredentials,
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     /// Base URL seam; default is `"https://textract.{region}.amazonaws.com"`.
     base_url: String,
 }
@@ -99,10 +99,14 @@ impl TextractProvider {
     /// Create a new Textract provider for the given region and credentials.
     pub fn new(region: String, credentials: AwsCredentials) -> Self {
         let base_url = format!("https://textract.{}.amazonaws.com", region);
+        let client = oxihttp::Client::builder()
+            .with_tls()
+            .build_https()
+            .expect("failed to build oxihttp HTTPS client for AWS Textract");
         Self {
             region,
             credentials,
-            client: reqwest::Client::new(),
+            client,
             base_url,
         }
     }
@@ -168,13 +172,13 @@ impl TextractProvider {
 
         let mut request = self
             .client
-            .post(self.endpoint_url())
-            .header("Content-Type", "application/x-amz-json-1.1")
-            .header("X-Amz-Target", target)
+            .post(&self.endpoint_url())?
+            .header("Content-Type", "application/x-amz-json-1.1")?
+            .header("X-Amz-Target", target)?
             .body(body_bytes.to_vec());
 
         for (name, value) in &signing_headers {
-            request = request.header(name.as_str(), value.as_str());
+            request = request.header(name, value)?;
         }
 
         let response = request
@@ -185,16 +189,19 @@ impl TextractProvider {
         let status = response.status();
         if !status.is_success() {
             let code = status.as_u16();
-            let body = response.text().await.unwrap_or_default();
+            let body = response.body_text().await.unwrap_or_default();
             return Err(VisionError::OcrEngine(format!(
                 "Textract API returned HTTP {}: {}",
                 code, body
             )));
         }
 
-        response.json::<serde_json::Value>().await.map_err(|e| {
-            VisionError::OcrEngine(format!("Failed to parse Textract response: {}", e))
-        })
+        response
+            .body_json::<serde_json::Value>()
+            .await
+            .map_err(|e| {
+                VisionError::OcrEngine(format!("Failed to parse Textract response: {}", e))
+            })
     }
 
     /// Call `DetectDocumentText` and return the raw response value.

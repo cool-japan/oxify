@@ -3,6 +3,8 @@ use std::env;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use hyper_util::client::legacy::connect::HttpConnector;
+use oxihttp::OxiHttpsConnector;
 use serde_json::{json, Value};
 use tracing::{debug, instrument, warn};
 
@@ -10,6 +12,17 @@ use crate::{
     errors::{GraphQlError, Result},
     types::{AuthConfig, GraphQlRequest, RetryConfig},
 };
+
+/// Connector type backing [`HttpGraphQlProvider`]'s HTTPS-capable client.
+///
+/// Named explicitly so the private [`HttpGraphQlProvider::apply_auth`] helper
+/// can operate on a concrete `oxihttp::RequestBuilder<GraphQlConnector>`
+/// instead of leaking a generic connector parameter through the crate's
+/// (already private) internals.  `oxihttp::HttpsClient` is a type alias for
+/// `Client<GraphQlConnector>`, and this same connector transparently
+/// supports plain `http://` targets (used by the wiremock-backed tests
+/// below) as well as `https://` targets (used in production).
+type GraphQlConnector = OxiHttpsConnector<HttpConnector>;
 
 // ---------------------------------------------------------------------------
 // GraphQlConfig
@@ -79,24 +92,26 @@ impl GraphQlConfig {
 // HttpGraphQlProvider
 // ---------------------------------------------------------------------------
 
-/// GraphQL client provider that communicates over plain HTTPS using `reqwest`.
+/// GraphQL client provider that communicates over plain HTTPS using `oxihttp`.
 ///
 /// All GraphQL operations are sent as HTTP POST requests with a JSON body
 /// containing `query`, `variables`, and an optional `operationName` field.
 pub struct HttpGraphQlProvider {
     cfg: GraphQlConfig,
-    http: reqwest::Client,
+    http: oxihttp::HttpsClient,
 }
 
 impl HttpGraphQlProvider {
     /// Create a new `HttpGraphQlProvider` from the supplied configuration.
     ///
-    /// Returns `Err(GraphQlError::Transport)` if the underlying `reqwest`
+    /// Returns `Err(GraphQlError::Transport)` if the underlying `oxihttp`
     /// client cannot be built (e.g. invalid TLS configuration).
     pub fn new(cfg: GraphQlConfig) -> Result<Self> {
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(cfg.timeout_secs))
-            .build()
+        let http = oxihttp::Client::builder()
+            .with_tls()
+            .connect_timeout(Duration::from_secs(cfg.timeout_secs))
+            .read_timeout(Duration::from_secs(cfg.timeout_secs))
+            .build_https()
             .map_err(|e| GraphQlError::Transport(format!("failed to build HTTP client: {e}")))?;
 
         Ok(Self { cfg, http })
@@ -113,23 +128,42 @@ impl HttpGraphQlProvider {
     // -----------------------------------------------------------------------
 
     /// Attach the configured authentication credentials to `req`.
-    async fn apply_auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    ///
+    /// The `ApiKey { in_header: false, .. }` variant is intentionally a
+    /// no-op here: `oxihttp`'s `RequestBuilder` has no `.query()` equivalent,
+    /// so that variant is instead applied to the endpoint URL via
+    /// [`oxify_model::http_util::append_query_params`] *before* the request
+    /// builder is constructed — see [`Self::execute_once`].
+    async fn apply_auth(
+        &self,
+        req: oxihttp::RequestBuilder<GraphQlConnector>,
+    ) -> Result<oxihttp::RequestBuilder<GraphQlConnector>> {
         match &self.cfg.auth {
-            AuthConfig::None => req,
-            AuthConfig::Bearer { token } => req.bearer_auth(token),
+            AuthConfig::None => Ok(req),
+            AuthConfig::Bearer { token } => req
+                .bearer_token(token)
+                .map_err(|e| GraphQlError::Transport(format!("failed to apply bearer auth: {e}"))),
             AuthConfig::ApiKey {
                 key,
                 value,
                 in_header,
             } => {
                 if *in_header {
-                    req.header(key.as_str(), value.as_str())
+                    req.header(key.as_str(), value.as_str()).map_err(|e| {
+                        GraphQlError::Transport(format!("failed to apply API key header: {e}"))
+                    })
                 } else {
-                    req.query(&[(key.as_str(), value.as_str())])
+                    Ok(req)
                 }
             }
-            AuthConfig::Basic { username, password } => req.basic_auth(username, Some(password)),
-            AuthConfig::Custom { header, value } => req.header(header.as_str(), value.as_str()),
+            AuthConfig::Basic { username, password } => req
+                .basic_auth(username, Some(password))
+                .map_err(|e| GraphQlError::Transport(format!("failed to apply basic auth: {e}"))),
+            AuthConfig::Custom { header, value } => {
+                req.header(header.as_str(), value.as_str()).map_err(|e| {
+                    GraphQlError::Transport(format!("failed to apply custom auth header: {e}"))
+                })
+            }
         }
     }
 
@@ -153,20 +187,45 @@ impl HttpGraphQlProvider {
 
         debug!(endpoint = %self.cfg.endpoint, "executing GraphQL request");
 
+        // `oxihttp`'s `RequestBuilder` has no `.query()` equivalent, so a
+        // query-string API key must be baked into the URL before the
+        // request builder is constructed.
+        let url = if let AuthConfig::ApiKey {
+            key,
+            value,
+            in_header: false,
+        } = &self.cfg.auth
+        {
+            oxify_model::http_util::append_query_params(
+                &self.cfg.endpoint,
+                &[(key.as_str(), value.as_str())],
+            )
+        } else {
+            self.cfg.endpoint.clone()
+        };
+
         // Start building the request.
-        let mut builder = self.http.post(&self.cfg.endpoint);
+        let mut builder = self
+            .http
+            .post(&url)
+            .map_err(|e| GraphQlError::Transport(format!("failed to build request: {e}")))?;
 
         // Merge default headers.
         for (key, value) in &self.cfg.default_headers {
-            builder = builder.header(key.as_str(), value.as_str());
+            builder = builder
+                .header(key.as_str(), value.as_str())
+                .map_err(|e| GraphQlError::Transport(format!("failed to set header {key}: {e}")))?;
         }
 
         // Apply authentication.
-        builder = self.apply_auth(builder).await;
+        builder = self.apply_auth(builder).await?;
 
         // Send the request.
         let response = builder
             .json(&body)
+            .map_err(|e| {
+                GraphQlError::Serialization(format!("failed to serialize request body: {e}"))
+            })?
             .send()
             .await
             .map_err(|e| GraphQlError::Transport(format!("request send failed: {e}")))?;
@@ -176,7 +235,7 @@ impl HttpGraphQlProvider {
 
         if !status.is_success() {
             let text = response
-                .text()
+                .body_text()
                 .await
                 .unwrap_or_else(|_| "<unreadable body>".to_string());
             return Err(GraphQlError::Http(format!("HTTP {status}: {text}")));
@@ -184,7 +243,7 @@ impl HttpGraphQlProvider {
 
         // Parse JSON body.
         let payload: Value = response
-            .json()
+            .body_json()
             .await
             .map_err(|e| GraphQlError::Serialization(format!("failed to parse response: {e}")))?;
 

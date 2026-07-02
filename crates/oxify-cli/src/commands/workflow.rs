@@ -679,8 +679,17 @@ async fn import_workflow(
     let content = if source.starts_with("http://") || source.starts_with("https://") {
         println!("Downloading from URL...");
 
-        // Use reqwest to download from URL
-        let response = reqwest::get(source)
+        // Use oxihttp to download from URL. A dedicated HTTPS-capable client
+        // is built (rather than the `oxihttp::get` one-shot helper) because
+        // that helper only builds a plain, non-TLS client and this import
+        // path explicitly accepts `https://` sources as well.
+        let client = oxihttp::Client::builder()
+            .with_tls()
+            .build_https()
+            .context("Failed to build HTTP client")?;
+        let response = client
+            .get(source)?
+            .send()
             .await
             .with_context(|| format!("Failed to download from URL: {}", source))?;
 
@@ -689,7 +698,7 @@ async fn import_workflow(
         }
 
         response
-            .text()
+            .body_text()
             .await
             .with_context(|| "Failed to read response body")?
     } else {

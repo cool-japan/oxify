@@ -1,38 +1,99 @@
 //! Database connection pool management
 //!
-//! Provides connection pooling and transaction support for SQLite.
+//! Provides connection pooling for SQLite via the Pure-Rust OxiSQL stack
+//! (`oxisql-pool` + `oxisql-sqlite-compat`, Limbo backend). Transactions are
+//! obtained per checked-out connection through [`oxisql_core::Connection::transaction`]
+//! rather than from the pool directly (see the module note on transactions below).
+//!
+//! # Transactions
+//!
+//! Under sqlx a `Transaction<'static, Sqlite>` was an owned value that could be
+//! passed around and stored. OxiSQL transactions (`Box<dyn oxisql_core::Transaction>`)
+//! are instead **borrowed from a checked-out connection**. Callers therefore
+//! acquire a connection with [`DatabasePool::acquire`] and open a transaction on
+//! it at the call site:
+//!
+//! ```ignore
+//! use oxisql_core::Connection;
+//! let conn = pool.acquire().await?;
+//! let mut tx = conn.transaction().await?;
+//! tx.execute("UPDATE ...", &[]).await?;
+//! tx.commit().await?;
+//! ```
 
 use crate::{DatabaseConfig, Result, StorageError};
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
-use sqlx::{Sqlite, Transaction};
-use std::future::Future;
-use std::time::Duration;
+use oxisql_core::Connection;
+use oxisql_pool::sqlite::{
+    new_sqlite_compat_pool_with_config, SqliteCompatManager, SqliteCompatPool,
+};
+use oxisql_pool::PoolConfig;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+/// A connection checked out from the pool.
+///
+/// Dereferences to an [`oxisql_sqlite_compat::SqliteConnection`], which implements
+/// [`oxisql_core::Connection`]; bring `Connection` into scope to call `query` /
+/// `execute` / `transaction` on it. The connection is returned to the pool when
+/// this value is dropped.
+pub type PooledConnection = deadpool::managed::Object<SqliteCompatManager>;
+
+/// Default connection-acquisition timeout, in milliseconds.
+const DEFAULT_ACQUIRE_TIMEOUT_MS: u64 = 30_000;
+
+/// Default idle-connection expiry, in milliseconds.
+const DEFAULT_IDLE_TIMEOUT_MS: u64 = 600_000;
 
 /// Database connection pool
 #[derive(Clone)]
 pub struct DatabasePool {
-    pool: SqlitePool,
+    /// Shared handle to the underlying OxiSQL SQLite pool. Wrapped in `Arc`
+    /// because `SqliteCompatPool` is not itself `Clone`, yet `DatabasePool` must
+    /// be cloneable so stores can hold their own handle.
+    inner: Arc<SqliteCompatPool>,
+    /// Tracks whether [`close`](DatabasePool::close) has been called. The
+    /// underlying `SqliteCompatPool` does not expose an `is_closed()` query, so
+    /// we record the closed state ourselves (shared across clones via `Arc`).
+    closed: Arc<AtomicBool>,
+    /// Minimum idle connections requested at construction, retained for
+    /// [`warmup`](DatabasePool::warmup) defaults and pool statistics.
+    min_connections: u32,
+    /// Configured connection-acquisition timeout, surfaced in [`PoolMetrics`].
+    acquire_timeout_ms: u64,
 }
 
 impl DatabasePool {
-    /// Create a new database pool
+    /// Create a new database pool.
+    ///
+    /// The `database_url` in `config` is normalised to a filesystem path (or
+    /// `":memory:"`) via [`database_url_to_path`]; OxiSQL's SQLite backend opens
+    /// a plain path rather than a `sqlite:` URL.
     pub async fn new(config: DatabaseConfig) -> Result<Self> {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(config.max_connections)
-            .min_connections(config.min_connections)
-            .acquire_timeout(Duration::from_secs(30))
-            .connect(&config.database_url)
-            .await?;
+        let path = database_url_to_path(&config.database_url);
+        let acquire_timeout_ms = DEFAULT_ACQUIRE_TIMEOUT_MS;
 
-        Ok(Self { pool })
+        let pool_config = PoolConfig {
+            max_size: config.max_connections as usize,
+            min_idle: Some(config.min_connections as usize),
+            connect_timeout_ms: Some(acquire_timeout_ms),
+            idle_timeout_ms: Some(DEFAULT_IDLE_TIMEOUT_MS),
+        };
+
+        let inner = new_sqlite_compat_pool_with_config(path.as_str(), pool_config)
+            .await
+            .map_err(|e| {
+                StorageError::Database(oxisql_core::OxiSqlError::ConnectionPool(e.to_string()))
+            })?;
+
+        Ok(Self {
+            inner: Arc::new(inner),
+            closed: Arc::new(AtomicBool::new(false)),
+            min_connections: config.min_connections,
+            acquire_timeout_ms,
+        })
     }
 
-    /// Create a DatabasePool from an existing SqlitePool
-    pub fn from_pool(pool: SqlitePool) -> Self {
-        Self { pool }
-    }
-
-    /// Warm up the connection pool
+    /// Warm up the connection pool.
     ///
     /// Pre-populates the pool with connections to avoid cold start latency.
     /// This is useful during application startup to ensure connections are
@@ -40,7 +101,8 @@ impl DatabasePool {
     ///
     /// # Arguments
     ///
-    /// * `target_connections` - Number of connections to pre-create (defaults to min_connections)
+    /// * `target_connections` - Number of connections to pre-create (defaults to
+    ///   the pool's minimum idle count)
     ///
     /// # Example
     ///
@@ -49,101 +111,102 @@ impl DatabasePool {
     /// pool.warmup(Some(5)).await?; // Pre-create 5 connections
     /// ```
     pub async fn warmup(&self, target_connections: Option<u32>) -> Result<u32> {
-        let target =
-            target_connections.unwrap_or_else(|| self.pool.options().get_min_connections());
+        let target = target_connections.unwrap_or(self.min_connections);
 
+        // Hold every acquired connection simultaneously so that the pool is
+        // forced to create distinct connection objects (a sequential
+        // acquire/drop cycle would keep reusing a single slot), then release
+        // them all back to the idle pool at once.
         let mut acquired = Vec::new();
-        let mut count = 0;
+        let mut count = 0u32;
 
-        // Acquire connections up to target
         for _ in 0..target {
-            match self.pool.acquire().await {
+            match self.inner.get().await {
                 Ok(conn) => {
                     acquired.push(conn);
                     count += 1;
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to acquire connection during warmup: {}", e);
+                    tracing::warn!("Failed to acquire connection during warmup: {e}");
                     break;
                 }
             }
         }
 
-        // Release all acquired connections back to pool
         drop(acquired);
 
-        tracing::info!("Warmed up connection pool with {} connections", count);
+        tracing::info!("Warmed up connection pool with {count} connections");
         Ok(count)
     }
 
-    /// Run database migrations
+    /// Run database migrations.
+    ///
+    /// Applies every pending `.sql` file in the `migrations/` directory through
+    /// [`oxisql_migrate`], recording applied versions in the `_oxisql_migrations`
+    /// tracker table. Migrations are discovered at runtime (not embedded at
+    /// compile time as with `sqlx::migrate!`), so `migrations/` is resolved
+    /// relative to the process working directory.
     pub async fn migrate(&self) -> Result<()> {
-        sqlx::migrate!("./migrations")
-            .run(&self.pool)
+        let conn = self.acquire().await?;
+        let mut runner = oxisql_migrate::runner::MigrationRunner::new("migrations/");
+        runner
+            .run_with_conn(&*conn)
             .await
             .map_err(|e| StorageError::Migration(e.to_string()))?;
         Ok(())
     }
 
-    /// Get a reference to the underlying pool
-    pub fn pool(&self) -> &SqlitePool {
-        &self.pool
+    /// Get a reference to the underlying OxiSQL SQLite pool.
+    ///
+    /// Useful for monitoring (`max_size`, `available`, `metrics`) and lifecycle
+    /// (`close`) access. For running queries, prefer [`acquire`](DatabasePool::acquire).
+    pub fn pool(&self) -> &SqliteCompatPool {
+        self.inner.as_ref()
     }
 
-    /// Check if database is healthy
+    /// Check if database is healthy.
     pub async fn health_check(&self) -> Result<()> {
-        sqlx::query("SELECT 1").execute(&self.pool).await?;
+        let conn = self.acquire().await?;
+        conn.query("SELECT 1", &[]).await?;
         Ok(())
     }
 
-    // ==================== Transaction Support ====================
-
-    /// Begin a new transaction
-    pub async fn begin(&self) -> Result<Transaction<'static, Sqlite>> {
-        let tx = self.pool.begin().await?;
-        Ok(tx)
+    /// Acquire a connection from the pool.
+    ///
+    /// Bring [`oxisql_core::Connection`] into scope to call `query` / `execute` /
+    /// `transaction` on the returned handle.
+    pub async fn acquire(&self) -> Result<PooledConnection> {
+        let conn = self.inner.get().await?;
+        Ok(conn)
     }
 
-    /// Execute a closure within a transaction
-    /// The transaction is committed if the closure returns Ok, rolled back otherwise
-    pub async fn transaction<F, T, Fut>(&self, f: F) -> Result<T>
-    where
-        F: FnOnce(Transaction<'static, Sqlite>) -> Fut,
-        Fut: Future<Output = Result<(Transaction<'static, Sqlite>, T)>>,
-    {
-        let tx = self.begin().await?;
-        match f(tx).await {
-            Ok((tx, result)) => {
-                tx.commit().await?;
-                Ok(result)
-            }
-            Err(e) => Err(e),
-        }
-    }
-
-    /// Get pool statistics
+    /// Get pool statistics.
     pub fn stats(&self) -> PoolStats {
+        let metrics = self.inner.metrics();
+        // `size` is the number of connections currently instantiated, recovered
+        // as active + idle from the deadpool status snapshot (deadpool exposes
+        // active/idle counts, so this retains the original sqlx semantics of
+        // "connections currently in the pool" rather than collapsing to max_size).
+        let size = u32::try_from(metrics.active + metrics.idle).unwrap_or(u32::MAX);
+        let max_connections = u32::try_from(metrics.max_size).unwrap_or(u32::MAX);
         PoolStats {
-            size: self.pool.size(),
-            num_idle: self.pool.num_idle(),
-            max_connections: self.pool.options().get_max_connections(),
-            min_connections: self.pool.options().get_min_connections(),
+            size,
+            num_idle: metrics.idle,
+            max_connections,
+            min_connections: self.min_connections,
         }
     }
 
-    /// Get comprehensive pool metrics including health status
+    /// Get comprehensive pool metrics including health status.
     pub fn metrics(&self) -> PoolMetrics {
-        let stats = self.stats();
-        let health = self.health_status();
-
         PoolMetrics {
-            stats,
-            health,
-            acquire_timeout_ms: 30_000, // 30 seconds (configured in new())
+            stats: self.stats(),
+            health: self.health_status(),
+            acquire_timeout_ms: self.acquire_timeout_ms,
         }
     }
 
-    /// Get pool health status based on utilization and state
+    /// Get pool health status based on utilization and state.
     pub fn health_status(&self) -> PoolHealth {
         if self.is_closed() {
             return PoolHealth::Critical;
@@ -160,20 +223,20 @@ impl DatabasePool {
         }
     }
 
-    /// Close the pool gracefully
-    pub async fn close(&self) {
-        self.pool.close().await;
+    /// Close the pool gracefully.
+    ///
+    /// This is synchronous (the OxiSQL pool's `close` is synchronous), unlike the
+    /// previous sqlx-based implementation whose `close` was `async`. After this
+    /// call no new connections are handed out and [`is_closed`](DatabasePool::is_closed)
+    /// reports `true`.
+    pub fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        self.inner.close();
     }
 
-    /// Check if the pool is closed
+    /// Check if the pool is closed.
     pub fn is_closed(&self) -> bool {
-        self.pool.is_closed()
-    }
-
-    /// Acquire a connection from the pool
-    pub async fn acquire(&self) -> Result<sqlx::pool::PoolConnection<Sqlite>> {
-        let conn = self.pool.acquire().await?;
-        Ok(conn)
+        self.closed.load(Ordering::SeqCst)
     }
 
     /// Export metrics in a format suitable for monitoring systems
@@ -242,10 +305,30 @@ impl DatabasePool {
     }
 }
 
+/// Normalise a database URL into a path accepted by the OxiSQL SQLite backend.
+///
+/// sqlx accepted `sqlite:`-scheme URLs with query parameters (e.g.
+/// `sqlite:oxify.db?mode=rwc`), but `oxisql-sqlite-compat` opens a plain
+/// filesystem path (or `":memory:"`). This strips the `sqlite:` / `sqlite://`
+/// scheme and any `?query` suffix, and maps empty / `:memory:` forms to
+/// `":memory:"`.
+fn database_url_to_path(url: &str) -> String {
+    let without_scheme = url
+        .strip_prefix("sqlite://")
+        .or_else(|| url.strip_prefix("sqlite:"))
+        .unwrap_or(url);
+    let path = without_scheme.split('?').next().unwrap_or(without_scheme);
+    if path.is_empty() || path == ":memory:" || path == "memory:" {
+        ":memory:".to_string()
+    } else {
+        path.to_string()
+    }
+}
+
 /// Pool statistics
 #[derive(Debug, Clone, Copy)]
 pub struct PoolStats {
-    /// Current number of connections in the pool
+    /// Current number of connections instantiated in the pool (active + idle).
     pub size: u32,
     /// Number of idle connections
     pub num_idle: usize,
@@ -328,47 +411,6 @@ impl std::fmt::Display for PoolHealth {
     }
 }
 
-/// Transaction helper for manual transaction management
-#[allow(dead_code)]
-pub struct TransactionHelper {
-    tx: Option<Transaction<'static, Sqlite>>,
-    committed: bool,
-}
-
-#[allow(dead_code)]
-impl TransactionHelper {
-    /// Create a new transaction helper
-    pub async fn new(pool: &DatabasePool) -> Result<Self> {
-        let tx = pool.begin().await?;
-        Ok(Self {
-            tx: Some(tx),
-            committed: false,
-        })
-    }
-
-    /// Get a reference to the transaction
-    pub fn tx(&mut self) -> &mut Transaction<'static, Sqlite> {
-        self.tx.as_mut().expect("Transaction already consumed")
-    }
-
-    /// Commit the transaction
-    pub async fn commit(mut self) -> Result<()> {
-        if let Some(tx) = self.tx.take() {
-            tx.commit().await?;
-            self.committed = true;
-        }
-        Ok(())
-    }
-
-    /// Rollback the transaction
-    pub async fn rollback(mut self) -> Result<()> {
-        if let Some(tx) = self.tx.take() {
-            tx.rollback().await?;
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,5 +439,17 @@ mod tests {
 
         assert_eq!(stats.active_connections(), 20);
         assert!(!stats.has_available());
+    }
+
+    #[test]
+    fn test_database_url_to_path() {
+        assert_eq!(database_url_to_path("sqlite:oxify.db?mode=rwc"), "oxify.db");
+        assert_eq!(
+            database_url_to_path("sqlite://data/oxify.db"),
+            "data/oxify.db"
+        );
+        assert_eq!(database_url_to_path("sqlite::memory:"), ":memory:");
+        assert_eq!(database_url_to_path("oxify.db"), "oxify.db");
+        assert_eq!(database_url_to_path("sqlite:"), ":memory:");
     }
 }

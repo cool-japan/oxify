@@ -417,7 +417,7 @@ impl GoogleVisionProvider {
         //
         // Production implementation would use:
         // - jsonwebtoken crate for JWT creation
-        // - reqwest for HTTP requests to token endpoint
+        // - oxihttp for HTTP requests to token endpoint
         // - google-cloud-auth crate or similar
 
         if self.config.credentials_path.is_none() {
@@ -460,16 +460,16 @@ impl GoogleVisionProvider {
         };
 
         // In production, send HTTP request:
-        // let client = reqwest::Client::new();
+        // let client = oxihttp::Client::builder().with_tls().build_https()?;
         // let response = client
-        //     .post(format!("{}/images:annotate", self.config.endpoint))
-        //     .bearer_auth(token)
-        //     .json(&request)
+        //     .post(&format!("{}/images:annotate", self.config.endpoint))?
+        //     .bearer_token(&token)?
+        //     .json(&request)?
         //     .timeout(Duration::from_secs(self.config.timeout_secs))
         //     .send()
         //     .await?;
         //
-        // let api_response: VisionApiResponse = response.json().await?;
+        // let api_response: VisionApiResponse = response.body_json().await?;
 
         // For now, return a mock response
         let api_response = self.mock_response();

@@ -2,15 +2,16 @@
 //!
 //! This module provides a typed HTTP client for interacting with the backend API.
 
+use oxify_model::http_util::append_query_params;
 use oxify_model::{ExecutionContext, ExecutionState, Workflow, WorkflowId};
-use reqwest::Client;
+use oxihttp::{Client, HttpsClient};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// API client for the OxiFY backend
 #[derive(Clone)]
 pub struct ApiClient {
-    client: Client,
+    client: HttpsClient,
     base_url: String,
 }
 
@@ -117,7 +118,7 @@ pub struct ApiErrorResponse {
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
     #[error("HTTP request failed: {0}")]
-    Request(#[from] reqwest::Error),
+    Request(#[from] oxihttp::OxiHttpError),
 
     #[error("API error ({status}): {message}")]
     Api { status: u16, message: String },
@@ -138,14 +139,18 @@ pub enum ApiError {
 impl ApiClient {
     /// Create a new API client
     pub fn new(base_url: String) -> Self {
+        let client = Client::builder()
+            .with_tls()
+            .build_https()
+            .expect("failed to build oxihttp HTTPS client for ApiClient");
         Self {
-            client: Client::new(),
+            client,
             base_url: base_url.trim_end_matches('/').to_string(),
         }
     }
 
     /// Create with custom client
-    pub fn with_client(base_url: String, client: Client) -> Self {
+    pub fn with_client(base_url: String, client: HttpsClient) -> Self {
         Self {
             client,
             base_url: base_url.trim_end_matches('/').to_string(),
@@ -159,7 +164,7 @@ impl ApiClient {
     /// Get dashboard statistics
     pub async fn get_dashboard_stats(&self) -> Result<DashboardStats, ApiError> {
         let url = format!("{}/api/v1/dashboard", self.base_url);
-        let response = self.client.get(&url).send().await?;
+        let response = self.client.get(&url)?.send().await?;
         self.handle_response(response).await
     }
 
@@ -172,22 +177,39 @@ impl ApiClient {
         &self,
         query: WorkflowListQuery,
     ) -> Result<PaginatedResponse<WorkflowSummary>, ApiError> {
-        let url = format!("{}/api/v1/workflows", self.base_url);
-        let response = self.client.get(&url).query(&query).send().await?;
+        let base_url = format!("{}/api/v1/workflows", self.base_url);
+        let mut params: Vec<(&str, String)> = Vec::new();
+        if let Some(search) = &query.search {
+            params.push(("search", search.clone()));
+        }
+        if let Some(status) = &query.status {
+            params.push(("status", status.clone()));
+        }
+        if let Some(sort) = &query.sort {
+            params.push(("sort", sort.clone()));
+        }
+        if let Some(page) = query.page {
+            params.push(("page", page.to_string()));
+        }
+        if let Some(per_page) = query.per_page {
+            params.push(("per_page", per_page.to_string()));
+        }
+        let url = append_query_params(&base_url, &params);
+        let response = self.client.get(&url)?.send().await?;
         self.handle_response(response).await
     }
 
     /// Get a single workflow by ID
     pub async fn get_workflow(&self, id: WorkflowId) -> Result<Workflow, ApiError> {
         let url = format!("{}/api/v1/workflows/{}", self.base_url, id);
-        let response = self.client.get(&url).send().await?;
+        let response = self.client.get(&url)?.send().await?;
         self.handle_response(response).await
     }
 
     /// Get workflow summary (metadata only)
     pub async fn get_workflow_summary(&self, id: WorkflowId) -> Result<WorkflowSummary, ApiError> {
         let url = format!("{}/api/v1/workflows/{}/summary", self.base_url, id);
-        let response = self.client.get(&url).send().await?;
+        let response = self.client.get(&url)?.send().await?;
         self.handle_response(response).await
     }
 
@@ -197,7 +219,7 @@ impl ApiClient {
         request: CreateWorkflowRequest,
     ) -> Result<Workflow, ApiError> {
         let url = format!("{}/api/v1/workflows", self.base_url);
-        let response = self.client.post(&url).json(&request).send().await?;
+        let response = self.client.post(&url)?.json(&request)?.send().await?;
         self.handle_response(response).await
     }
 
@@ -208,14 +230,14 @@ impl ApiClient {
         request: UpdateWorkflowRequest,
     ) -> Result<Workflow, ApiError> {
         let url = format!("{}/api/v1/workflows/{}", self.base_url, id);
-        let response = self.client.put(&url).json(&request).send().await?;
+        let response = self.client.put(&url)?.json(&request)?.send().await?;
         self.handle_response(response).await
     }
 
     /// Delete a workflow
     pub async fn delete_workflow(&self, id: WorkflowId) -> Result<(), ApiError> {
         let url = format!("{}/api/v1/workflows/{}", self.base_url, id);
-        let response = self.client.delete(&url).send().await?;
+        let response = self.client.delete(&url)?.send().await?;
 
         if response.status().is_success() {
             Ok(())
@@ -233,22 +255,36 @@ impl ApiClient {
         &self,
         query: ExecutionListQuery,
     ) -> Result<PaginatedResponse<ExecutionSummary>, ApiError> {
-        let url = format!("{}/api/v1/executions", self.base_url);
-        let response = self.client.get(&url).query(&query).send().await?;
+        let base_url = format!("{}/api/v1/executions", self.base_url);
+        let mut params: Vec<(&str, String)> = Vec::new();
+        if let Some(workflow_id) = query.workflow_id {
+            params.push(("workflow_id", workflow_id.to_string()));
+        }
+        if let Some(status) = &query.status {
+            params.push(("status", status.clone()));
+        }
+        if let Some(page) = query.page {
+            params.push(("page", page.to_string()));
+        }
+        if let Some(per_page) = query.per_page {
+            params.push(("per_page", per_page.to_string()));
+        }
+        let url = append_query_params(&base_url, &params);
+        let response = self.client.get(&url)?.send().await?;
         self.handle_response(response).await
     }
 
     /// Get a single execution by ID
     pub async fn get_execution(&self, id: Uuid) -> Result<ExecutionContext, ApiError> {
         let url = format!("{}/api/v1/executions/{}", self.base_url, id);
-        let response = self.client.get(&url).send().await?;
+        let response = self.client.get(&url)?.send().await?;
         self.handle_response(response).await
     }
 
     /// Get execution summary (metadata only)
     pub async fn get_execution_summary(&self, id: Uuid) -> Result<ExecutionSummary, ApiError> {
         let url = format!("{}/api/v1/executions/{}/summary", self.base_url, id);
-        let response = self.client.get(&url).send().await?;
+        let response = self.client.get(&url)?.send().await?;
         self.handle_response(response).await
     }
 
@@ -258,14 +294,14 @@ impl ApiClient {
         request: StartExecutionRequest,
     ) -> Result<ExecutionContext, ApiError> {
         let url = format!("{}/api/v1/executions", self.base_url);
-        let response = self.client.post(&url).json(&request).send().await?;
+        let response = self.client.post(&url)?.json(&request)?.send().await?;
         self.handle_response(response).await
     }
 
     /// Cancel a running execution
     pub async fn cancel_execution(&self, id: Uuid) -> Result<(), ApiError> {
         let url = format!("{}/api/v1/executions/{}/cancel", self.base_url, id);
-        let response = self.client.post(&url).send().await?;
+        let response = self.client.post(&url)?.send().await?;
 
         if response.status().is_success() {
             Ok(())
@@ -277,7 +313,7 @@ impl ApiClient {
     /// Pause a running execution
     pub async fn pause_execution(&self, id: Uuid) -> Result<(), ApiError> {
         let url = format!("{}/api/v1/executions/{}/pause", self.base_url, id);
-        let response = self.client.post(&url).send().await?;
+        let response = self.client.post(&url)?.send().await?;
 
         if response.status().is_success() {
             Ok(())
@@ -289,7 +325,7 @@ impl ApiClient {
     /// Resume a paused execution
     pub async fn resume_execution(&self, id: Uuid) -> Result<(), ApiError> {
         let url = format!("{}/api/v1/executions/{}/resume", self.base_url, id);
-        let response = self.client.post(&url).send().await?;
+        let response = self.client.post(&url)?.send().await?;
 
         if response.status().is_success() {
             Ok(())
@@ -305,12 +341,13 @@ impl ApiClient {
     pub async fn stream_execution(
         &self,
         id: Uuid,
-    ) -> Result<impl futures::Stream<Item = Result<bytes::Bytes, reqwest::Error>>, ApiError> {
+    ) -> Result<impl futures::Stream<Item = Result<bytes::Bytes, oxihttp::OxiHttpError>>, ApiError>
+    {
         let url = format!("{}/api/v1/executions/{}/stream", self.base_url, id);
         let response = self
             .client
-            .get(&url)
-            .header("Accept", "text/event-stream")
+            .get(&url)?
+            .header("Accept", "text/event-stream")?
             .send()
             .await?;
         if !response.status().is_success() {
@@ -319,7 +356,7 @@ impl ApiClient {
                 message: format!("SSE stream returned {}", response.status()),
             });
         }
-        Ok(response.bytes_stream())
+        Ok(response.body_stream())
     }
 
     /// Get execution logs
@@ -328,12 +365,13 @@ impl ApiClient {
         id: Uuid,
         limit: Option<u32>,
     ) -> Result<Vec<LogEntry>, ApiError> {
-        let url = format!("{}/api/v1/executions/{}/logs", self.base_url, id);
-        let mut request = self.client.get(&url);
-        if let Some(limit) = limit {
-            request = request.query(&[("limit", limit)]);
-        }
-        let response = request.send().await?;
+        let base_url = format!("{}/api/v1/executions/{}/logs", self.base_url, id);
+        let url = if let Some(limit) = limit {
+            append_query_params(&base_url, &[("limit", limit.to_string())])
+        } else {
+            base_url
+        };
+        let response = self.client.get(&url)?.send().await?;
         self.handle_response(response).await
     }
 
@@ -343,13 +381,13 @@ impl ApiClient {
 
     async fn handle_response<T: for<'de> Deserialize<'de>>(
         &self,
-        response: reqwest::Response,
+        response: oxihttp::Response,
     ) -> Result<T, ApiError> {
         let status = response.status();
 
         if status.is_success() {
             response
-                .json::<T>()
+                .body_json::<T>()
                 .await
                 .map_err(|e| ApiError::Deserialize(e.to_string()))
         } else {
@@ -357,7 +395,7 @@ impl ApiClient {
         }
     }
 
-    async fn extract_error(&self, response: reqwest::Response) -> ApiError {
+    async fn extract_error(&self, response: oxihttp::Response) -> ApiError {
         let status = response.status().as_u16();
 
         match status {
@@ -366,7 +404,7 @@ impl ApiClient {
             404 => ApiError::NotFound("Resource not found".to_string()),
             _ => {
                 let message = response
-                    .json::<ApiErrorResponse>()
+                    .body_json::<ApiErrorResponse>()
                     .await
                     .map(|e| e.message)
                     .unwrap_or_else(|_| "Unknown error".to_string());

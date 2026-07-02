@@ -78,20 +78,21 @@ impl TwilioConfig {
 // ---------------------------------------------------------------------------
 
 /// Twilio SMS communication provider that uses the Twilio Messaging REST API
-/// directly via `reqwest`.  No third-party Twilio SDK is required.
+/// directly via `oxihttp`.  No third-party Twilio SDK is required.
 ///
 /// Authentication is performed via HTTP Basic auth with the Account SID as the
 /// username and the Auth Token as the password, as required by the Twilio API.
 pub struct TwilioProvider {
     cfg: TwilioConfig,
-    http: reqwest::Client,
+    http: oxihttp::HttpsClient,
 }
 
 impl TwilioProvider {
     /// Create a new `TwilioProvider` from the supplied configuration.
     pub fn new(cfg: TwilioConfig) -> Result<Self> {
-        let http = reqwest::Client::builder()
-            .build()
+        let http = oxihttp::Client::builder()
+            .with_tls()
+            .build_https()
             .map_err(|e| CommError::Http(format!("failed to build HTTP client: {e}")))?;
 
         Ok(Self { cfg, http })
@@ -106,18 +107,6 @@ impl TwilioProvider {
 // ---------------------------------------------------------------------------
 // Internal Twilio API types
 // ---------------------------------------------------------------------------
-
-/// Form-encoded body for the Twilio Messages API.
-/// Field names are capitalised to match the Twilio API specification.
-#[derive(serde::Serialize)]
-struct SmsFormBody<'a> {
-    #[serde(rename = "From")]
-    from: &'a str,
-    #[serde(rename = "To")]
-    to: &'a str,
-    #[serde(rename = "Body")]
-    body: &'a str,
-}
 
 /// Partial deserialisation of the Twilio 201 Created response body.
 #[derive(serde::Deserialize)]
@@ -167,15 +156,17 @@ impl super::MessageProvider for TwilioProvider {
         );
         debug!(%url, %to, "posting Twilio SMS message");
 
+        // Field names are capitalised to match the Twilio API specification.
+        let form_body = oxihttp::FormBody::new()
+            .field("From", self.cfg.from_number.clone())
+            .field("To", to.clone())
+            .field("Body", text.clone());
+
         let response = self
             .http
-            .post(&url)
-            .basic_auth(&self.cfg.account_sid, Some(&self.cfg.auth_token))
-            .form(&SmsFormBody {
-                from: &self.cfg.from_number,
-                to: &to,
-                body: &text,
-            })
+            .post(&url)?
+            .basic_auth(&self.cfg.account_sid, Some(&self.cfg.auth_token))?
+            .form(&form_body)
             .send()
             .await
             .map_err(|e| CommError::Http(format!("POST Messages.json failed: {e}")))?;
@@ -184,11 +175,11 @@ impl super::MessageProvider for TwilioProvider {
         let status = response.status();
 
         if !status.is_success() {
-            let body_text = response.text().await.unwrap_or_default();
+            let body_text = response.body_text().await.unwrap_or_default();
             return Err(CommError::Http(format!("Twilio API {status}: {body_text}")));
         }
 
-        let parsed: TwilioMessageResponse = response.json().await.map_err(|e| {
+        let parsed: TwilioMessageResponse = response.body_json().await.map_err(|e| {
             CommError::Serialization(format!("deserialize Twilio Messages.json response: {e}"))
         })?;
 

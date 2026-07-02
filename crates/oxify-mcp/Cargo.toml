@@ -2,6 +2,7 @@
 name = "oxify-mcp"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Model Context Protocol (MCP) server implementation for OxiFY"
@@ -18,7 +19,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-reqwest = { workspace = true }
+oxihttp = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 
@@ -39,7 +40,7 @@ linear = []
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
-# Required for tests that construct GitHubServer / GitHubActionsServer —
-# reqwest/octocrab TLS stacks need a process-level rustls CryptoProvider.
+# Required for tests that construct GitHubServer —
+# octocrab's TLS stack (reqwest-backed) needs a process-level rustls CryptoProvider.
 rustls = { version = "0.23", features = ["ring"] }
 wiremock = { workspace = true }

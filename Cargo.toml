@@ -32,6 +32,7 @@ resolver = "2"
 [workspace.package]
 version = "0.2.0"
 edition = "2021"
+rust-version = "1.89"
 authors = ["OxiFY Contributors"]
 license = "Apache-2.0"
 repository = "https://github.com/cool-japan/oxify"
@@ -39,6 +40,8 @@ repository = "https://github.com/cool-japan/oxify"
 [workspace.dependencies]
 # CeleRS — cross-workspace path dep (not published on crates.io)
 celers = { version = "0.2.0", path = "../celers/crates/celers", default-features = false }
+# OxiFY-Model — in-workspace path dep, shared model/error/HTTP-util types
+oxify-model = { version = "0.2.0", path = "crates/oxify-model" }
 
 # Core dependencies
 tokio = { version = "1.52.3", features = ["full"] }
@@ -56,6 +59,10 @@ axum = { version = "0.8.9", features = ["macros", "ws"] }
 tower = "0.5.3"
 tower-http = { version = "0.7.0", features = ["cors", "trace"] }
 hyper = { version = "1.10", features = ["full"] }
+# Needed only to name hyper_util::client::legacy::connect::{Connect, HttpConnector}
+# when writing connector-generic helpers against oxihttp::RequestBuilder<C> /
+# oxihttp::HttpsClient (oxihttp itself does not re-export these types).
+hyper-util = { version = "0.1.20", default-features = false, features = ["client-legacy"] }
 
 # GraphQL
 async-graphql = { version = "7.2", features = ["chrono"] }
@@ -63,8 +70,23 @@ async-graphql-axum = "7.2"
 
 # LLM & Vector DB clients
 reqwest = { version = "0.13.4", features = ["json", "stream", "form", "query"] }
+# COOLJAPAN pure-Rust HTTP client (OxiHTTP) — migration target replacing reqwest.
+# NOTE: 0.2.1 was requested but is NOT published on crates.io; 0.2.0 is the latest
+# published release (verified via `cargo add --dry-run`), and matches oxitls' pin.
+oxihttp = { version = "0.2.0", default-features = false, features = ["client", "tls", "decompression"] }
+percent-encoding = "2.3"
 qdrant-client = "1.18.0"
 sqlx = { version = "0.9.0", features = ["runtime-tokio", "sqlite", "chrono", "uuid"] }
+# COOLJAPAN pure-Rust SQL stack (OxiSQL) — migration target replacing sqlx for the
+# SQLite storage layer (oxify-storage). sqlx is retained above because
+# oxify-connect-db / oxify-connect-vector still use it for the Postgres/MySQL paths.
+oxisql-core = "0.3.1"
+oxisql-sqlite-compat = "0.3.1"
+oxisql-pool = { version = "0.3.1", features = ["sqlite"] }
+oxisql-migrate = { version = "0.3.1", features = ["migrate"] }
+# Generic connection pool — names deadpool::managed::{Object, PoolError} in the
+# oxify-storage pool/error glue. Version pinned to match oxisql-pool 0.3.1.
+deadpool = { version = "0.13.0", features = ["managed"] }
 
 # Utilities
 clap = { version = "4.6.1", features = ["derive"] }
@@ -99,9 +121,13 @@ lapin = "4.10.0"
 octocrab = "0.53"
 
 # Cryptography (AWS SigV4, etc.)
-hmac = "0.13"
 sha2 = "0.11"
 hex = "0.4"
+
+# COOLJAPAN pure-Rust cryptography (OxiCrypto ecosystem)
+oxicrypto-hash = "0.2"
+oxicrypto-mac = "0.2"
+oxicrypto-core = "0.2"
 
 # JWT / auth tokens
 jsonwebtoken = "10.4"
@@ -112,8 +138,11 @@ lettre = { version = "0.11", default-features = false, features = ["tokio1-rustl
 # Document database
 mongodb = "3.7.0"
 
-# Object storage
-object_store = { version = "0.14", default-features = false, features = ["aws", "gcp", "azure", "fs"] }
+# Object storage (COOLJAPAN pure-Rust OxiStore ecosystem)
+oxistore-blob       = { version = "0.2", features = ["blob"] }
+oxistore-blob-s3    = "0.2"
+oxistore-blob-gcs   = "0.2"
+oxistore-blob-azure = "0.2"
 bytes = "1.12"
 
 # Compression (Pure Rust, OxiARC ecosystem)

@@ -2,6 +2,7 @@
 name = "oxify-cli"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Command-line interface for OxiFY AI orchestration and workflow automation"
@@ -30,7 +31,7 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 toml = { workspace = true }
 dirs = { workspace = true }
-reqwest = { workspace = true }
+oxihttp = { workspace = true }
 oxiarc-deflate = { workspace = true }
 oxiarc-archive = { workspace = true }
 uuid = { workspace = true }

@@ -1,5 +1,9 @@
--- Migration: 001_performance_indexes
--- Description: Add performance indexes for improved query performance
+-- Migration: performance_indexes
+-- Description: Add performance indexes for improved query performance.
+-- Folded in from the retired hand-rolled migration_runner (sql/001_performance_indexes.sql)
+-- during the sqlx -> oxisql migration. Pure SQLite CREATE INDEX statements only;
+-- the Postgres-only sql/002_schema_constraints.sql (DO $$ ... $$ / ALTER TABLE
+-- ADD CONSTRAINT) was dropped because SQLite cannot express it.
 
 -- Index for executions table - workflow_id + created_at
 CREATE INDEX IF NOT EXISTS idx_executions_workflow_id_created_at

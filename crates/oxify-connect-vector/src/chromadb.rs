@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// ChromaDB vector database provider
 pub struct ChromaDBProvider {
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     base_url: String,
 }
 
@@ -65,7 +65,10 @@ impl ChromaDBProvider {
     /// Create a new ChromaDB provider
     pub fn new(base_url: String) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: oxihttp::Client::builder()
+                .with_tls()
+                .build_https()
+                .expect("failed to build oxihttp HTTPS client for ChromaDB"),
             base_url,
         }
     }
@@ -88,15 +91,16 @@ impl VectorProvider for ChromaDBProvider {
         let response = self
             .client
             .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&query)
+            .and_then(|request| request.header("Content-Type", "application/json"))
+            .and_then(|request| request.json(&query))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         let status = response.status();
         let body = response
-            .text()
+            .body_text()
             .await
             .map_err(|e| VectorError::QueryError(e.to_string()))?;
 
@@ -168,14 +172,15 @@ impl VectorProvider for ChromaDBProvider {
         let response = self
             .client
             .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&add_request)
+            .and_then(|request| request.header("Content-Type", "application/json"))
+            .and_then(|request| request.json(&add_request))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         if !response.status().is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = response.body_text().await.unwrap_or_default();
             return Err(VectorError::DatabaseError(format!(
                 "Failed to insert: {}",
                 body
@@ -191,17 +196,19 @@ impl VectorProvider for ChromaDBProvider {
             self.base_url, request.collection
         );
 
+        let delete_body = serde_json::json!({ "ids": request.ids });
         let response = self
             .client
             .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&serde_json::json!({ "ids": request.ids }))
+            .and_then(|builder| builder.header("Content-Type", "application/json"))
+            .and_then(|builder| builder.json(&delete_body))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         if !response.status().is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = response.body_text().await.unwrap_or_default();
             return Err(VectorError::DatabaseError(format!(
                 "Failed to delete: {}",
                 body
@@ -221,14 +228,15 @@ impl VectorProvider for ChromaDBProvider {
         let response = self
             .client
             .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&create_request)
+            .and_then(|request| request.header("Content-Type", "application/json"))
+            .and_then(|request| request.json(&create_request))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         if !response.status().is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = response.body_text().await.unwrap_or_default();
             return Err(VectorError::DatabaseError(format!(
                 "Failed to create collection: {}",
                 body
@@ -244,6 +252,7 @@ impl VectorProvider for ChromaDBProvider {
         let response = self
             .client
             .get(&url)
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
@@ -283,14 +292,15 @@ impl VectorProvider for ChromaDBProvider {
         let response = self
             .client
             .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&add_request)
+            .and_then(|request| request.header("Content-Type", "application/json"))
+            .and_then(|request| request.json(&add_request))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         if !response.status().is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = response.body_text().await.unwrap_or_default();
             return Err(VectorError::DatabaseError(format!(
                 "Batch insert failed: {}",
                 body
@@ -314,11 +324,13 @@ impl VectorProvider for ChromaDBProvider {
             self.base_url, request.collection
         );
 
+        let get_body = serde_json::json!({ "ids": vec![&request.id] });
         let get_response = self
             .client
             .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&serde_json::json!({ "ids": vec![&request.id] }))
+            .and_then(|builder| builder.header("Content-Type", "application/json"))
+            .and_then(|builder| builder.json(&get_body))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
@@ -331,7 +343,7 @@ impl VectorProvider for ChromaDBProvider {
         }
 
         let existing: ChromaGetResponse = get_response
-            .json()
+            .body_json()
             .await
             .map_err(|e| VectorError::QueryError(e.to_string()))?;
 
@@ -370,14 +382,15 @@ impl VectorProvider for ChromaDBProvider {
         let response = self
             .client
             .post(&update_url)
-            .header("Content-Type", "application/json")
-            .json(&update_request)
+            .and_then(|request| request.header("Content-Type", "application/json"))
+            .and_then(|request| request.json(&update_request))
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         if !response.status().is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = response.body_text().await.unwrap_or_default();
             return Err(VectorError::DatabaseError(format!(
                 "Update failed: {}",
                 body
@@ -394,6 +407,7 @@ impl VectorProvider for ChromaDBProvider {
         let response = self
             .client
             .get(&url)
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
@@ -406,7 +420,7 @@ impl VectorProvider for ChromaDBProvider {
         }
 
         let _collection: ChromaCollectionResponse = response
-            .json()
+            .body_json()
             .await
             .map_err(|e| VectorError::QueryError(e.to_string()))?;
 
@@ -416,13 +430,14 @@ impl VectorProvider for ChromaDBProvider {
         let count_response = self
             .client
             .get(&count_url)
+            .map_err(|e| VectorError::ConnectionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| VectorError::ConnectionError(e.to_string()))?;
 
         let vector_count: usize = if count_response.status().is_success() {
             count_response
-                .json()
+                .body_json()
                 .await
                 .map_err(|e| VectorError::QueryError(e.to_string()))?
         } else {

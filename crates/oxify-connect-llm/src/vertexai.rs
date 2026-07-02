@@ -12,7 +12,7 @@ pub struct VertexAiProvider {
     project_id: String,
     location: String,
     model: String,
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     base_url: String,
 }
 
@@ -24,7 +24,10 @@ impl VertexAiProvider {
             project_id,
             location,
             model,
-            client: reqwest::Client::new(),
+            client: oxihttp::Client::builder()
+                .with_tls()
+                .build_https()
+                .expect("failed to build oxihttp HTTPS client for Vertex AI"),
             base_url,
         }
     }
@@ -169,10 +172,10 @@ impl LlmProvider for VertexAiProvider {
 
         let response = self
             .client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .header("Authorization", format!("Bearer {}", self.access_token))
-            .json(&vx_request)
+            .post(&url)?
+            .header("Content-Type", "application/json")?
+            .header("Authorization", &format!("Bearer {}", self.access_token))?
+            .json(&vx_request)?
             .send()
             .await?;
 
@@ -188,7 +191,7 @@ impl LlmProvider for VertexAiProvider {
             return Err(LlmError::RateLimited(retry_after));
         }
 
-        let body = response.text().await?;
+        let body = response.body_text().await?;
 
         if !status.is_success() {
             return Err(LlmError::ApiError(format!("HTTP {}: {}", status, body)));
@@ -251,10 +254,10 @@ impl StreamingLlmProvider for VertexAiProvider {
 
         let response = self
             .client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .header("Authorization", format!("Bearer {}", self.access_token))
-            .json(&vx_request)
+            .post(&url)?
+            .header("Content-Type", "application/json")?
+            .header("Authorization", &format!("Bearer {}", self.access_token))?
+            .json(&vx_request)?
             .send()
             .await?;
 
@@ -271,12 +274,12 @@ impl StreamingLlmProvider for VertexAiProvider {
         }
 
         if !status.is_success() {
-            let body = response.text().await?;
+            let body = response.body_text().await?;
             return Err(LlmError::ApiError(format!("HTTP {}: {}", status, body)));
         }
 
         let model_name = self.model.clone();
-        let byte_stream = response.bytes_stream();
+        let byte_stream = response.body_stream();
 
         let parsed_stream = byte_stream.filter_map(move |chunk_result| {
             let model = model_name.clone();
@@ -331,10 +334,10 @@ impl EmbeddingProvider for VertexAiProvider {
 
             let response = self
                 .client
-                .post(&url)
-                .header("Content-Type", "application/json")
-                .header("Authorization", format!("Bearer {}", self.access_token))
-                .json(&embed_req)
+                .post(&url)?
+                .header("Content-Type", "application/json")?
+                .header("Authorization", &format!("Bearer {}", self.access_token))?
+                .json(&embed_req)?
                 .send()
                 .await?;
 
@@ -350,7 +353,7 @@ impl EmbeddingProvider for VertexAiProvider {
                 return Err(LlmError::RateLimited(retry_after));
             }
 
-            let body = response.text().await?;
+            let body = response.body_text().await?;
 
             if !status.is_success() {
                 return Err(LlmError::ApiError(format!("HTTP {}: {}", status, body)));

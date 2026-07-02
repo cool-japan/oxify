@@ -12,7 +12,8 @@
 //! - Multiple registry support
 
 use crate::plugin_manifest::PluginManifest;
-use reqwest::Client;
+use oxify_model::http_util::append_query_params;
+use oxihttp::{Client, HttpsClient};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -195,16 +196,24 @@ pub struct RegistryClient {
     /// Configuration
     config: RegistryConfig,
     /// HTTP client
-    client: Client,
+    client: HttpsClient,
 }
 
 impl RegistryClient {
     /// Create a new registry client
     pub fn new(config: RegistryConfig) -> Result<Self, MarketplaceError> {
-        let client = Client::builder()
-            .timeout(config.timeout)
-            .danger_accept_invalid_certs(!config.verify_ssl)
-            .build()
+        let builder = Client::builder()
+            .connect_timeout(config.timeout)
+            .read_timeout(config.timeout);
+        // oxihttp's `with_danger_accept_invalid_certs` takes no boolean, so the
+        // builder chain is branched on the SSL verification flag instead.
+        let builder = if config.verify_ssl {
+            builder.with_tls()
+        } else {
+            builder.with_tls().with_danger_accept_invalid_certs()
+        };
+        let client = builder
+            .build_https()
             .map_err(|e| MarketplaceError::NetworkError(e.to_string()))?;
 
         Ok(Self { config, client })
@@ -215,29 +224,38 @@ impl RegistryClient {
         &self,
         criteria: SearchCriteria,
     ) -> Result<Vec<SearchResult>, MarketplaceError> {
-        let url = format!("{}/api/v1/plugins/search", self.config.url);
+        let base_url = format!("{}/api/v1/plugins/search", self.config.url);
 
-        let mut request = self.client.get(&url);
-
-        // Add query parameters
+        // oxihttp has no builder-level query API; collect all parameters and
+        // append them to the URL before constructing the request.
+        let mut query_pairs: Vec<(String, String)> = Vec::new();
         if let Some(query) = &criteria.query {
-            request = request.query(&[("q", query)]);
+            query_pairs.push(("q".to_string(), query.clone()));
         }
         if let Some(category) = &criteria.category {
-            request = request.query(&[("category", category)]);
+            query_pairs.push(("category".to_string(), category.clone()));
         }
         if let Some(author) = &criteria.author {
-            request = request.query(&[("author", author)]);
+            query_pairs.push(("author".to_string(), author.clone()));
         }
         if !criteria.keywords.is_empty() {
-            request = request.query(&[("keywords", criteria.keywords.join(","))]);
+            query_pairs.push(("keywords".to_string(), criteria.keywords.join(",")));
         }
-        request = request.query(&[("limit", criteria.limit.to_string())]);
-        request = request.query(&[("offset", criteria.offset.to_string())]);
+        query_pairs.push(("limit".to_string(), criteria.limit.to_string()));
+        query_pairs.push(("offset".to_string(), criteria.offset.to_string()));
+
+        let url = append_query_params(&base_url, &query_pairs);
+
+        let mut request = self
+            .client
+            .get(&url)
+            .map_err(|e| MarketplaceError::NetworkError(e.to_string()))?;
 
         // Add authentication
         if let Some(api_key) = &self.config.api_key {
-            request = request.header("Authorization", format!("Bearer {}", api_key));
+            request = request
+                .header("Authorization", &format!("Bearer {}", api_key))
+                .map_err(|e| MarketplaceError::NetworkError(e.to_string()))?;
         }
 
         let response = request
@@ -253,7 +271,7 @@ impl RegistryClient {
         }
 
         let results: Vec<SearchResult> = response
-            .json()
+            .body_json()
             .await
             .map_err(|e| MarketplaceError::RegistryError(e.to_string()))?;
 
@@ -264,11 +282,16 @@ impl RegistryClient {
     pub async fn get_plugin(&self, name: &str) -> Result<SearchResult, MarketplaceError> {
         let url = format!("{}/api/v1/plugins/{}", self.config.url, name);
 
-        let mut request = self.client.get(&url);
+        let mut request = self
+            .client
+            .get(&url)
+            .map_err(|e| MarketplaceError::NetworkError(e.to_string()))?;
 
         // Add authentication
         if let Some(api_key) = &self.config.api_key {
-            request = request.header("Authorization", format!("Bearer {}", api_key));
+            request = request
+                .header("Authorization", &format!("Bearer {}", api_key))
+                .map_err(|e| MarketplaceError::NetworkError(e.to_string()))?;
         }
 
         let response = request
@@ -288,7 +311,7 @@ impl RegistryClient {
         }
 
         let result: SearchResult = response
-            .json()
+            .body_json()
             .await
             .map_err(|e| MarketplaceError::RegistryError(e.to_string()))?;
 
@@ -305,11 +328,16 @@ impl RegistryClient {
         let plugin_info = self.get_plugin(name).await?;
 
         // Download the plugin package
-        let mut request = self.client.get(&plugin_info.download_url);
+        let mut request = self
+            .client
+            .get(&plugin_info.download_url)
+            .map_err(|e| MarketplaceError::NetworkError(e.to_string()))?;
 
         // Add authentication
         if let Some(api_key) = &self.config.api_key {
-            request = request.header("Authorization", format!("Bearer {}", api_key));
+            request = request
+                .header("Authorization", &format!("Bearer {}", api_key))
+                .map_err(|e| MarketplaceError::NetworkError(e.to_string()))?;
         }
 
         let response = request
@@ -327,7 +355,7 @@ impl RegistryClient {
         // Save to file
         let plugin_path = destination.join(format!("{}.tar.gz", name));
         let bytes = response
-            .bytes()
+            .body_bytes()
             .await
             .map_err(|e| MarketplaceError::DownloadError(e.to_string()))?;
 
@@ -369,9 +397,10 @@ impl RegistryClient {
         let create_request = self
             .client
             .post(&create_url)
+            .map_err(|e| MarketplaceError::NetworkError(e.to_string()))?
             .header(
                 "Authorization",
-                format!(
+                &format!(
                     "Bearer {}",
                     self.config
                         .api_key
@@ -379,7 +408,9 @@ impl RegistryClient {
                         .expect("api_key required for marketplace operations")
                 ),
             )
+            .map_err(|e| MarketplaceError::NetworkError(e.to_string()))?
             .header("Content-Type", "application/json")
+            .map_err(|e| MarketplaceError::NetworkError(e.to_string()))?
             .body(manifest_json);
 
         let create_response = create_request
@@ -389,7 +420,7 @@ impl RegistryClient {
 
         if !create_response.status().is_success() {
             let error_text = create_response
-                .text()
+                .body_text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(MarketplaceError::PublicationError(format!(
@@ -410,9 +441,10 @@ impl RegistryClient {
         let upload_request = self
             .client
             .put(&upload_url)
+            .map_err(|e| MarketplaceError::NetworkError(e.to_string()))?
             .header(
                 "Authorization",
-                format!(
+                &format!(
                     "Bearer {}",
                     self.config
                         .api_key
@@ -420,7 +452,9 @@ impl RegistryClient {
                         .expect("api_key required for marketplace operations")
                 ),
             )
+            .map_err(|e| MarketplaceError::NetworkError(e.to_string()))?
             .header("Content-Type", "application/gzip")
+            .map_err(|e| MarketplaceError::NetworkError(e.to_string()))?
             .body(package_bytes);
 
         let upload_response = upload_request
@@ -430,7 +464,7 @@ impl RegistryClient {
 
         if !upload_response.status().is_success() {
             let error_text = upload_response
-                .text()
+                .body_text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(MarketplaceError::PublicationError(format!(
@@ -446,11 +480,16 @@ impl RegistryClient {
     pub async fn get_versions(&self, name: &str) -> Result<Vec<String>, MarketplaceError> {
         let url = format!("{}/api/v1/plugins/{}/versions", self.config.url, name);
 
-        let mut request = self.client.get(&url);
+        let mut request = self
+            .client
+            .get(&url)
+            .map_err(|e| MarketplaceError::NetworkError(e.to_string()))?;
 
         // Add authentication
         if let Some(api_key) = &self.config.api_key {
-            request = request.header("Authorization", format!("Bearer {}", api_key));
+            request = request
+                .header("Authorization", &format!("Bearer {}", api_key))
+                .map_err(|e| MarketplaceError::NetworkError(e.to_string()))?;
         }
 
         let response = request
@@ -466,7 +505,7 @@ impl RegistryClient {
         }
 
         let versions: Vec<String> = response
-            .json()
+            .body_json()
             .await
             .map_err(|e| MarketplaceError::RegistryError(e.to_string()))?;
 

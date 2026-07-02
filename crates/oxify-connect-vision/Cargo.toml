@@ -2,6 +2,7 @@
 name = "oxify-connect-vision"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Vision/OCR connector for OxiFY workflows"
@@ -44,10 +45,10 @@ num_cpus = { workspace = true }
 
 # Model downloading
 dirs = { workspace = true }
-sha2 = { workspace = true }
-hmac = { workspace = true }
+oxicrypto-hash = { workspace = true }
+oxicrypto-mac = { workspace = true }
 hex = { workspace = true }
-reqwest = { workspace = true }
+oxihttp = { workspace = true }
 
 # Configuration
 serde_yaml = "0.9"

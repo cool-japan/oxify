@@ -26,3 +26,15 @@ pub enum CommError {
 
 /// Convenience alias so callers write `errors::Result<T>`.
 pub type Result<T> = std::result::Result<T, CommError>;
+
+/// Convert an `oxihttp` request-building failure (invalid header, malformed
+/// URL, JSON serialization, etc.) into a [`CommError::Http`].
+///
+/// This lets provider code use the `?` operator directly on the fallible
+/// `oxihttp` builder methods (`.post()`, `.header()`, `.json()`, `.bearer_token()`,
+/// `.basic_auth()`, ...) without a `.map_err(...)` at every call site.
+impl From<oxihttp::OxiHttpError> for CommError {
+    fn from(err: oxihttp::OxiHttpError) -> Self {
+        CommError::Http(err.to_string())
+    }
+}

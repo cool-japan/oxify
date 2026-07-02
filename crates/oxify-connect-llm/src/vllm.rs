@@ -40,7 +40,7 @@ use std::time::Duration;
 /// ```
 pub struct VllmProvider {
     model: String,
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     base_url: String,
 }
 
@@ -129,7 +129,10 @@ impl VllmProvider {
     pub fn new(model: String) -> Self {
         Self {
             model,
-            client: reqwest::Client::new(),
+            client: oxihttp::Client::builder()
+                .with_tls()
+                .build_https()
+                .expect("failed to build oxihttp HTTPS client for vLLM"),
             base_url: "http://localhost:8000".to_string(),
         }
     }
@@ -178,9 +181,9 @@ impl LlmProvider for VllmProvider {
 
         let response = self
             .client
-            .post(format!("{}/v1/chat/completions", self.base_url))
-            .header("Content-Type", "application/json")
-            .json(&vllm_request)
+            .post(&format!("{}/v1/chat/completions", self.base_url))?
+            .header("Content-Type", "application/json")?
+            .json(&vllm_request)?
             .send()
             .await?;
 
@@ -197,7 +200,7 @@ impl LlmProvider for VllmProvider {
             return Err(LlmError::RateLimited(retry_after));
         }
 
-        let body = response.text().await?;
+        let body = response.body_text().await?;
 
         if !status.is_success() {
             return Err(LlmError::ApiError(format!("HTTP {}: {}", status, body)));
@@ -237,9 +240,9 @@ impl StreamingLlmProvider for VllmProvider {
 
         let response = self
             .client
-            .post(format!("{}/v1/chat/completions", self.base_url))
-            .header("Content-Type", "application/json")
-            .json(&vllm_request)
+            .post(&format!("{}/v1/chat/completions", self.base_url))?
+            .header("Content-Type", "application/json")?
+            .json(&vllm_request)?
             .send()
             .await?;
 
@@ -257,11 +260,11 @@ impl StreamingLlmProvider for VllmProvider {
         }
 
         if !status.is_success() {
-            let body = response.text().await?;
+            let body = response.body_text().await?;
             return Err(LlmError::ApiError(format!("HTTP {}: {}", status, body)));
         }
 
-        let stream = response.bytes_stream();
+        let stream = response.body_stream();
         let model_name = self.model.clone();
 
         let parsed_stream = stream.filter_map(move |chunk_result| {
@@ -355,9 +358,9 @@ impl EmbeddingProvider for VllmProvider {
 
         let response = self
             .client
-            .post(format!("{}/v1/embeddings", self.base_url))
-            .header("Content-Type", "application/json")
-            .json(&vllm_request)
+            .post(&format!("{}/v1/embeddings", self.base_url))?
+            .header("Content-Type", "application/json")?
+            .json(&vllm_request)?
             .send()
             .await?;
 
@@ -374,7 +377,7 @@ impl EmbeddingProvider for VllmProvider {
             return Err(LlmError::RateLimited(retry_after));
         }
 
-        let body = response.text().await?;
+        let body = response.body_text().await?;
 
         if !status.is_success() {
             return Err(LlmError::ApiError(format!("HTTP {}: {}", status, body)));

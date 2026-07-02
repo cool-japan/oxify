@@ -13,7 +13,7 @@ use std::time::Duration;
 pub struct GeminiProvider {
     api_key: String,
     model: String,
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     base_url: String,
 }
 
@@ -79,7 +79,10 @@ impl GeminiProvider {
         Self {
             api_key,
             model,
-            client: reqwest::Client::new(),
+            client: oxihttp::Client::builder()
+                .with_tls()
+                .build_https()
+                .expect("failed to build oxihttp HTTPS client for Gemini"),
             base_url: "https://generativelanguage.googleapis.com/v1beta".to_string(),
         }
     }
@@ -128,9 +131,9 @@ impl LlmProvider for GeminiProvider {
 
         let response = self
             .client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&gemini_request)
+            .post(&url)?
+            .header("Content-Type", "application/json")?
+            .json(&gemini_request)?
             .send()
             .await?;
 
@@ -148,7 +151,7 @@ impl LlmProvider for GeminiProvider {
             return Err(LlmError::RateLimited(retry_after));
         }
 
-        let body = response.text().await?;
+        let body = response.body_text().await?;
 
         if !status.is_success() {
             return Err(LlmError::ApiError(format!("HTTP {}: {}", status, body)));
@@ -222,9 +225,9 @@ impl StreamingLlmProvider for GeminiProvider {
 
         let response = self
             .client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&gemini_request)
+            .post(&url)?
+            .header("Content-Type", "application/json")?
+            .json(&gemini_request)?
             .send()
             .await?;
 
@@ -243,11 +246,11 @@ impl StreamingLlmProvider for GeminiProvider {
         }
 
         if !status.is_success() {
-            let body = response.text().await?;
+            let body = response.body_text().await?;
             return Err(LlmError::ApiError(format!("HTTP {}: {}", status, body)));
         }
 
-        let stream = response.bytes_stream();
+        let stream = response.body_stream();
         let model_name = self.model.clone();
 
         let parsed_stream = stream.filter_map(move |chunk_result| {
@@ -344,9 +347,9 @@ impl EmbeddingProvider for GeminiProvider {
 
             let response = self
                 .client
-                .post(&url)
-                .header("Content-Type", "application/json")
-                .json(&gemini_request)
+                .post(&url)?
+                .header("Content-Type", "application/json")?
+                .json(&gemini_request)?
                 .send()
                 .await?;
 
@@ -364,7 +367,7 @@ impl EmbeddingProvider for GeminiProvider {
                 return Err(LlmError::RateLimited(retry_after));
             }
 
-            let body = response.text().await?;
+            let body = response.body_text().await?;
 
             if !status.is_success() {
                 return Err(LlmError::ApiError(format!("HTTP {}: {}", status, body)));
@@ -381,5 +384,89 @@ impl EmbeddingProvider for GeminiProvider {
             model,
             usage: None, // Gemini doesn't provide token usage for embeddings
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::LlmRequest;
+    use futures::StreamExt;
+    use wiremock::matchers::{method, path_regex};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn make_request(prompt: &str) -> LlmRequest {
+        LlmRequest {
+            prompt: prompt.to_string(),
+            system_prompt: None,
+            temperature: None,
+            max_tokens: None,
+            tools: vec![],
+            images: vec![],
+        }
+    }
+
+    /// End-to-end regression guard for the `body_stream()` SSE parsing path.
+    ///
+    /// Drives `complete_stream` against a mock server that returns a realistic
+    /// Gemini `alt=sse` response (two `data:` events, the second carrying
+    /// `usageMetadata`) and asserts the chunks are parsed correctly. This
+    /// exercises the `.body_stream()` rename introduced during the reqwest ->
+    /// oxihttp migration against a real HTTP server.
+    #[tokio::test]
+    async fn test_complete_stream_sse_parsing() {
+        let server = MockServer::start().await;
+
+        // A realistic Gemini `alt=sse` event: a `data:` line carrying the
+        // generated text plus `usageMetadata` (which marks the terminal chunk),
+        // followed by the SSE event-terminating blank line.
+        let sse_body = concat!(
+            "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello world\"}],",
+            "\"role\":\"model\"}}],",
+            "\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":2,",
+            "\"totalTokenCount\":7}}\n",
+            "\n",
+        );
+
+        Mock::given(method("POST"))
+            .and(path_regex(r".*:streamGenerateContent$"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(sse_body),
+            )
+            .mount(&server)
+            .await;
+
+        let provider = GeminiProvider::new("test_key".to_string(), "gemini-1.5-flash".to_string())
+            .with_base_url(server.uri());
+
+        let mut stream = provider
+            .complete_stream(make_request("Say hi"))
+            .await
+            .expect("complete_stream should return a stream");
+
+        let mut collected_content = String::new();
+        let mut last_chunk: Option<LlmChunk> = None;
+        while let Some(item) = stream.next().await {
+            let chunk = item.expect("stream item should be Ok");
+            collected_content.push_str(&chunk.content);
+            last_chunk = Some(chunk);
+        }
+
+        // The `.body_stream()` path must surface the SSE payload and the
+        // `data: ` parser must reconstruct the generated text and usage.
+        assert_eq!(collected_content, "Hello world");
+
+        let last = last_chunk.expect("stream should yield at least one chunk");
+        assert!(
+            last.done,
+            "final chunk (carrying usageMetadata) should be done"
+        );
+        assert_eq!(last.model.as_deref(), Some("gemini-1.5-flash"));
+        let usage = last.usage.expect("final chunk should carry usage");
+        assert_eq!(usage.total_tokens, Some(7));
+        assert_eq!(usage.prompt_tokens, Some(5));
+        assert_eq!(usage.completion_tokens, Some(2));
     }
 }

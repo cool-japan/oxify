@@ -2,6 +2,7 @@
 name = "oxify-celers"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Bridge OxiFY workflow execution to the CeleRS distributed task queue"

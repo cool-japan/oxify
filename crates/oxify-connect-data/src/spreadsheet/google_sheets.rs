@@ -1,6 +1,7 @@
 //! Google Sheets API v4 provider implementation.
 
 use async_trait::async_trait;
+use oxify_model::http_util::append_query_params;
 use serde_json::{json, Value};
 use tracing::instrument;
 
@@ -63,17 +64,21 @@ impl GoogleSheetsConfig {
 /// via the Google Sheets REST API.
 pub struct GoogleSheetsProvider {
     cfg: GoogleSheetsConfig,
-    http: reqwest::Client,
+    http: oxihttp::HttpsClient,
 }
 
 impl GoogleSheetsProvider {
     /// Construct a provider from the given configuration.
-    #[must_use]
-    pub fn new(cfg: GoogleSheetsConfig) -> Self {
-        Self {
-            cfg,
-            http: reqwest::Client::new(),
-        }
+    ///
+    /// # Errors
+    /// Returns [`DataError::Config`] if the underlying HTTPS client cannot be
+    /// constructed (e.g. TLS trust-store initialization failure).
+    pub fn new(cfg: GoogleSheetsConfig) -> Result<Self> {
+        let http = oxihttp::Client::builder()
+            .with_tls()
+            .build_https()
+            .map_err(|e| DataError::Config(format!("failed to build HTTP client: {e}")))?;
+        Ok(Self { cfg, http })
     }
 
     /// Produce the `Authorization` header value for the current access token.
@@ -83,9 +88,9 @@ impl GoogleSheetsProvider {
 
     /// Map an HTTP status code to the appropriate [`DataError`] variant,
     /// incorporating the response body for context.
-    async fn map_error(resp: reqwest::Response) -> DataError {
+    async fn map_error(resp: oxihttp::Response) -> DataError {
         let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
+        let body = resp.body_text().await.unwrap_or_default();
         match status.as_u16() {
             401 | 403 => DataError::Auth(format!("HTTP {status}: {body}")),
             404 => DataError::NotFound(format!("HTTP {status}: {body}")),
@@ -109,8 +114,8 @@ impl SpreadsheetExecutor for GoogleSheetsProvider {
         );
         let resp = self
             .http
-            .get(&url)
-            .header("Authorization", self.auth_header())
+            .get(&url)?
+            .header("Authorization", &self.auth_header())?
             .send()
             .await?;
 
@@ -118,7 +123,7 @@ impl SpreadsheetExecutor for GoogleSheetsProvider {
             return Err(Self::map_error(resp).await);
         }
 
-        let body: Value = resp.json().await?;
+        let body: Value = resp.body_json().await?;
         let rows = body
             .get("values")
             .and_then(Value::as_array)
@@ -146,12 +151,12 @@ impl SpreadsheetExecutor for GoogleSheetsProvider {
             "majorDimension": "ROWS",
             "values": values,
         });
+        let url = append_query_params(&url, &[("valueInputOption", "USER_ENTERED")]);
         let resp = self
             .http
-            .put(&url)
-            .header("Authorization", self.auth_header())
-            .query(&[("valueInputOption", "USER_ENTERED")])
-            .json(&body)
+            .put(&url)?
+            .header("Authorization", &self.auth_header())?
+            .json(&body)?
             .send()
             .await?;
 
@@ -159,7 +164,7 @@ impl SpreadsheetExecutor for GoogleSheetsProvider {
             return Err(Self::map_error(resp).await);
         }
 
-        let data: Value = resp.json().await?;
+        let data: Value = resp.body_json().await?;
         let updated = data
             .get("updatedCells")
             .and_then(Value::as_u64)
@@ -183,15 +188,18 @@ impl SpreadsheetExecutor for GoogleSheetsProvider {
             "majorDimension": "ROWS",
             "values": values,
         });
-        let resp = self
-            .http
-            .post(&url)
-            .header("Authorization", self.auth_header())
-            .query(&[
+        let url = append_query_params(
+            &url,
+            &[
                 ("valueInputOption", "USER_ENTERED"),
                 ("insertDataOption", "INSERT_ROWS"),
-            ])
-            .json(&body)
+            ],
+        );
+        let resp = self
+            .http
+            .post(&url)?
+            .header("Authorization", &self.auth_header())?
+            .json(&body)?
             .send()
             .await?;
 
@@ -199,7 +207,7 @@ impl SpreadsheetExecutor for GoogleSheetsProvider {
             return Err(Self::map_error(resp).await);
         }
 
-        let data: Value = resp.json().await?;
+        let data: Value = resp.body_json().await?;
         let updated = data
             .pointer("/updates/updatedCells")
             .and_then(Value::as_u64)
@@ -215,9 +223,9 @@ impl SpreadsheetExecutor for GoogleSheetsProvider {
         );
         let resp = self
             .http
-            .post(&url)
-            .header("Authorization", self.auth_header())
-            .json(&json!({}))
+            .post(&url)?
+            .header("Authorization", &self.auth_header())?
+            .json(&json!({}))?
             .send()
             .await?;
 
@@ -240,11 +248,11 @@ impl SpreadsheetExecutor for GoogleSheetsProvider {
         // Build multi-value "ranges" query params manually so each range gets
         // its own key.
         let query: Vec<(&str, &str)> = ranges.iter().map(|r| ("ranges", *r)).collect();
+        let url = append_query_params(&url, &query);
         let resp = self
             .http
-            .get(&url)
-            .header("Authorization", self.auth_header())
-            .query(&query)
+            .get(&url)?
+            .header("Authorization", &self.auth_header())?
             .send()
             .await?;
 
@@ -252,7 +260,7 @@ impl SpreadsheetExecutor for GoogleSheetsProvider {
             return Err(Self::map_error(resp).await);
         }
 
-        let data: Value = resp.json().await?;
+        let data: Value = resp.body_json().await?;
         let value_ranges = data
             .get("valueRanges")
             .and_then(Value::as_array)
@@ -297,7 +305,7 @@ mod tests {
             access_token: "test-token".to_owned(),
             base_url,
         };
-        GoogleSheetsProvider::new(cfg)
+        GoogleSheetsProvider::new(cfg).expect("failed to build GoogleSheetsProvider")
     }
 
     // ------------------------------------------------------------------

@@ -2,6 +2,7 @@
 name = "oxify-engine"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Workflow execution engine for OxiFY - DAG orchestration, scheduling, and state management"
@@ -30,10 +31,12 @@ evalexpr = "13.1"
 serde_json_path = "0.7"
 rhai = { workspace = true }
 wasmer = { workspace = true, optional = true }
-reqwest = { workspace = true }
+oxihttp = { workspace = true }
+hyper-util = { workspace = true }
 futures = { workspace = true }
-hmac = { workspace = true }
-sha2 = { workspace = true }
+oxicrypto-hash = { workspace = true }
+oxicrypto-mac = { workspace = true }
+oxicrypto-core = { workspace = true }
 hex = { workspace = true }
 base64 = "0.22"
 rand = { workspace = true }

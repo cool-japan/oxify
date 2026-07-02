@@ -1,12 +1,32 @@
 //! Execution storage implementation for SQLite
 
+use crate::models::ExecutionRow;
+use crate::row_ext::{row_to, RowExt};
 use crate::{DatabasePool, Result, StorageError};
 use oxify_model::{ExecutionContext, ExecutionState, WorkflowId};
-use sqlx::Row;
+use oxisql_core::{Connection, OxiSqlError, Row};
 use uuid::Uuid;
 
 /// Maximum number of variables allowed in an execution context
 const MAX_VARIABLES: usize = 1000;
+
+/// Map a full `executions` row onto [`ExecutionRow`].
+///
+/// All read queries in this module select the same nine columns, so a single
+/// mapping closure (built via the [`row_to!`] macro) is shared across them.
+fn map_execution_row(row: &Row) -> std::result::Result<ExecutionRow, OxiSqlError> {
+    row_to!(ExecutionRow {
+        id: "id",
+        workflow_id: "workflow_id",
+        started_at: "started_at",
+        completed_at: "completed_at",
+        state: "state",
+        context: "context",
+        node_results: "node_results",
+        variables: "variables",
+        error_message: "error_message",
+    })(row)
+}
 
 /// Execution storage layer
 #[derive(Clone)]
@@ -41,21 +61,23 @@ impl ExecutionStore {
         let node_results = serde_json::to_string(&ctx.node_results)?;
         let variables = serde_json::to_string(&ctx.variables)?;
 
-        sqlx::query(
+        let conn = self.pool.acquire().await?;
+        conn.execute(
             r#"
             INSERT INTO executions (id, workflow_id, started_at, completed_at, state, context, node_results, variables)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             "#,
+            &[
+                &id,
+                &workflow_id,
+                &started_at,
+                &completed_at,
+                &state,
+                &context_json,
+                &node_results,
+                &variables,
+            ],
         )
-        .bind(&id)
-        .bind(&workflow_id)
-        .bind(Some(&started_at))
-        .bind(&completed_at)
-        .bind(&state)
-        .bind(&context_json)
-        .bind(&node_results)
-        .bind(&variables)
-        .execute(self.pool.pool())
         .await?;
 
         Ok(ctx.execution_id)
@@ -85,7 +107,8 @@ impl ExecutionStore {
             }
         }
 
-        let mut tx = self.pool.pool().begin().await?;
+        let conn = self.pool.acquire().await?;
+        let mut tx = conn.transaction().await?;
 
         for ctx in contexts {
             let id = ctx.execution_id.to_string();
@@ -97,22 +120,29 @@ impl ExecutionStore {
             let node_results = serde_json::to_string(&ctx.node_results)?;
             let variables = serde_json::to_string(&ctx.variables)?;
 
-            sqlx::query(
-                r#"
-                INSERT INTO executions (id, workflow_id, started_at, completed_at, state, context, node_results, variables)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                "#,
-            )
-            .bind(&id)
-            .bind(&workflow_id)
-            .bind(Some(&started_at))
-            .bind(&completed_at)
-            .bind(&state)
-            .bind(&context_json)
-            .bind(&node_results)
-            .bind(&variables)
-            .execute(&mut *tx)
-            .await?;
+            let insert_result = tx
+                .execute(
+                    r#"
+                    INSERT INTO executions (id, workflow_id, started_at, completed_at, state, context, node_results, variables)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    "#,
+                    &[
+                        &id,
+                        &workflow_id,
+                        &started_at,
+                        &completed_at,
+                        &state,
+                        &context_json,
+                        &node_results,
+                        &variables,
+                    ],
+                )
+                .await;
+
+            if let Err(e) = insert_result {
+                tx.rollback().await?;
+                return Err(StorageError::Database(e));
+            }
         }
 
         tx.commit().await?;
@@ -124,21 +154,22 @@ impl ExecutionStore {
     #[tracing::instrument(skip(self), fields(execution_id = %id))]
     pub async fn get(&self, id: &Uuid) -> Result<Option<ExecutionContext>> {
         let id_str = id.to_string();
-        let row = sqlx::query(
-            r#"
-            SELECT id, workflow_id, started_at, completed_at, state, context, node_results, variables, error_message
-            FROM executions
-            WHERE id = ?
-            "#,
-        )
-        .bind(&id_str)
-        .fetch_optional(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                r#"
+                SELECT id, workflow_id, started_at, completed_at, state, context, node_results, variables, error_message
+                FROM executions
+                WHERE id = $1
+                "#,
+                &[&id_str],
+            )
+            .await?;
 
-        match row {
+        match rows.first() {
             Some(row) => {
-                let context_str: String = row.get("context");
-                let ctx: ExecutionContext = serde_json::from_str(&context_str)?;
+                let erow = map_execution_row(row)?;
+                let ctx: ExecutionContext = serde_json::from_str(&erow.context)?;
                 Ok(Some(ctx))
             }
             None => Ok(None),
@@ -147,23 +178,24 @@ impl ExecutionStore {
 
     /// List all executions
     pub async fn list(&self) -> Result<Vec<(Uuid, ExecutionContext)>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT id, workflow_id, started_at, completed_at, state, context, node_results, variables, error_message
-            FROM executions
-            ORDER BY started_at DESC
-            "#,
-        )
-        .fetch_all(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                r#"
+                SELECT id, workflow_id, started_at, completed_at, state, context, node_results, variables, error_message
+                FROM executions
+                ORDER BY started_at DESC
+                "#,
+                &[],
+            )
+            .await?;
 
         let executions: Vec<(Uuid, ExecutionContext)> = rows
-            .into_iter()
+            .iter()
             .filter_map(|row| {
-                let id_str: String = row.get("id");
-                let context_str: String = row.get("context");
-                let id = Uuid::parse_str(&id_str).ok()?;
-                let ctx: ExecutionContext = serde_json::from_str(&context_str).ok()?;
+                let erow = map_execution_row(row).ok()?;
+                let id = Uuid::parse_str(&erow.id).ok()?;
+                let ctx: ExecutionContext = serde_json::from_str(&erow.context).ok()?;
                 Some((id, ctx))
             })
             .collect();
@@ -177,25 +209,25 @@ impl ExecutionStore {
         workflow_id: &WorkflowId,
     ) -> Result<Vec<(Uuid, ExecutionContext)>> {
         let workflow_id_str = workflow_id.to_string();
-        let rows = sqlx::query(
-            r#"
-            SELECT id, workflow_id, started_at, completed_at, state, context, node_results, variables, error_message
-            FROM executions
-            WHERE workflow_id = ?
-            ORDER BY started_at DESC
-            "#,
-        )
-        .bind(&workflow_id_str)
-        .fetch_all(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                r#"
+                SELECT id, workflow_id, started_at, completed_at, state, context, node_results, variables, error_message
+                FROM executions
+                WHERE workflow_id = $1
+                ORDER BY started_at DESC
+                "#,
+                &[&workflow_id_str],
+            )
+            .await?;
 
         let executions: Vec<(Uuid, ExecutionContext)> = rows
-            .into_iter()
+            .iter()
             .filter_map(|row| {
-                let id_str: String = row.get("id");
-                let context_str: String = row.get("context");
-                let id = Uuid::parse_str(&id_str).ok()?;
-                let ctx: ExecutionContext = serde_json::from_str(&context_str).ok()?;
+                let erow = map_execution_row(row).ok()?;
+                let id = Uuid::parse_str(&erow.id).ok()?;
+                let ctx: ExecutionContext = serde_json::from_str(&erow.context).ok()?;
                 Some((id, ctx))
             })
             .collect();
@@ -209,26 +241,25 @@ impl ExecutionStore {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<(Uuid, ExecutionContext)>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT id, workflow_id, started_at, completed_at, state, context, node_results, variables, error_message
-            FROM executions
-            ORDER BY started_at DESC
-            LIMIT ? OFFSET ?
-            "#,
-        )
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                r#"
+                SELECT id, workflow_id, started_at, completed_at, state, context, node_results, variables, error_message
+                FROM executions
+                ORDER BY started_at DESC
+                LIMIT $1 OFFSET $2
+                "#,
+                &[&limit, &offset],
+            )
+            .await?;
 
         let executions: Vec<(Uuid, ExecutionContext)> = rows
-            .into_iter()
+            .iter()
             .filter_map(|row| {
-                let id_str: String = row.get("id");
-                let context_str: String = row.get("context");
-                let id = Uuid::parse_str(&id_str).ok()?;
-                let ctx: ExecutionContext = serde_json::from_str(&context_str).ok()?;
+                let erow = map_execution_row(row).ok()?;
+                let id = Uuid::parse_str(&erow.id).ok()?;
+                let ctx: ExecutionContext = serde_json::from_str(&erow.context).ok()?;
                 Some((id, ctx))
             })
             .collect();
@@ -261,80 +292,91 @@ impl ExecutionStore {
             _ => None,
         };
 
-        let result = sqlx::query(
-            r#"
-            UPDATE executions
-            SET completed_at = ?, state = ?, context = ?, node_results = ?, variables = ?, error_message = ?
-            WHERE id = ?
-            "#,
-        )
-        .bind(&completed_at)
-        .bind(&state)
-        .bind(&context_json)
-        .bind(&node_results)
-        .bind(&variables)
-        .bind(&error_message)
-        .bind(&id_str)
-        .execute(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows_affected = conn
+            .execute(
+                r#"
+                UPDATE executions
+                SET completed_at = $1, state = $2, context = $3, node_results = $4, variables = $5, error_message = $6
+                WHERE id = $7
+                "#,
+                &[
+                    &completed_at,
+                    &state,
+                    &context_json,
+                    &node_results,
+                    &variables,
+                    &error_message,
+                    &id_str,
+                ],
+            )
+            .await?;
 
-        Ok(result.rows_affected() > 0)
+        Ok(rows_affected > 0)
     }
 
     /// Delete an execution
     #[tracing::instrument(skip(self), fields(execution_id = %id))]
     pub async fn delete(&self, id: &Uuid) -> Result<bool> {
         let id_str = id.to_string();
-        let result = sqlx::query(
-            r#"
-            DELETE FROM executions
-            WHERE id = ?
-            "#,
-        )
-        .bind(&id_str)
-        .execute(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows_affected = conn
+            .execute(
+                r#"
+                DELETE FROM executions
+                WHERE id = $1
+                "#,
+                &[&id_str],
+            )
+            .await?;
 
-        Ok(result.rows_affected() > 0)
+        Ok(rows_affected > 0)
     }
 
     /// Count executions by state
     pub async fn count_by_state(&self, state: &str) -> Result<i64> {
-        let row = sqlx::query(
-            r#"
-            SELECT COUNT(*) as count
-            FROM executions
-            WHERE state = ?
-            "#,
-        )
-        .bind(state)
-        .fetch_one(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                r#"
+                SELECT COUNT(*) as count
+                FROM executions
+                WHERE state = $1
+                "#,
+                &[&state],
+            )
+            .await?;
 
-        let count: i64 = row.get("count");
+        let row = rows.first().ok_or_else(|| {
+            StorageError::Database(OxiSqlError::Execution(
+                "COUNT(*) query returned no rows".to_string(),
+            ))
+        })?;
+        let count: i64 = row.col("count")?;
         Ok(count)
     }
 
     /// Get active executions (Running or Paused)
     pub async fn get_active(&self) -> Result<Vec<(Uuid, ExecutionContext)>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT id, workflow_id, started_at, completed_at, state, context, node_results, variables, error_message
-            FROM executions
-            WHERE state IN ('Running', 'Paused')
-            ORDER BY started_at DESC
-            "#,
-        )
-        .fetch_all(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                r#"
+                SELECT id, workflow_id, started_at, completed_at, state, context, node_results, variables, error_message
+                FROM executions
+                WHERE state IN ('Running', 'Paused')
+                ORDER BY started_at DESC
+                "#,
+                &[],
+            )
+            .await?;
 
         let executions: Vec<(Uuid, ExecutionContext)> = rows
-            .into_iter()
+            .iter()
             .filter_map(|row| {
-                let id_str: String = row.get("id");
-                let context_str: String = row.get("context");
-                let id = Uuid::parse_str(&id_str).ok()?;
-                let ctx: ExecutionContext = serde_json::from_str(&context_str).ok()?;
+                let erow = map_execution_row(row).ok()?;
+                let id = Uuid::parse_str(&erow.id).ok()?;
+                let ctx: ExecutionContext = serde_json::from_str(&erow.context).ok()?;
                 Some((id, ctx))
             })
             .collect();
@@ -347,16 +389,17 @@ impl ExecutionStore {
     #[tracing::instrument(skip(self), fields(workflow_id = %workflow_id))]
     pub async fn delete_by_workflow(&self, workflow_id: &WorkflowId) -> Result<u64> {
         let workflow_id_str = workflow_id.to_string();
-        let result = sqlx::query(
-            r#"
-            DELETE FROM executions WHERE workflow_id = ?
-            "#,
-        )
-        .bind(&workflow_id_str)
-        .execute(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows_affected = conn
+            .execute(
+                r#"
+                DELETE FROM executions WHERE workflow_id = $1
+                "#,
+                &[&workflow_id_str],
+            )
+            .await?;
 
-        Ok(result.rows_affected())
+        Ok(rows_affected)
     }
 
     /// Archive completed executions older than the specified date
@@ -364,18 +407,19 @@ impl ExecutionStore {
     #[tracing::instrument(skip(self), fields(before = %before))]
     pub async fn archive_completed(&self, before: chrono::DateTime<chrono::Utc>) -> Result<u64> {
         let before_str = before.to_rfc3339();
-        let result = sqlx::query(
-            r#"
-            DELETE FROM executions
-            WHERE completed_at IS NOT NULL
-            AND completed_at < ?
-            "#,
-        )
-        .bind(&before_str)
-        .execute(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows_affected = conn
+            .execute(
+                r#"
+                DELETE FROM executions
+                WHERE completed_at IS NOT NULL
+                AND completed_at < $1
+                "#,
+                &[&before_str],
+            )
+            .await?;
 
-        Ok(result.rows_affected())
+        Ok(rows_affected)
     }
 }
 
@@ -394,7 +438,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires database
     async fn test_execution_crud() -> Result<()> {
         let pool = setup_test_pool().await?;
         pool.migrate().await?;

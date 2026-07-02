@@ -87,7 +87,7 @@ impl From<&str> for ResourceId {
 pub enum StorageError {
     /// Database error
     #[error("Database error: {0}")]
-    Database(#[from] sqlx::Error),
+    Database(#[from] oxisql_core::OxiSqlError),
 
     /// Serialization error
     #[error("Serialization error: {0}")]
@@ -131,6 +131,19 @@ pub enum StorageError {
     /// Batch operation error
     #[error("Batch size {size} exceeds maximum {max}")]
     BatchTooLarge { size: usize, max: usize },
+}
+
+/// Map a deadpool connection-checkout failure into a storage error.
+///
+/// The OxiSQL SQLite pool (`oxisql_pool::sqlite::SqliteCompatPool`) returns
+/// `deadpool::managed::PoolError<OxiSqlError>` from `get()`. We fold these
+/// checkout failures (timeout, closed pool, backend connect failure) onto
+/// `OxiSqlError::ConnectionPool` so they flow through the existing `Database`
+/// taxonomy and are classified as retryable by [`StorageError::is_retryable`].
+impl From<deadpool::managed::PoolError<oxisql_core::OxiSqlError>> for StorageError {
+    fn from(err: deadpool::managed::PoolError<oxisql_core::OxiSqlError>) -> Self {
+        StorageError::Database(oxisql_core::OxiSqlError::ConnectionPool(err.to_string()))
+    }
 }
 
 impl StorageError {
@@ -209,33 +222,24 @@ impl StorageError {
     /// Check if the error is retryable (transient database errors)
     pub fn is_retryable(&self) -> bool {
         match self {
-            StorageError::Database(e) => {
-                // Check for connection pool errors (always retryable)
-                if matches!(e, sqlx::Error::PoolTimedOut | sqlx::Error::PoolClosed) {
-                    return true;
+            StorageError::Database(e) => match e {
+                // Connection-pool exhaustion/timeouts and query timeouts are
+                // transient by nature and always safe to retry.
+                oxisql_core::OxiSqlError::ConnectionPool(_)
+                | oxisql_core::OxiSqlError::Timeout(_) => true,
+                // SQLite surfaces transient write contention ("database is
+                // locked" / "database table is busy") as a generic execution
+                // error. OxiSqlError has no typed variant for this class of
+                // recoverable failure, so we fall back to a substring match on
+                // the message text — the only signal the SQLite/Limbo backend
+                // exposes to distinguish these retryable states from permanent
+                // execution failures.
+                oxisql_core::OxiSqlError::Execution(msg) => {
+                    let lowered = msg.to_ascii_lowercase();
+                    lowered.contains("locked") || lowered.contains("busy")
                 }
-
-                // Check for I/O errors (connection issues)
-                if matches!(e, sqlx::Error::Io(_)) {
-                    return true;
-                }
-
-                // Check for transient database-specific errors
-                e.as_database_error()
-                    .and_then(sqlx::error::DatabaseError::code)
-                    .is_some_and(|code| {
-                        // PostgreSQL error codes for transient errors:
-                        // 40001 - serialization_failure
-                        // 40P01 - deadlock_detected
-                        // 08006 - connection_failure
-                        // 08003 - connection_does_not_exist
-                        // 57P03 - cannot_connect_now
-                        matches!(
-                            code.as_ref(),
-                            "40001" | "40P01" | "08006" | "08003" | "57P03"
-                        )
-                    })
-            }
+                _ => false,
+            },
             _ => false,
         }
     }

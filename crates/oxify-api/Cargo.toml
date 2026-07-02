@@ -2,6 +2,7 @@
 name = "oxify-api"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "GraphQL and REST API server for OxiFY AI orchestration platform"

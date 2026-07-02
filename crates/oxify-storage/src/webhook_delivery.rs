@@ -22,7 +22,7 @@
 
 use crate::webhook_retry::{RetryState, WebhookRetryConfig, WebhookRetryManager};
 use chrono::{DateTime, Utc};
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use oxihttp::{HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -117,7 +117,7 @@ pub struct DeliveryStats {
 /// Webhook delivery service with retry support
 pub struct WebhookDeliveryService {
     /// HTTP client
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     /// Service configuration
     config: WebhookDeliveryConfig,
     /// Retry manager
@@ -131,10 +131,12 @@ pub struct WebhookDeliveryService {
 impl WebhookDeliveryService {
     /// Create a new delivery service
     pub fn new(config: WebhookDeliveryConfig) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(config.timeout_secs))
-            .user_agent(&config.user_agent)
-            .build()
+        let client = oxihttp::Client::builder()
+            .connect_timeout(Duration::from_secs(config.timeout_secs))
+            .read_timeout(Duration::from_secs(config.timeout_secs))
+            .user_agent(config.user_agent.clone())
+            .with_tls()
+            .build_https()
             .expect("Failed to create HTTP client");
 
         let retry_manager = WebhookRetryManager::with_config(config.retry_config.clone());
@@ -405,13 +407,10 @@ impl WebhookDeliveryService {
         debug!(event_id = %event_id, url = %url, attempt = %attempt, "Attempting webhook delivery");
 
         // Make the request
-        let response = self
-            .client
-            .post(url)
-            .headers(header_map)
-            .body(body)
-            .send()
-            .await;
+        let response = match self.client.post(url) {
+            Ok(builder) => builder.headers(header_map).body(body).send().await,
+            Err(err) => Err(err),
+        };
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -423,7 +422,7 @@ impl WebhookDeliveryService {
 
                 // Get response body (truncated)
                 let response_body = resp
-                    .text()
+                    .body_text()
                     .await
                     .ok()
                     .map(|s| s.chars().take(1000).collect::<String>());
@@ -484,15 +483,12 @@ impl WebhookDeliveryService {
 
 /// Create HMAC-SHA256 signature
 fn create_hmac_signature(secret: &str, payload: &[u8]) -> String {
-    use hmac::{Hmac, Mac};
-    use sha2::Sha256;
+    use oxicrypto_mac::hmac_sha256_to_vec;
 
-    type HmacSha256 = Hmac<Sha256>;
+    let signature = hmac_sha256_to_vec(secret.as_bytes(), payload)
+        .expect("HMAC-SHA256 accepts any key length");
 
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("Invalid secret length");
-    mac.update(payload);
-
-    format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+    format!("sha256={}", hex::encode(signature))
 }
 
 #[cfg(test)]

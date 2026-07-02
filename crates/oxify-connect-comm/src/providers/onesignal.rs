@@ -60,13 +60,14 @@ impl OneSignalConfig {
 
 pub struct OneSignalProvider {
     cfg: OneSignalConfig,
-    http: reqwest::Client,
+    http: oxihttp::HttpsClient,
 }
 
 impl OneSignalProvider {
     pub fn new(cfg: OneSignalConfig) -> Result<Self> {
-        let http = reqwest::Client::builder()
-            .build()
+        let http = oxihttp::Client::builder()
+            .with_tls()
+            .build_https()
             .map_err(|e| CommError::Http(format!("failed to build HTTP client: {e}")))?;
         Ok(Self { cfg, http })
     }
@@ -153,25 +154,28 @@ impl super::MessageProvider for OneSignalProvider {
         let url = format!("{}/notifications", self.cfg.base_url);
         let response = self
             .http
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .header("Authorization", format!("Basic {}", self.cfg.rest_api_key))
-            .json(&body)
+            .post(&url)?
+            .header("Content-Type", "application/json")?
+            .header("Authorization", &format!("Basic {}", self.cfg.rest_api_key))?
+            .json(&body)?
             .send()
             .await
             .map_err(|e| CommError::Http(format!("POST notifications failed: {e}")))?;
 
         let status = response.status();
         if !status.is_success() {
-            let body_text = response.text().await.unwrap_or_default();
+            let body_text = response.body_text().await.unwrap_or_default();
             return Err(CommError::Http(format!(
                 "OneSignal API {status}: {body_text}"
             )));
         }
 
-        let parsed = response.json::<NotificationResponse>().await.map_err(|e| {
-            CommError::Serialization(format!("deserialize OneSignal response: {e}"))
-        })?;
+        let parsed = response
+            .body_json::<NotificationResponse>()
+            .await
+            .map_err(|e| {
+                CommError::Serialization(format!("deserialize OneSignal response: {e}"))
+            })?;
 
         if let Some(errors) = &parsed.errors {
             let is_empty = match errors {

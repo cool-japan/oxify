@@ -140,7 +140,7 @@ fn mock_stream(
 
 /// SSE frame buffer state for the proxy unfold.
 struct SseProxyState {
-    byte_stream: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>,
+    byte_stream: Pin<Box<dyn Stream<Item = Result<Bytes, oxihttp::OxiHttpError>> + Send>>,
     buffer: String,
     execution_id: Uuid,
     done: bool,
@@ -157,7 +157,7 @@ fn proxy_stream<S>(
     byte_stream: S,
 ) -> impl Stream<Item = Result<Event, Infallible>> + Send + 'static
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
+    S: Stream<Item = Result<Bytes, oxihttp::OxiHttpError>> + Send + 'static,
 {
     let initial = SseProxyState {
         byte_stream: Box::pin(byte_stream),
@@ -549,8 +549,8 @@ mod tests {
         let chunk2 = Bytes::from_static(b"\n\n");
 
         let byte_stream = stream::iter(vec![
-            Ok::<Bytes, reqwest::Error>(chunk1),
-            Ok::<Bytes, reqwest::Error>(chunk2),
+            Ok::<Bytes, oxihttp::OxiHttpError>(chunk1),
+            Ok::<Bytes, oxihttp::OxiHttpError>(chunk2),
         ]);
 
         let mut events: Vec<Event> = Vec::new();

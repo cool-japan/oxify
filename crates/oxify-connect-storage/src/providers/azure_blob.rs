@@ -2,13 +2,11 @@
 //!
 //! Enabled via the `azure` Cargo feature.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use object_store::{
-    azure::MicrosoftAzureBuilder, path::Path as StoragePath, ObjectStore, ObjectStoreExt,
-};
+use oxistore_blob::{BlobError, BlobStore};
+use oxistore_blob_azure::{AzureBlobStore, AzureConfig, AzureCredentials};
 use tracing::{debug, instrument};
 
 use super::ObjectStoreProvider;
@@ -61,31 +59,43 @@ impl AzureBlobConfig {
 
 /// Object store provider backed by Azure Blob Storage.
 pub struct AzureBlobStoreProvider {
-    store: Arc<dyn ObjectStore>,
+    store: AzureBlobStore,
 }
 
 impl AzureBlobStoreProvider {
     /// Build an [`AzureBlobStoreProvider`] from the supplied
     /// [`AzureBlobConfig`].
+    ///
+    /// # Credentials
+    ///
+    /// The pure-Rust `oxistore-blob-azure` backend authenticates exclusively
+    /// with a static Shared Key (account name + account key).  It does **not**
+    /// support managed identity / workload identity.  When
+    /// [`AzureBlobConfig::account_key`] is `None`, this returns a
+    /// [`StorageError::Config`] up front rather than silently failing later at
+    /// request time.
     pub fn new(cfg: AzureBlobConfig) -> Result<Self> {
-        let mut builder = MicrosoftAzureBuilder::new()
-            .with_container_name(&cfg.container)
-            .with_account(&cfg.account_name);
+        let account_key = cfg.account_key.ok_or_else(|| {
+            StorageError::Config(
+                "the pure-Rust Azure Blob backend requires an explicit account key; \
+                 managed identity / workload identity is not supported"
+                    .to_string(),
+            )
+        })?;
 
-        if let Some(key) = &cfg.account_key {
-            builder = builder.with_access_key(key);
-        }
+        let credentials = AzureCredentials {
+            account_name: cfg.account_name,
+            account_key_b64: account_key,
+        };
+
+        let mut config = AzureConfig::new(credentials, cfg.container);
         if let Some(endpoint) = cfg.endpoint {
-            builder = builder.with_endpoint(endpoint);
+            config.endpoint = Some(endpoint);
         }
 
-        let store = builder
-            .build()
-            .map_err(|e| StorageError::Config(e.to_string()))?;
+        let store = AzureBlobStore::new(config).map_err(|e| StorageError::Config(e.to_string()))?;
 
-        Ok(Self {
-            store: Arc::new(store),
-        })
+        Ok(Self { store })
     }
 
     /// Build an [`AzureBlobStoreProvider`] by reading configuration from the
@@ -95,18 +105,14 @@ impl AzureBlobStoreProvider {
         Self::new(AzureBlobConfig::from_env()?)
     }
 
-    /// Convert a string key to an [`object_store`] [`Path`][StoragePath].
-    fn to_path(key: &str) -> StoragePath {
-        StoragePath::from(key)
-    }
-
-    /// Map an [`object_store::Error`] to our [`StorageError`] with context.
-    fn map_store_error(err: object_store::Error, bucket: &str, key: &str) -> StorageError {
+    /// Map a [`BlobError`] to our [`StorageError`] with bucket/key context.
+    fn map_store_error(err: BlobError, bucket: &str, key: &str) -> StorageError {
         match err {
-            object_store::Error::NotFound { .. } => StorageError::NotFound {
+            BlobError::NotFound(_) => StorageError::NotFound {
                 bucket: bucket.to_string(),
                 key: key.to_string(),
             },
+            // `BlobError` is `#[non_exhaustive]`, so a wildcard arm is mandatory.
             other => StorageError::Provider(other.to_string()),
         }
     }
@@ -131,9 +137,8 @@ impl ObjectStoreProvider for AzureBlobStoreProvider {
         _meta: ObjectMeta,
     ) -> Result<PutResult> {
         debug!(bucket, key, bytes = data.len(), "Azure put_object");
-        let path = Self::to_path(key);
         self.store
-            .put(&path, data.into())
+            .put(key, data)
             .await
             .map_err(|e| Self::map_store_error(e, bucket, key))?;
 
@@ -147,15 +152,9 @@ impl ObjectStoreProvider for AzureBlobStoreProvider {
     #[instrument(skip(self), fields(bucket, key))]
     async fn get_object(&self, bucket: &str, key: &str) -> Result<ObjectData> {
         debug!(bucket, key, "Azure get_object");
-        let path = Self::to_path(key);
-        let result = self
+        let data = self
             .store
-            .get(&path)
-            .await
-            .map_err(|e| Self::map_store_error(e, bucket, key))?;
-
-        let data = result
-            .bytes()
+            .get(key)
             .await
             .map_err(|e| Self::map_store_error(e, bucket, key))?;
 
@@ -169,9 +168,8 @@ impl ObjectStoreProvider for AzureBlobStoreProvider {
     #[instrument(skip(self), fields(bucket, key))]
     async fn delete_object(&self, bucket: &str, key: &str) -> Result<()> {
         debug!(bucket, key, "Azure delete_object");
-        let path = Self::to_path(key);
         self.store
-            .delete(&path)
+            .delete(key)
             .await
             .map_err(|e| Self::map_store_error(e, bucket, key))?;
         Ok(())
@@ -184,24 +182,31 @@ impl ObjectStoreProvider for AzureBlobStoreProvider {
         prefix: Option<&str>,
         max: usize,
     ) -> Result<Vec<ObjectListing>> {
-        use futures::StreamExt as _;
-
         debug!(bucket, prefix, max, "Azure list_objects");
 
-        let prefix_path = prefix.map(StoragePath::from);
-        let mut stream = self.store.list(prefix_path.as_ref());
+        // `oxistore-blob-azure` exposes only an eager, key-only `list`; there is
+        // no metadata-bearing or bounded/paginated variant.  Fetch the full key
+        // list, then issue a bounded number of `head` calls (capped at `max`)
+        // to gather sizes.  Keys removed between `list` and `head` (a natural
+        // race) are silently skipped.
+        let prefix_str = prefix.unwrap_or("");
+        let keys = self
+            .store
+            .list(prefix_str)
+            .await
+            .map_err(|e| Self::map_store_error(e, bucket, prefix_str))?;
 
         let mut results = Vec::new();
-        while let Some(item) = stream.next().await {
-            let meta = item.map_err(|e| StorageError::Provider(e.to_string()))?;
-            results.push(ObjectListing {
-                key: meta.location.to_string(),
-                size: meta.size,
-                last_modified: Some(meta.last_modified),
-                etag: meta.e_tag,
-            });
-            if results.len() >= max {
-                break;
+        for key in keys.into_iter().take(max) {
+            match self.store.head(&key).await {
+                Ok(meta) => results.push(ObjectListing {
+                    key: meta.key,
+                    size: meta.size,
+                    last_modified: None,
+                    etag: None,
+                }),
+                Err(BlobError::NotFound(_)) => continue,
+                Err(e) => return Err(Self::map_store_error(e, bucket, &key)),
             }
         }
 
@@ -215,9 +220,11 @@ impl ObjectStoreProvider for AzureBlobStoreProvider {
         _ttl: Duration,
         _op: PresignOp,
     ) -> Result<String> {
+        // `oxistore-blob-azure` provides no SAS-token / signed-URL capability at
+        // all, so this operation is genuinely unsupported by the backend.
         Err(StorageError::Unsupported(
-            "Azure Blob presigned URLs require SAS token generation not yet available in the \
-             public object_store trait surface"
+            "Azure Blob presigned URLs are not supported: the pure-Rust oxistore-blob-azure \
+             backend exposes no SAS-token generation"
                 .to_string(),
         ))
     }

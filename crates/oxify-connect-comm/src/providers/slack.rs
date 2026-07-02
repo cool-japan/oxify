@@ -58,17 +58,18 @@ impl SlackConfig {
 // ---------------------------------------------------------------------------
 
 /// Slack communication provider that uses the Slack Web API directly via
-/// `reqwest`.  No third-party Slack SDK is required.
+/// `oxihttp`.  No third-party Slack SDK is required.
 pub struct SlackProvider {
     cfg: SlackConfig,
-    http: reqwest::Client,
+    http: oxihttp::HttpsClient,
 }
 
 impl SlackProvider {
     /// Create a new `SlackProvider` from the supplied configuration.
     pub fn new(cfg: SlackConfig) -> Result<Self> {
-        let http = reqwest::Client::builder()
-            .build()
+        let http = oxihttp::Client::builder()
+            .with_tls()
+            .build_https()
             .map_err(|e| CommError::Http(format!("failed to build HTTP client: {e}")))?;
 
         Ok(Self { cfg, http })
@@ -157,19 +158,19 @@ impl super::MessageProvider for SlackProvider {
 
         let response = self
             .http
-            .post(&url)
-            .bearer_auth(&self.cfg.token)
+            .post(&url)?
+            .bearer_token(&self.cfg.token)?
             .json(&PostMessageRequest {
                 channel: &channel,
                 text: &text,
-            })
+            })?
             .send()
             .await
             .map_err(|e| CommError::Http(format!("POST chat.postMessage failed: {e}")))?;
 
         let status = response.status();
         let body: PostMessageResponse = response
-            .json()
+            .body_json()
             .await
             .map_err(|e| CommError::Serialization(format!("deserialize chat.postMessage: {e}")))?;
 
@@ -201,14 +202,14 @@ impl super::MessageProvider for SlackProvider {
 
         let response = self
             .http
-            .get(&url)
-            .bearer_auth(&self.cfg.token)
+            .get(&url)?
+            .bearer_token(&self.cfg.token)?
             .send()
             .await
             .map_err(|e| CommError::Http(format!("GET conversations.list failed: {e}")))?;
 
         let status = response.status();
-        let body: ConversationsListResponse = response.json().await.map_err(|e| {
+        let body: ConversationsListResponse = response.body_json().await.map_err(|e| {
             CommError::Serialization(format!("deserialize conversations.list: {e}"))
         })?;
 

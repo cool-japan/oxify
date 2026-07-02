@@ -224,8 +224,14 @@ impl McpExecutor {
         let path = parts[1];
         let url = format!("{}{}", server_id.trim_end_matches('/'), path);
 
-        let client = reqwest::Client::new();
-        let mut request_builder = match method.as_str() {
+        // Build an HTTPS-capable oxihttp client (also handles plain http:// URLs).
+        let client = match oxihttp::Client::builder().with_tls().build_https() {
+            Ok(client) => client,
+            Err(e) => {
+                return ExecutionResult::Failure(format!("Failed to build HTTP client: {}", e));
+            }
+        };
+        let build_result = match method.as_str() {
             "GET" => client.get(&url),
             "POST" => client.post(&url),
             "PUT" => client.put(&url),
@@ -235,10 +241,24 @@ impl McpExecutor {
                 return ExecutionResult::Failure(format!("Unsupported HTTP method: {}", method));
             }
         };
+        let mut request_builder = match build_result {
+            Ok(builder) => builder,
+            Err(e) => {
+                return ExecutionResult::Failure(format!("Failed to build HTTP request: {}", e));
+            }
+        };
 
         // Add JSON body for POST/PUT/PATCH
         if matches!(method.as_str(), "POST" | "PUT" | "PATCH") {
-            request_builder = request_builder.json(&parameters);
+            request_builder = match request_builder.json(&parameters) {
+                Ok(builder) => builder,
+                Err(e) => {
+                    return ExecutionResult::Failure(format!(
+                        "Failed to serialize request body: {}",
+                        e
+                    ));
+                }
+            };
         }
 
         // Execute HTTP request
@@ -247,7 +267,7 @@ impl McpExecutor {
                 let status = response.status();
                 let status_code = status.as_u16();
 
-                match response.text().await {
+                match response.body_text().await {
                     Ok(body) => {
                         // Try to parse as JSON
                         let body_value = serde_json::from_str::<Value>(&body)

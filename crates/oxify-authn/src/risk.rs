@@ -595,14 +595,12 @@ impl DeviceFingerprint {
     /// Generate a device fingerprint from user agent and IP
     #[must_use]
     pub fn generate(ip: &str, user_agent: &str) -> String {
-        use sha2::{Digest, Sha256};
+        use oxicrypto_hash::Sha256;
 
-        let mut hasher = Sha256::new();
-        hasher.update(ip.as_bytes());
-        hasher.update(user_agent.as_bytes());
-        let result = hasher.finalize();
-
-        hex::encode(result)
+        let mut buf = Vec::with_capacity(ip.len() + user_agent.len());
+        buf.extend_from_slice(ip.as_bytes());
+        buf.extend_from_slice(user_agent.as_bytes());
+        hex::encode(Sha256.hash_fixed(&buf))
     }
 
     /// Parse IP address for validation

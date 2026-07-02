@@ -1,6 +1,7 @@
 //! Airtable REST API v0 provider implementation.
 
 use async_trait::async_trait;
+use oxify_model::http_util::append_query_params;
 use serde_json::{json, Value};
 use tracing::instrument;
 
@@ -61,17 +62,21 @@ impl AirtableConfig {
 /// Implements [`TableExecutor`] for record CRUD against Airtable bases.
 pub struct AirtableProvider {
     cfg: AirtableConfig,
-    http: reqwest::Client,
+    http: oxihttp::HttpsClient,
 }
 
 impl AirtableProvider {
     /// Construct a provider from the given configuration.
-    #[must_use]
-    pub fn new(cfg: AirtableConfig) -> Self {
-        Self {
-            cfg,
-            http: reqwest::Client::new(),
-        }
+    ///
+    /// # Errors
+    /// Returns [`DataError::Config`] if the underlying HTTPS client cannot be
+    /// constructed (e.g. TLS trust-store initialization failure).
+    pub fn new(cfg: AirtableConfig) -> Result<Self> {
+        let http = oxihttp::Client::builder()
+            .with_tls()
+            .build_https()
+            .map_err(|e| DataError::Config(format!("failed to build HTTP client: {e}")))?;
+        Ok(Self { cfg, http })
     }
 
     /// Produce the `Authorization` header value for the current API key.
@@ -80,9 +85,9 @@ impl AirtableProvider {
     }
 
     /// Map an HTTP status code to the appropriate [`DataError`] variant.
-    async fn map_error(resp: reqwest::Response) -> DataError {
+    async fn map_error(resp: oxihttp::Response) -> DataError {
         let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
+        let body = resp.body_text().await.unwrap_or_default();
         match status.as_u16() {
             401 | 403 => DataError::Auth(format!("HTTP {status}: {body}")),
             404 => DataError::NotFound(format!("HTTP {status}: {body}")),
@@ -102,10 +107,6 @@ impl AirtableProvider {
         max_records: Option<u64>,
     ) -> Result<Vec<Value>> {
         let url = format!("{}/{}/{}", self.cfg.base_url, base_id, table_id);
-        let mut req = self
-            .http
-            .get(&url)
-            .header("Authorization", self.auth_header());
 
         // Build query params; avoid allocating if there are none.
         let mut params: Vec<(&str, String)> = Vec::new();
@@ -115,16 +116,23 @@ impl AirtableProvider {
         if let Some(formula) = filter_formula {
             params.push(("filterByFormula", formula.to_owned()));
         }
-        if !params.is_empty() {
-            req = req.query(&params);
-        }
+        let url = if params.is_empty() {
+            url
+        } else {
+            append_query_params(&url, &params)
+        };
 
-        let resp = req.send().await?;
+        let resp = self
+            .http
+            .get(&url)?
+            .header("Authorization", &self.auth_header())?
+            .send()
+            .await?;
         if !resp.status().is_success() {
             return Err(Self::map_error(resp).await);
         }
 
-        let data: Value = resp.json().await?;
+        let data: Value = resp.body_json().await?;
         let records = data
             .get("records")
             .and_then(Value::as_array)
@@ -160,15 +168,15 @@ impl TableExecutor for AirtableProvider {
         );
         let resp = self
             .http
-            .get(&url)
-            .header("Authorization", self.auth_header())
+            .get(&url)?
+            .header("Authorization", &self.auth_header())?
             .send()
             .await?;
 
         if !resp.status().is_success() {
             return Err(Self::map_error(resp).await);
         }
-        let record: Value = resp.json().await?;
+        let record: Value = resp.body_json().await?;
         Ok(record)
     }
 
@@ -178,16 +186,16 @@ impl TableExecutor for AirtableProvider {
         let body = json!({"fields": fields});
         let resp = self
             .http
-            .post(&url)
-            .header("Authorization", self.auth_header())
-            .json(&body)
+            .post(&url)?
+            .header("Authorization", &self.auth_header())?
+            .json(&body)?
             .send()
             .await?;
 
         if !resp.status().is_success() {
             return Err(Self::map_error(resp).await);
         }
-        let data: Value = resp.json().await?;
+        let data: Value = resp.body_json().await?;
         let id = data
             .get("id")
             .and_then(Value::as_str)
@@ -211,9 +219,9 @@ impl TableExecutor for AirtableProvider {
         let body = json!({"fields": fields});
         let resp = self
             .http
-            .patch(&url)
-            .header("Authorization", self.auth_header())
-            .json(&body)
+            .patch(&url)?
+            .header("Authorization", &self.auth_header())?
+            .json(&body)?
             .send()
             .await?;
 
@@ -231,8 +239,8 @@ impl TableExecutor for AirtableProvider {
         );
         let resp = self
             .http
-            .delete(&url)
-            .header("Authorization", self.auth_header())
+            .delete(&url)?
+            .header("Authorization", &self.auth_header())?
             .send()
             .await?;
 
@@ -271,7 +279,7 @@ mod tests {
             api_key: "test-key".to_owned(),
             base_url,
         };
-        AirtableProvider::new(cfg)
+        AirtableProvider::new(cfg).expect("failed to build AirtableProvider")
     }
 
     // ------------------------------------------------------------------

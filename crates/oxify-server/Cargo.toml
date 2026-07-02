@@ -2,6 +2,7 @@
 name = "oxify-server"
 version = "0.2.0"
 edition = "2021"
+rust-version.workspace = true
 authors = ["OxiFY Contributors"]
 license = "Apache-2.0"
 description = "HTTP server implementation for OxiFY - Axum, graceful shutdown, middleware (ported from OxiRS)"
@@ -63,7 +64,6 @@ rand = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
-reqwest = { workspace = true }
 
 [features]
 default = ["compression", "cors"]

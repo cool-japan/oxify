@@ -50,8 +50,9 @@
 //! ```
 
 use chrono::{DateTime, Duration, Utc};
+use oxicrypto_core::StreamingHash;
+use oxicrypto_hash::Sha256Streaming;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration as StdDuration;
@@ -184,21 +185,25 @@ impl VectorCache {
     /// Generate cache key from query vector and parameters
     fn generate_key(query_vector: &[f32], params: &VectorSearchParams) -> String {
         // Hash query vector for efficient lookup
-        let mut hasher = Sha256::new();
+        let mut hasher = Sha256Streaming::new();
         for &val in query_vector {
-            hasher.update(val.to_le_bytes());
+            hasher.update(&val.to_le_bytes());
         }
 
         // Include parameters in hash
         hasher.update(params.collection.as_bytes());
-        hasher.update(params.limit.to_le_bytes());
-        hasher.update(params.threshold_millis.to_le_bytes());
+        hasher.update(&params.limit.to_le_bytes());
+        hasher.update(&params.threshold_millis.to_le_bytes());
         if let Some(filter) = &params.filter {
             hasher.update(filter.as_bytes());
         }
-        hasher.update([params.metric as u8]);
+        hasher.update(&[params.metric as u8]);
 
-        hex::encode(hasher.finalize())
+        let mut digest = [0u8; 32];
+        hasher
+            .finalize(&mut digest)
+            .expect("SHA-256 output buffer is exactly 32 bytes");
+        hex::encode(digest)
     }
 
     /// Get cached search results
@@ -331,7 +336,10 @@ impl VectorCache {
 
     /// Get cache metrics
     pub fn metrics(&self) -> VectorCacheMetrics {
-        self.metrics.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.metrics
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Reset cache metrics
@@ -497,6 +505,30 @@ mod tests {
 
         // vec2 should be evicted
         assert!(cache.get(&vec2, &params).is_none());
+    }
+
+    /// Golden regression test: captures the exact PRE-migration (sha2-based)
+    /// cache-key string produced by [`VectorCache::generate_key`] for a fixed
+    /// query vector and fixed search parameters. `generate_key` streams the
+    /// query-vector little-endian bytes plus the parameter fields through
+    /// `sha2::Sha256` and hex-encodes the digest. After the SHA-256 backend is
+    /// migrated, this literal MUST remain byte-identical, proving cache keys
+    /// stay stable so pre-migration cached entries remain addressable. This is
+    /// a fixed-input / fixed-output guard (NOT a self-consistent round trip).
+    #[test]
+    fn test_golden_generate_key() {
+        let params = VectorSearchParams {
+            collection: "golden-collection".to_string(),
+            limit: 10,
+            threshold_millis: 700,
+            filter: Some("golden-filter".to_string()),
+            metric: VectorMetric::Cosine,
+        };
+        let key = VectorCache::generate_key(&[1.0f32, 2.0, 3.0], &params);
+        assert_eq!(
+            key, "806641f3c1653139cf680714ef7ce425ba5e921182f87105f853c2adb326dcc2",
+            "vector cache key must match the pre-migration golden value"
+        );
     }
 
     #[test]

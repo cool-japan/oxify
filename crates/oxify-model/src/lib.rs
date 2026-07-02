@@ -13,6 +13,7 @@ pub mod edge;
 pub mod event;
 pub mod execution;
 pub mod graphql_schema;
+pub mod http_util;
 pub mod json_schema;
 pub mod linter;
 pub mod metrics_export;
@@ -70,6 +71,7 @@ pub use graphql_schema::{
     generate_graphql_schema, GraphQLArgument, GraphQLField, GraphQLSchemaGenerator, GraphQLType,
     GraphQLTypeKind,
 };
+pub use http_util::append_query_params;
 pub use json_schema::{
     generate_workflow_schema, schema_to_json, schema_to_value, JsonSchema, WorkflowSchemaGenerator,
 };

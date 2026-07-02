@@ -52,26 +52,28 @@ impl Default for LinearConfig {
 
 /// MCP server backed by the Linear GraphQL API
 pub struct LinearServer {
-    client: reqwest::Client,
+    client: oxihttp::HttpsClient,
     cfg: LinearConfig,
 }
 
 impl LinearServer {
     /// Create a new Linear server using the supplied configuration.
     pub fn new(cfg: LinearConfig) -> Result<Self> {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = oxihttp::HeaderMap::new();
         if !cfg.api_key.is_empty() {
             headers.insert(
-                reqwest::header::AUTHORIZATION,
-                reqwest::header::HeaderValue::from_str(&cfg.api_key)
+                oxihttp::HeaderName::from_static("authorization"),
+                oxihttp::HeaderValue::from_str(&cfg.api_key)
                     .map_err(|e| McpError::InvalidRequest(e.to_string()))?,
             );
         }
-        let client = reqwest::Client::builder()
+        let client = oxihttp::Client::builder()
             .user_agent(&cfg.user_agent)
-            .timeout(std::time::Duration::from_secs(cfg.timeout_secs))
+            .connect_timeout(std::time::Duration::from_secs(cfg.timeout_secs))
+            .read_timeout(std::time::Duration::from_secs(cfg.timeout_secs))
             .default_headers(headers)
-            .build()
+            .with_tls()
+            .build_https()
             .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
         Ok(Self { client, cfg })
     }
@@ -85,7 +87,9 @@ impl LinearServer {
         let response = self
             .client
             .post(&self.cfg.base_url)
+            .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
             .json(&body)
+            .map_err(|e| McpError::ToolExecutionError(e.to_string()))?
             .send()
             .await
             .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
@@ -93,7 +97,7 @@ impl LinearServer {
         let status = response.status();
         if !status.is_success() {
             let text = response
-                .text()
+                .body_text()
                 .await
                 .unwrap_or_else(|_| "<unreadable body>".to_string());
             return Err(McpError::ToolExecutionError(format!(
@@ -103,7 +107,7 @@ impl LinearServer {
         }
 
         let result: Value = response
-            .json()
+            .body_json()
             .await
             .map_err(|e| McpError::ToolExecutionError(e.to_string()))?;
 
@@ -410,11 +414,6 @@ impl McpServer for LinearServer {
 mod tests {
     use super::*;
 
-    /// Install the ring-based rustls crypto provider once per test process.
-    fn install_crypto_provider() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    }
-
     #[test]
     fn test_config_default_has_empty_key() {
         let cfg = LinearConfig::default();
@@ -433,7 +432,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_tools_returns_eight() {
-        install_crypto_provider();
         let server = LinearServer::new(LinearConfig::default()).unwrap();
         let tools = server.list_tools().await.unwrap();
         assert_eq!(tools.len(), 8);
@@ -441,7 +439,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_tools_all_names_unique() {
-        install_crypto_provider();
         let server = LinearServer::new(LinearConfig::default()).unwrap();
         let tools = server.list_tools().await.unwrap();
         let names: std::collections::HashSet<&str> =
@@ -451,7 +448,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_call_unknown_tool_returns_not_found() {
-        install_crypto_provider();
         let server = LinearServer::new(LinearConfig::default()).unwrap();
         let result = server.call_tool("nonexistent_tool", json!({})).await;
         assert!(result.is_err());
@@ -460,7 +456,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_issue_missing_id_returns_invalid_request() {
-        install_crypto_provider();
         let cfg = LinearConfig {
             api_key: "fake_key".to_string(),
             ..Default::default()
@@ -476,7 +471,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_issue_missing_title_returns_invalid_request() {
-        install_crypto_provider();
         let cfg = LinearConfig {
             api_key: "fake_key".to_string(),
             ..Default::default()
@@ -494,7 +488,6 @@ mod tests {
 
     #[test]
     fn test_all_tools_have_description() {
-        install_crypto_provider();
         let rt = tokio::runtime::Runtime::new().unwrap();
         let tools = rt.block_on(async {
             let server = LinearServer::new(LinearConfig::default()).unwrap();
@@ -515,7 +508,6 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_list_teams_live() {
-        install_crypto_provider();
         let cfg = LinearConfig::from_env().expect("LINEAR_API_KEY must be set");
         let server = LinearServer::new(cfg).unwrap();
         let result = server.call_tool("list_teams", json!({})).await;

@@ -1,11 +1,30 @@
 //! Workflow storage implementation for SQLite
 
+use crate::models::WorkflowRow;
+use crate::row_ext::{row_to, RowExt};
 use crate::{DatabasePool, Result, StorageError};
 use chrono::{DateTime, Utc};
 use oxify_model::{Workflow, WorkflowId};
+use oxisql_core::{Connection, OxiSqlError, Row};
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use uuid::Uuid;
+
+/// Map a query row selecting the standard `workflows` columns onto a
+/// [`WorkflowRow`], using the shared [`row_to!`] helper. Centralising the
+/// mapping here keeps every `SELECT` in this store in sync with the
+/// [`WorkflowRow`] shape.
+fn workflow_row_from(row: &Row) -> std::result::Result<WorkflowRow, OxiSqlError> {
+    row_to!(WorkflowRow {
+        id: "id",
+        name: "name",
+        description: "description",
+        created_at: "created_at",
+        updated_at: "updated_at",
+        version: "version",
+        definition: "definition",
+        tags: "tags",
+    })(row)
+}
 
 /// Workflow storage layer
 #[derive(Clone)]
@@ -28,18 +47,14 @@ impl WorkflowStore {
         let definition = serde_json::to_string(workflow)?;
         let tags = serde_json::to_string(&workflow.metadata.tags)?;
 
-        sqlx::query(
+        let conn = self.pool.acquire().await?;
+        conn.execute(
             r#"
             INSERT INTO workflows (id, name, description, definition, tags)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES ($1, $2, $3, $4, $5)
             "#,
+            &[&id, name, &description, &definition, &tags],
         )
-        .bind(&id)
-        .bind(name)
-        .bind(description)
-        .bind(&definition)
-        .bind(&tags)
-        .execute(self.pool.pool())
         .await?;
 
         Ok(workflow.metadata.id)
@@ -49,21 +64,22 @@ impl WorkflowStore {
     #[tracing::instrument(skip(self), fields(workflow_id = %id))]
     pub async fn get(&self, id: &WorkflowId) -> Result<Option<Workflow>> {
         let id_str = id.to_string();
-        let row = sqlx::query(
-            r#"
-            SELECT id, name, description, created_at, updated_at, version, definition, tags
-            FROM workflows
-            WHERE id = ?
-            "#,
-        )
-        .bind(&id_str)
-        .fetch_optional(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                r#"
+                SELECT id, name, description, created_at, updated_at, version, definition, tags
+                FROM workflows
+                WHERE id = $1
+                "#,
+                &[&id_str],
+            )
+            .await?;
 
-        match row {
+        match rows.first() {
             Some(row) => {
-                let definition_str: String = row.get("definition");
-                let workflow: Workflow = serde_json::from_str(&definition_str)?;
+                let workflow_row = workflow_row_from(row)?;
+                let workflow: Workflow = serde_json::from_str(&workflow_row.definition)?;
                 Ok(Some(workflow))
             }
             None => Ok(None),
@@ -72,21 +88,23 @@ impl WorkflowStore {
 
     /// List all workflows
     pub async fn list(&self) -> Result<Vec<Workflow>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT id, name, description, created_at, updated_at, version, definition, tags
-            FROM workflows
-            ORDER BY created_at DESC
-            "#,
-        )
-        .fetch_all(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                r#"
+                SELECT id, name, description, created_at, updated_at, version, definition, tags
+                FROM workflows
+                ORDER BY created_at DESC
+                "#,
+                &[],
+            )
+            .await?;
 
         let workflows: Vec<Workflow> = rows
-            .into_iter()
+            .iter()
             .filter_map(|row| {
-                let definition_str: String = row.get("definition");
-                serde_json::from_str(&definition_str).ok()
+                let workflow_row = workflow_row_from(row).ok()?;
+                serde_json::from_str(&workflow_row.definition).ok()
             })
             .collect();
 
@@ -95,24 +113,24 @@ impl WorkflowStore {
 
     /// List workflows with pagination
     pub async fn list_paginated(&self, limit: i64, offset: i64) -> Result<Vec<Workflow>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT id, name, description, created_at, updated_at, version, definition, tags
-            FROM workflows
-            ORDER BY created_at DESC
-            LIMIT ? OFFSET ?
-            "#,
-        )
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                r#"
+                SELECT id, name, description, created_at, updated_at, version, definition, tags
+                FROM workflows
+                ORDER BY created_at DESC
+                LIMIT $1 OFFSET $2
+                "#,
+                &[&limit, &offset],
+            )
+            .await?;
 
         let workflows: Vec<Workflow> = rows
-            .into_iter()
+            .iter()
             .filter_map(|row| {
-                let definition_str: String = row.get("definition");
-                serde_json::from_str(&definition_str).ok()
+                let workflow_row = workflow_row_from(row).ok()?;
+                serde_json::from_str(&workflow_row.definition).ok()
             })
             .collect();
 
@@ -121,11 +139,17 @@ impl WorkflowStore {
 
     /// Count total workflows
     pub async fn count(&self) -> Result<i64> {
-        let row = sqlx::query("SELECT COUNT(*) as count FROM workflows")
-            .fetch_one(self.pool.pool())
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query("SELECT COUNT(*) as count FROM workflows", &[])
             .await?;
 
-        let count: i64 = row.get("count");
+        let row = rows.first().ok_or_else(|| {
+            StorageError::Database(OxiSqlError::Other(
+                "COUNT(*) query returned no rows".to_string(),
+            ))
+        })?;
+        let count: i64 = row.col("count")?;
         Ok(count)
     }
 
@@ -138,63 +162,61 @@ impl WorkflowStore {
         let definition = serde_json::to_string(workflow)?;
         let tags = serde_json::to_string(&workflow.metadata.tags)?;
 
-        let result = sqlx::query(
-            r#"
-            UPDATE workflows
-            SET name = ?, description = ?, definition = ?, tags = ?, version = version + 1, updated_at = datetime('now')
-            WHERE id = ?
-            "#,
-        )
-        .bind(name)
-        .bind(description)
-        .bind(&definition)
-        .bind(&tags)
-        .bind(&id_str)
-        .execute(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows_affected = conn
+            .execute(
+                r#"
+                UPDATE workflows
+                SET name = $1, description = $2, definition = $3, tags = $4, version = version + 1, updated_at = datetime('now')
+                WHERE id = $5
+                "#,
+                &[name, &description, &definition, &tags, &id_str],
+            )
+            .await?;
 
-        Ok(result.rows_affected() > 0)
+        Ok(rows_affected > 0)
     }
 
     /// Delete a workflow
     #[tracing::instrument(skip(self), fields(workflow_id = %id))]
     pub async fn delete(&self, id: &WorkflowId) -> Result<bool> {
         let id_str = id.to_string();
-        let result = sqlx::query(
-            r#"
-            DELETE FROM workflows
-            WHERE id = ?
-            "#,
-        )
-        .bind(&id_str)
-        .execute(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows_affected = conn
+            .execute(
+                r#"
+                DELETE FROM workflows
+                WHERE id = $1
+                "#,
+                &[&id_str],
+            )
+            .await?;
 
-        Ok(result.rows_affected() > 0)
+        Ok(rows_affected > 0)
     }
 
     /// Search workflows by name (case-insensitive)
     pub async fn search(&self, query: &str) -> Result<Vec<Workflow>> {
         let pattern = format!("%{query}%");
 
-        let rows = sqlx::query(
-            r#"
-            SELECT id, name, description, created_at, updated_at, version, definition, tags
-            FROM workflows
-            WHERE name LIKE ? OR description LIKE ?
-            ORDER BY created_at DESC
-            "#,
-        )
-        .bind(&pattern)
-        .bind(&pattern)
-        .fetch_all(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                r#"
+                SELECT id, name, description, created_at, updated_at, version, definition, tags
+                FROM workflows
+                WHERE name LIKE $1 OR description LIKE $2
+                ORDER BY created_at DESC
+                "#,
+                &[&pattern, &pattern],
+            )
+            .await?;
 
         let workflows: Vec<Workflow> = rows
-            .into_iter()
+            .iter()
             .filter_map(|row| {
-                let definition_str: String = row.get("definition");
-                serde_json::from_str(&definition_str).ok()
+                let workflow_row = workflow_row_from(row).ok()?;
+                serde_json::from_str(&workflow_row.definition).ok()
             })
             .collect();
 
@@ -363,23 +385,24 @@ impl WorkflowStore {
         // Search for tag in JSON array using LIKE (simple approach)
         let pattern = format!("%\"{tag}\"%");
 
-        let rows = sqlx::query(
-            r#"
-            SELECT id, name, description, created_at, updated_at, version, definition, tags
-            FROM workflows
-            WHERE tags LIKE ?
-            ORDER BY created_at DESC
-            "#,
-        )
-        .bind(&pattern)
-        .fetch_all(self.pool.pool())
-        .await?;
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query(
+                r#"
+                SELECT id, name, description, created_at, updated_at, version, definition, tags
+                FROM workflows
+                WHERE tags LIKE $1
+                ORDER BY created_at DESC
+                "#,
+                &[&pattern],
+            )
+            .await?;
 
         let workflows: Vec<Workflow> = rows
-            .into_iter()
+            .iter()
             .filter_map(|row| {
-                let definition_str: String = row.get("definition");
-                serde_json::from_str(&definition_str).ok()
+                let workflow_row = workflow_row_from(row).ok()?;
+                serde_json::from_str(&workflow_row.definition).ok()
             })
             .collect();
 
@@ -401,14 +424,15 @@ impl WorkflowStore {
 
     /// Get workflow IDs only (for lighter queries)
     pub async fn list_ids(&self) -> Result<Vec<WorkflowId>> {
-        let rows = sqlx::query("SELECT id FROM workflows ORDER BY created_at DESC")
-            .fetch_all(self.pool.pool())
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query("SELECT id FROM workflows ORDER BY created_at DESC", &[])
             .await?;
 
         let ids: Vec<WorkflowId> = rows
-            .into_iter()
-            .filter_map(|r| {
-                let id_str: String = r.get("id");
+            .iter()
+            .filter_map(|row| {
+                let id_str: String = row.col("id").ok()?;
                 Uuid::parse_str(&id_str).ok()
             })
             .collect();
@@ -419,12 +443,12 @@ impl WorkflowStore {
     /// Check if a workflow exists
     pub async fn exists(&self, id: &WorkflowId) -> Result<bool> {
         let id_str = id.to_string();
-        let row = sqlx::query("SELECT 1 FROM workflows WHERE id = ? LIMIT 1")
-            .bind(&id_str)
-            .fetch_optional(self.pool.pool())
+        let conn = self.pool.acquire().await?;
+        let rows = conn
+            .query("SELECT 1 FROM workflows WHERE id = $1 LIMIT 1", &[&id_str])
             .await?;
 
-        Ok(row.is_some())
+        Ok(!rows.is_empty())
     }
 
     /// Get multiple workflows by IDs
@@ -513,7 +537,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires database
     async fn test_workflow_crud() -> Result<()> {
         let pool = setup_test_pool().await?;
         pool.migrate().await?;

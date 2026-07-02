@@ -2,6 +2,7 @@
 name = "oxify-connect-graphql"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "GraphQL client connector for OxiFY - queries, mutations, custom auth, introspection"
@@ -12,7 +13,9 @@ async-trait.workspace = true
 thiserror.workspace = true
 serde = { workspace = true }
 serde_json.workspace = true
-reqwest = { workspace = true }
+oxihttp = { workspace = true }
+oxify-model = { workspace = true }
+hyper-util = { workspace = true }
 tokio = { workspace = true }
 tracing.workspace = true
 futures.workspace = true

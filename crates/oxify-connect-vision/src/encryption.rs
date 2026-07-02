@@ -286,15 +286,15 @@ impl EncryptionProvider {
 
     /// Derive a key using PBKDF2-SHA256
     fn derive_key_pbkdf2(&self, master_key: &[u8], salt: &[u8]) -> Result<Vec<u8>> {
-        use sha2::{Digest, Sha256};
+        use oxicrypto_hash::Sha256;
 
         // Simple PBKDF2 implementation using SHA-256
         let mut key = master_key.to_vec();
         for _ in 0..self.config.pbkdf2_iterations {
-            let mut hasher = Sha256::new();
-            hasher.update(&key);
-            hasher.update(salt);
-            key = hasher.finalize().to_vec();
+            let mut buf = Vec::with_capacity(key.len() + salt.len());
+            buf.extend_from_slice(&key);
+            buf.extend_from_slice(salt);
+            key = Sha256.hash_fixed(&buf).to_vec();
         }
 
         Ok(key)
@@ -304,22 +304,26 @@ impl EncryptionProvider {
     fn derive_key_argon2(&self, master_key: &[u8], salt: &[u8]) -> Result<Vec<u8>> {
         // Simplified Argon2 implementation
         // In production, use a proper Argon2 library
-        use sha2::{Digest, Sha256};
+        use oxicrypto_hash::Sha256;
 
-        let mut hasher = Sha256::new();
-        hasher.update(master_key);
-        hasher.update(salt);
-        hasher.update(self.config.argon2_memory_cost.to_le_bytes());
-        hasher.update(self.config.argon2_time_cost.to_le_bytes());
+        let memory_cost_bytes = self.config.argon2_memory_cost.to_le_bytes();
+        let time_cost_bytes = self.config.argon2_time_cost.to_le_bytes();
+        let mut buf = Vec::with_capacity(
+            master_key.len() + salt.len() + memory_cost_bytes.len() + time_cost_bytes.len(),
+        );
+        buf.extend_from_slice(master_key);
+        buf.extend_from_slice(salt);
+        buf.extend_from_slice(&memory_cost_bytes);
+        buf.extend_from_slice(&time_cost_bytes);
 
-        let mut key = hasher.finalize().to_vec();
+        let mut key = Sha256.hash_fixed(&buf).to_vec();
 
         // Apply time cost
         for _ in 0..self.config.argon2_time_cost {
-            let mut hasher = Sha256::new();
-            hasher.update(&key);
-            hasher.update(salt);
-            key = hasher.finalize().to_vec();
+            let mut buf = Vec::with_capacity(key.len() + salt.len());
+            buf.extend_from_slice(&key);
+            buf.extend_from_slice(salt);
+            key = Sha256.hash_fixed(&buf).to_vec();
         }
 
         Ok(key)
@@ -365,12 +369,14 @@ impl EncryptionProvider {
             .expect("system time before Unix epoch")
             .as_nanos();
 
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(timestamp.to_le_bytes());
-        hasher.update(counter.to_le_bytes());
+        use oxicrypto_hash::Sha256;
+        let timestamp_bytes = timestamp.to_le_bytes();
+        let counter_bytes = counter.to_le_bytes();
+        let mut buf = Vec::with_capacity(timestamp_bytes.len() + counter_bytes.len());
+        buf.extend_from_slice(&timestamp_bytes);
+        buf.extend_from_slice(&counter_bytes);
 
-        hasher.finalize()[..self.config.salt_size].to_vec()
+        Sha256.hash_fixed(&buf)[..self.config.salt_size].to_vec()
     }
 
     /// Generate a random nonce
@@ -384,13 +390,16 @@ impl EncryptionProvider {
             .expect("system time before Unix epoch")
             .as_nanos();
 
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(timestamp.to_le_bytes());
-        hasher.update(counter.to_le_bytes());
-        hasher.update(b"nonce");
+        use oxicrypto_hash::Sha256;
+        let timestamp_bytes = timestamp.to_le_bytes();
+        let counter_bytes = counter.to_le_bytes();
+        let mut buf =
+            Vec::with_capacity(timestamp_bytes.len() + counter_bytes.len() + b"nonce".len());
+        buf.extend_from_slice(&timestamp_bytes);
+        buf.extend_from_slice(&counter_bytes);
+        buf.extend_from_slice(b"nonce");
 
-        hasher.finalize()[..self.config.nonce_size].to_vec()
+        Sha256.hash_fixed(&buf)[..self.config.nonce_size].to_vec()
     }
 
     /// Encrypt data
@@ -433,24 +442,25 @@ impl EncryptionProvider {
         // Simplified AES-GCM implementation
         // In production, use a proper crypto library like `aes-gcm`
 
-        use sha2::{Digest, Sha256};
+        use oxicrypto_hash::Sha256;
 
         let mut ciphertext = Vec::new();
         for (i, &byte) in plaintext.iter().enumerate() {
-            let mut hasher = Sha256::new();
-            hasher.update(key);
-            hasher.update(nonce);
-            hasher.update((i as u64).to_le_bytes());
-            let keystream = hasher.finalize();
+            let index_bytes = (i as u64).to_le_bytes();
+            let mut buf = Vec::with_capacity(key.len() + nonce.len() + index_bytes.len());
+            buf.extend_from_slice(key);
+            buf.extend_from_slice(nonce);
+            buf.extend_from_slice(&index_bytes);
+            let keystream = Sha256.hash_fixed(&buf);
             ciphertext.push(byte ^ keystream[0]);
         }
 
         // Generate authentication tag
-        let mut hasher = Sha256::new();
-        hasher.update(key);
-        hasher.update(nonce);
-        hasher.update(&ciphertext);
-        let tag = hasher.finalize()[..16].to_vec();
+        let mut buf = Vec::with_capacity(key.len() + nonce.len() + ciphertext.len());
+        buf.extend_from_slice(key);
+        buf.extend_from_slice(nonce);
+        buf.extend_from_slice(&ciphertext);
+        let tag = Sha256.hash_fixed(&buf)[..16].to_vec();
 
         Ok((ciphertext, tag))
     }
@@ -465,26 +475,29 @@ impl EncryptionProvider {
         // Simplified ChaCha20-Poly1305 implementation
         // In production, use a proper crypto library like `chacha20poly1305`
 
-        use sha2::{Digest, Sha256};
+        use oxicrypto_hash::Sha256;
 
         let mut ciphertext = Vec::new();
         for (i, &byte) in plaintext.iter().enumerate() {
-            let mut hasher = Sha256::new();
-            hasher.update(key);
-            hasher.update(nonce);
-            hasher.update((i as u64).to_le_bytes());
-            hasher.update(b"chacha20");
-            let keystream = hasher.finalize();
+            let index_bytes = (i as u64).to_le_bytes();
+            let mut buf =
+                Vec::with_capacity(key.len() + nonce.len() + index_bytes.len() + b"chacha20".len());
+            buf.extend_from_slice(key);
+            buf.extend_from_slice(nonce);
+            buf.extend_from_slice(&index_bytes);
+            buf.extend_from_slice(b"chacha20");
+            let keystream = Sha256.hash_fixed(&buf);
             ciphertext.push(byte ^ keystream[0]);
         }
 
         // Generate authentication tag
-        let mut hasher = Sha256::new();
-        hasher.update(key);
-        hasher.update(nonce);
-        hasher.update(&ciphertext);
-        hasher.update(b"poly1305");
-        let tag = hasher.finalize()[..16].to_vec();
+        let mut buf =
+            Vec::with_capacity(key.len() + nonce.len() + ciphertext.len() + b"poly1305".len());
+        buf.extend_from_slice(key);
+        buf.extend_from_slice(nonce);
+        buf.extend_from_slice(&ciphertext);
+        buf.extend_from_slice(b"poly1305");
+        let tag = Sha256.hash_fixed(&buf)[..16].to_vec();
 
         Ok((ciphertext, tag))
     }
@@ -534,31 +547,34 @@ impl EncryptionProvider {
         ciphertext: &[u8],
         algorithm: EncryptionAlgorithm,
     ) -> Result<Vec<u8>> {
-        use sha2::{Digest, Sha256};
+        use oxicrypto_hash::Sha256;
 
-        let mut hasher = Sha256::new();
-        hasher.update(key);
-        hasher.update(nonce);
-        hasher.update(ciphertext);
+        let extra = if algorithm == EncryptionAlgorithm::ChaCha20Poly1305 {
+            b"poly1305".as_slice()
+        } else {
+            b"".as_slice()
+        };
+        let mut buf = Vec::with_capacity(key.len() + nonce.len() + ciphertext.len() + extra.len());
+        buf.extend_from_slice(key);
+        buf.extend_from_slice(nonce);
+        buf.extend_from_slice(ciphertext);
+        buf.extend_from_slice(extra);
 
-        if algorithm == EncryptionAlgorithm::ChaCha20Poly1305 {
-            hasher.update(b"poly1305");
-        }
-
-        Ok(hasher.finalize()[..16].to_vec())
+        Ok(Sha256.hash_fixed(&buf)[..16].to_vec())
     }
 
     /// Decrypt using AES-256-GCM
     fn decrypt_aes_gcm(&self, key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>> {
-        use sha2::{Digest, Sha256};
+        use oxicrypto_hash::Sha256;
 
         let mut plaintext = Vec::new();
         for (i, &byte) in ciphertext.iter().enumerate() {
-            let mut hasher = Sha256::new();
-            hasher.update(key);
-            hasher.update(nonce);
-            hasher.update((i as u64).to_le_bytes());
-            let keystream = hasher.finalize();
+            let index_bytes = (i as u64).to_le_bytes();
+            let mut buf = Vec::with_capacity(key.len() + nonce.len() + index_bytes.len());
+            buf.extend_from_slice(key);
+            buf.extend_from_slice(nonce);
+            buf.extend_from_slice(&index_bytes);
+            let keystream = Sha256.hash_fixed(&buf);
             plaintext.push(byte ^ keystream[0]);
         }
 
@@ -567,16 +583,18 @@ impl EncryptionProvider {
 
     /// Decrypt using ChaCha20-Poly1305
     fn decrypt_chacha20(&self, key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>> {
-        use sha2::{Digest, Sha256};
+        use oxicrypto_hash::Sha256;
 
         let mut plaintext = Vec::new();
         for (i, &byte) in ciphertext.iter().enumerate() {
-            let mut hasher = Sha256::new();
-            hasher.update(key);
-            hasher.update(nonce);
-            hasher.update((i as u64).to_le_bytes());
-            hasher.update(b"chacha20");
-            let keystream = hasher.finalize();
+            let index_bytes = (i as u64).to_le_bytes();
+            let mut buf =
+                Vec::with_capacity(key.len() + nonce.len() + index_bytes.len() + b"chacha20".len());
+            buf.extend_from_slice(key);
+            buf.extend_from_slice(nonce);
+            buf.extend_from_slice(&index_bytes);
+            buf.extend_from_slice(b"chacha20");
+            let keystream = Sha256.hash_fixed(&buf);
             plaintext.push(byte ^ keystream[0]);
         }
 
@@ -932,5 +950,182 @@ mod tests {
         let decrypted2 = provider.decrypt(&encrypted2).unwrap();
         assert_eq!(decrypted1, plaintext);
         assert_eq!(decrypted2, plaintext);
+    }
+
+    // ------------------------------------------------------------------
+    // Golden-value regression tests (PRE-migration baseline).
+    //
+    // These tests pin the exact byte-level output of the CURRENT sha2-based
+    // KDF/keystream construction for FIXED inputs. They exist so that a
+    // later migration off `sha2` can be proven to produce byte-identical
+    // output. Round-trip (encrypt -> decrypt) tests alone cannot catch this
+    // class of regression: if encrypt and decrypt both change in a
+    // self-consistent way, round-trip still passes even though the actual
+    // ciphertext/tag/key bytes silently changed underneath.
+    //
+    // DO NOT "fix" the underlying algorithms here — they are an
+    // intentionally simplified, home-grown construction (not real
+    // AES-GCM/ChaCha20-Poly1305/PBKDF2/Argon2). These tests only freeze the
+    // CURRENT observable behavior so it can be diffed after migration.
+    //
+    // `generate_salt`/`generate_nonce` are deliberately NOT golden-tested:
+    // both mix `SystemTime::now()` nanoseconds and a process-lifetime
+    // atomic counter into the hash input, so their output is not
+    // reproducible across runs.
+    // ------------------------------------------------------------------
+
+    /// Fixed 32-byte key used by the golden encryption tests.
+    const GOLDEN_KEY_32: &[u8; 32] = b"0123456789abcdef0123456789abcdef";
+
+    /// Fixed 12-byte nonce used by the golden encryption tests.
+    const GOLDEN_NONCE_12: &[u8; 12] = b"golden-nonce";
+
+    /// GOLDEN TEST — captures the PRE-migration (sha2-based) output of
+    /// `derive_key_pbkdf2` for a fixed master key, salt, and iteration
+    /// count (the `EncryptionConfig` default of 100_000). This is a
+    /// hand-rolled "iterated SHA-256" construction, not real
+    /// PBKDF2-HMAC-SHA256; after the sha2 migration this exact hex digest
+    /// must still be produced for these inputs.
+    #[test]
+    fn test_golden_derive_key_pbkdf2() {
+        let config = EncryptionConfig::new()
+            .with_master_key(b"golden-master-key")
+            .with_kdf(KeyDerivationFunction::Pbkdf2Sha256);
+        let provider = EncryptionProvider::new(config).expect("valid golden config");
+
+        let key = provider
+            .derive_key_pbkdf2(b"golden-master-key", b"golden-salt")
+            .expect("pbkdf2 derivation should succeed");
+
+        assert_eq!(
+            hex::encode(&key),
+            "437b48c42055a32d1d86a6b7ddc9f555f3a46e035d6d55b84a0ea7b279787c40",
+            "derive_key_pbkdf2 golden output changed for fixed inputs \
+             (master_key=b\"golden-master-key\", salt=b\"golden-salt\", pbkdf2_iterations=100000)"
+        );
+    }
+
+    /// GOLDEN TEST — captures the PRE-migration (sha2-based) output of
+    /// `derive_key_argon2` for a fixed master key, salt, and the
+    /// `EncryptionConfig` default memory/time cost (65536 / 3). This is a
+    /// simplified stand-in for Argon2id (plain iterated SHA-256), not real
+    /// Argon2; after migration this exact hex digest must still be
+    /// produced for these inputs.
+    #[test]
+    fn test_golden_derive_key_argon2() {
+        let config = EncryptionConfig::new()
+            .with_master_key(b"golden-master-key")
+            .with_kdf(KeyDerivationFunction::Argon2id);
+        let provider = EncryptionProvider::new(config).expect("valid golden config");
+
+        let key = provider
+            .derive_key_argon2(b"golden-master-key", b"golden-salt")
+            .expect("argon2 derivation should succeed");
+
+        assert_eq!(
+            hex::encode(&key),
+            "2001ac0197ccf8308f946befcbf9fafa8cfc3c82ddcc4a9e58a50ea653fe55a3",
+            "derive_key_argon2 golden output changed for fixed inputs \
+             (master_key=b\"golden-master-key\", salt=b\"golden-salt\", \
+             argon2_memory_cost=65536, argon2_time_cost=3)"
+        );
+    }
+
+    /// GOLDEN TEST — captures the PRE-migration (sha2-based) ciphertext AND
+    /// authentication tag produced by `encrypt_aes_gcm` for a fixed
+    /// 32-byte key, fixed 12-byte nonce, and fixed plaintext. This
+    /// "AES-GCM" is a simplified per-byte keystream XOR construction, not
+    /// real AES-GCM; both outputs must remain byte-identical post-migration.
+    #[test]
+    fn test_golden_encrypt_aes_gcm() {
+        let config = EncryptionConfig::new().with_master_key(b"golden-master-key");
+        let provider = EncryptionProvider::new(config).expect("valid golden config");
+
+        let plaintext = b"Golden plaintext for pre-migration regression test.";
+        let (ciphertext, tag) = provider
+            .encrypt_aes_gcm(GOLDEN_KEY_32, GOLDEN_NONCE_12, plaintext)
+            .expect("aes-gcm encryption should succeed");
+
+        assert_eq!(
+            hex::encode(&ciphertext),
+            "7105a57dcd16139a0440176910f11f3f5d97e71289a25f9c1eadbb5685da169\
+edacb39196a7318552d0ccfa99cb39f2d33791c",
+            "encrypt_aes_gcm golden ciphertext changed for fixed key/nonce/plaintext"
+        );
+        assert_eq!(
+            hex::encode(&tag),
+            "ed00350bb742e1393ed3827cccc92727",
+            "encrypt_aes_gcm golden tag changed for fixed key/nonce/plaintext"
+        );
+    }
+
+    /// GOLDEN TEST — captures the PRE-migration (sha2-based) ciphertext AND
+    /// authentication tag produced by `encrypt_chacha20` for a fixed
+    /// 32-byte key, fixed 12-byte nonce, and fixed plaintext. This
+    /// "ChaCha20" is a simplified per-byte keystream XOR construction, not
+    /// real ChaCha20-Poly1305; both outputs must remain byte-identical
+    /// post-migration.
+    #[test]
+    fn test_golden_encrypt_chacha20() {
+        let config = EncryptionConfig::new().with_master_key(b"golden-master-key");
+        let provider = EncryptionProvider::new(config).expect("valid golden config");
+
+        let plaintext = b"Golden plaintext for pre-migration regression test.";
+        let (ciphertext, tag) = provider
+            .encrypt_chacha20(GOLDEN_KEY_32, GOLDEN_NONCE_12, plaintext)
+            .expect("chacha20 encryption should succeed");
+
+        assert_eq!(
+            hex::encode(&ciphertext),
+            "607bb2d6554035cd416886c68970f53738cf2933581c553deee529f0b7dcc38\
+665a1a999adb5f73b08f12374bc2a36f3e186b2",
+            "encrypt_chacha20 golden ciphertext changed for fixed key/nonce/plaintext"
+        );
+        assert_eq!(
+            hex::encode(&tag),
+            "f45203baeb1df18dd58ac25cbdf0a90a",
+            "encrypt_chacha20 golden tag changed for fixed key/nonce/plaintext"
+        );
+    }
+
+    /// GOLDEN TEST — captures the PRE-migration (sha2-based) authentication
+    /// tag produced by `compute_tag` for a fixed key/nonce/ciphertext,
+    /// across both supported algorithms. The `ChaCha20Poly1305` branch
+    /// mixes in an extra `b"poly1305"` domain separator, so it must be
+    /// pinned separately from the `Aes256Gcm` branch.
+    #[test]
+    fn test_golden_compute_tag() {
+        let config = EncryptionConfig::new().with_master_key(b"golden-master-key");
+        let provider = EncryptionProvider::new(config).expect("valid golden config");
+
+        let ciphertext = b"golden-ciphertext-fixture-bytes";
+
+        let tag_aes = provider
+            .compute_tag(
+                GOLDEN_KEY_32,
+                GOLDEN_NONCE_12,
+                ciphertext,
+                EncryptionAlgorithm::Aes256Gcm,
+            )
+            .expect("compute_tag (aes) should succeed");
+        assert_eq!(
+            hex::encode(&tag_aes),
+            "38a28fe14cb67d5dbf55d73cfd2768d1",
+            "compute_tag golden AES-GCM tag changed for fixed key/nonce/ciphertext"
+        );
+
+        let tag_chacha = provider
+            .compute_tag(
+                GOLDEN_KEY_32,
+                GOLDEN_NONCE_12,
+                ciphertext,
+                EncryptionAlgorithm::ChaCha20Poly1305,
+            )
+            .expect("compute_tag (chacha20) should succeed");
+        assert_eq!(
+            hex::encode(&tag_chacha),
+            "a07ee014ffdaf701d2560908647b31d5",
+            "compute_tag golden ChaCha20Poly1305 tag changed for fixed key/nonce/ciphertext"
+        );
     }
 }

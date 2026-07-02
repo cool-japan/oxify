@@ -301,34 +301,26 @@ pub fn generate_webhook_secret() -> String {
 
 /// Helper to verify HMAC signature
 pub fn verify_webhook_signature(secret: &str, payload: &[u8], signature: &str) -> bool {
-    use hmac::{Hmac, KeyInit, Mac};
-    use sha2::Sha256;
+    use oxicrypto_mac::hmac_sha256_to_vec;
 
-    type HmacSha256 = Hmac<Sha256>;
-
-    let mut mac = match HmacSha256::new_from_slice(secret.as_bytes()) {
-        Ok(m) => m,
+    let mac_bytes = match hmac_sha256_to_vec(secret.as_bytes(), payload) {
+        Ok(b) => b,
         Err(_) => return false,
     };
 
-    mac.update(payload);
-
-    let expected = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+    let expected = format!("sha256={}", hex::encode(mac_bytes));
 
     expected == signature
 }
 
 /// Helper to create HMAC signature for testing
 pub fn create_webhook_signature(secret: &str, payload: &[u8]) -> String {
-    use hmac::{Hmac, KeyInit, Mac};
-    use sha2::Sha256;
+    use oxicrypto_mac::hmac_sha256_to_vec;
 
-    type HmacSha256 = Hmac<Sha256>;
+    let mac_bytes =
+        hmac_sha256_to_vec(secret.as_bytes(), payload).expect("HMAC-SHA256 accepts any key length");
 
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("Invalid secret");
-    mac.update(payload);
-
-    format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+    format!("sha256={}", hex::encode(mac_bytes))
 }
 
 #[cfg(test)]

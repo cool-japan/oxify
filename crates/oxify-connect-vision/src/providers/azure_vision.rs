@@ -24,7 +24,7 @@
 use crate::errors::{Result, VisionError};
 use crate::types::{OcrMetadata, OcrResult};
 use async_trait::async_trait;
-use reqwest::Client;
+use oxihttp::HttpsClient;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
@@ -323,7 +323,7 @@ pub struct AzureVisionProvider {
     config: AzureVisionConfig,
     rate_limiter: Arc<RateLimiter>,
     cost_tracker: Arc<CostTracker>,
-    client: Client,
+    client: HttpsClient,
 }
 
 impl AzureVisionProvider {
@@ -332,10 +332,13 @@ impl AzureVisionProvider {
         let rps = config.rate_limit_rps;
         let rate_limiter = Arc::new(RateLimiter::new(rps));
         let cost_tracker = Arc::new(CostTracker::new(0.001));
-        let client = Client::builder()
-            .timeout(Duration::from_secs(config.timeout_secs))
-            .build()
-            .unwrap_or_default();
+        let timeout = Duration::from_secs(config.timeout_secs);
+        let client = oxihttp::Client::builder()
+            .with_tls()
+            .connect_timeout(timeout)
+            .read_timeout(timeout)
+            .build_https()
+            .expect("failed to build oxihttp HTTPS client for Azure Vision");
         Self {
             config,
             rate_limiter,
@@ -377,9 +380,9 @@ impl AzureVisionProvider {
 
         let response = self
             .client
-            .post(&url)
-            .header("Ocp-Apim-Subscription-Key", &self.config.api_key)
-            .header("Content-Type", "application/octet-stream")
+            .post(&url)?
+            .header("Ocp-Apim-Subscription-Key", &self.config.api_key)?
+            .header("Content-Type", "application/octet-stream")?
             .body(image_data.to_vec())
             .send()
             .await
@@ -388,14 +391,14 @@ impl AzureVisionProvider {
         let status = response.status();
         if !status.is_success() {
             let code = status.as_u16();
-            let body = response.text().await.unwrap_or_default();
+            let body = response.body_text().await.unwrap_or_default();
             return Err(VisionError::OcrEngine(format!(
                 "Azure Vision API returned HTTP {}: {}",
                 code, body
             )));
         }
 
-        let resp: AzureAnalyzeResponse = response.json().await.map_err(|e| {
+        let resp: AzureAnalyzeResponse = response.body_json().await.map_err(|e| {
             VisionError::OcrEngine(format!("Failed to parse Azure response: {}", e))
         })?;
 

@@ -2,6 +2,7 @@
 name = "oxify-connect-storage"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Object storage connectors for OxiFY - S3, MinIO, GCS, Azure Blob"
@@ -16,8 +17,10 @@ tokio = { workspace = true }
 tracing.workspace = true
 chrono.workspace = true
 bytes.workspace = true
-futures.workspace = true
-object_store = { workspace = true, optional = true }
+oxistore-blob       = { workspace = true, optional = true }
+oxistore-blob-s3    = { workspace = true, optional = true }
+oxistore-blob-gcs   = { workspace = true, optional = true }
+oxistore-blob-azure = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
@@ -26,8 +29,8 @@ tempfile.workspace = true
 [features]
 default = ["memory"]
 memory = []
-aws = ["object_store"]
-gcs = ["object_store"]
-azure = ["object_store"]
-local = ["object_store"]
+aws = ["oxistore-blob", "oxistore-blob-s3"]
+gcs = ["oxistore-blob", "oxistore-blob-gcs"]
+azure = ["oxistore-blob", "oxistore-blob-azure"]
+local = ["oxistore-blob"]
 all-providers = ["memory", "aws", "gcs", "azure", "local"]

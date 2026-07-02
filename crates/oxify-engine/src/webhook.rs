@@ -87,27 +87,26 @@ impl WebhookConfig {
 
     /// Verify HMAC signature
     pub fn verify_signature(&self, payload: &[u8], signature: &str) -> bool {
-        use hmac::{digest::KeyInit, Hmac, Mac};
-        use sha2::Sha256;
+        use oxicrypto_core::Mac;
+        use oxicrypto_mac::HmacSha256;
 
         if let Some(secret) = &self.secret {
-            type HmacSha256 = Hmac<Sha256>;
-
-            if let Ok(mut mac) = HmacSha256::new_from_slice(secret.as_bytes()) {
-                mac.update(payload);
-
-                // Try to decode the signature from hex
-                if let Ok(sig_bytes) = hex::decode(signature) {
-                    return mac.verify_slice(&sig_bytes).is_ok();
-                }
-
-                // Try base64 encoding
-                if let Ok(sig_bytes) =
-                    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, signature)
-                {
-                    return mac.verify_slice(&sig_bytes).is_ok();
-                }
+            // Try to decode the signature from hex
+            if let Ok(sig_bytes) = hex::decode(signature) {
+                return HmacSha256
+                    .verify(secret.as_bytes(), payload, &sig_bytes)
+                    .is_ok();
             }
+
+            // Try base64 encoding
+            if let Ok(sig_bytes) =
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, signature)
+            {
+                return HmacSha256
+                    .verify(secret.as_bytes(), payload, &sig_bytes)
+                    .is_ok();
+            }
+
             false
         } else {
             // No secret configured, accept any request
