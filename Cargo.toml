@@ -39,7 +39,7 @@ repository = "https://github.com/cool-japan/oxify"
 
 [workspace.dependencies]
 # CeleRS — cross-workspace path dep (not published on crates.io)
-celers = { version = "0.2.0", path = "../celers/crates/celers", default-features = false }
+celers = { version = "0.3.0", default-features = false }
 # OxiFY-Model — in-workspace path dep, shared model/error/HTTP-util types
 oxify-model = { version = "0.2.0", path = "crates/oxify-model" }
 

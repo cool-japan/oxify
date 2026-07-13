@@ -17,7 +17,7 @@ celers = { workspace = true, optional = true }
 
 # celers-core provides Task, TaskRegistry, TaskId, CelersError, BrokerMessage
 # which the celers facade does not re-export.
-celers-core = { path = "../../../celers/crates/celers-core", version = "0.2.0", optional = true }
+celers-core = { version = "0.3.0", optional = true }
 
 serde       = { workspace = true }
 serde_json  = { workspace = true }
