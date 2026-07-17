@@ -128,9 +128,9 @@ sha2 = "0.11"
 hex = "0.4"
 
 # COOLJAPAN pure-Rust cryptography (OxiCrypto ecosystem)
-oxicrypto-hash = "0.2"
-oxicrypto-mac = "0.2"
-oxicrypto-core = "0.2"
+oxicrypto-hash = "0.2.1"
+oxicrypto-mac = "0.2.1"
+oxicrypto-core = "0.2.1"
 
 # JWT / auth tokens
 jsonwebtoken = "10.4"
