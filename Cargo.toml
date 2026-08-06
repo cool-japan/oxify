@@ -83,10 +83,10 @@ sqlx = { version = "0.9.0", features = ["runtime-tokio", "sqlite", "chrono", "uu
 # COOLJAPAN pure-Rust SQL stack (OxiSQL) — migration target replacing sqlx for the
 # SQLite storage layer (oxify-storage). sqlx is retained above because
 # oxify-connect-db / oxify-connect-vector still use it for the Postgres/MySQL paths.
-oxisql-core = "0.4.0"
-oxisql-sqlite-compat = "0.4.0"
-oxisql-pool = { version = "0.4.0", features = ["sqlite"] }
-oxisql-migrate = { version = "0.4.0", features = ["migrate"] }
+oxisql-core = "0.4.1"
+oxisql-sqlite-compat = "0.4.1"
+oxisql-pool = { version = "0.4.1", features = ["sqlite"] }
+oxisql-migrate = { version = "0.4.1", features = ["migrate"] }
 # Generic connection pool — names deadpool::managed::{Object, PoolError} in the
 # oxify-storage pool/error glue. Version pinned to match oxisql-pool 0.3.1.
 deadpool = { version = "0.13.0", features = ["managed"] }
