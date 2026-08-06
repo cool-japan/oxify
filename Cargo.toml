@@ -76,7 +76,7 @@ async-graphql-axum = "7.2"
 # (opentelemetry-otlp's HTTP exporter, oauth2, qdrant-client).
 # NOTE: 0.2.1 was requested but is NOT published on crates.io; 0.2.0 is the latest
 # published release (verified via `cargo add --dry-run`), and matches oxitls' pin.
-oxihttp = { version = "0.2.0", default-features = false, features = ["client", "tls", "decompression"] }
+oxihttp = { version = "0.2.1", default-features = false, features = ["client", "tls", "decompression"] }
 percent-encoding = "2.3"
 qdrant-client = "1.18.0"
 sqlx = { version = "0.9.0", features = ["runtime-tokio", "sqlite", "chrono", "uuid"] }
