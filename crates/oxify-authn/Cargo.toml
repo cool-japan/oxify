@@ -28,8 +28,8 @@ oxihttp = { workspace = true }
 
 # Password hashing
 # COOLJAPAN pure-Rust Argon2id KDF (replaces the legacy `argon2` 0.5 crate; password.rs migrated)
-oxicrypto-kdf = { version = "0.2.1", features = ["std"] }
-oxicrypto-core = { version = "0.2.1", features = ["std"] }
+oxicrypto-kdf = { version = "0.3.0", features = ["std"] }
+oxicrypto-core = { version = "0.3.0", features = ["std"] }
 bcrypt = "0.19"
 
 # TOTP for MFA (optional)
