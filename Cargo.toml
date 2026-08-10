@@ -156,10 +156,13 @@ oxiarc-archive = "0.4.1"
 ratatui = "0.30"
 crossterm = "0.29"
 
-# HTML parsing / scraping — pure Rust (wraps html5ever + selectors + cssparser,
-# zero C dependencies). Used by oxify-mcp's `web_scrape` tool for CSS-selector
-# extraction; unconditional (pure Rust, no reason to feature-gate).
-scraper = "0.27.0"
+# HTML parsing / scraping — OxiXML, pure Rust with zero C dependencies.
+# `oxixml-html` is an HTML5 tokenizer + tree builder producing an `oxixml-dom`
+# arena tree; `oxixml-dom` supplies the node handles and navigation API the
+# `web_scrape` tool's CSS-selector engine walks. Unconditional (pure Rust, no
+# reason to feature-gate).
+oxixml-html = "0.1.1"
+oxixml-dom = "0.1.1"
 
 # Headless browser automation — async-native Chrome DevTools Protocol (CDP) client.
 # The crate itself is pure Rust; it drives an external Chrome/Chromium *binary* over

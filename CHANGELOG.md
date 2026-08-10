@@ -43,6 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `oxify generate --description "..."` command — calls LLM (OpenAI/Anthropic/Ollama), extracts JSON, validates with `WorkflowValidator`, retries with error feedback (up to `--max-retries` attempts)
 - Outputs to stdout or file in JSON or YAML format
 
+### Changed
+
+#### XML / HTML stack moved to OxiXML
+- `oxify-mcp`: `web_scrape` no longer depends on `scraper`. HTML is parsed by `oxixml-html` (HTML5 tokenizer + tree builder over an `oxixml-dom` arena), and CSS selectors are handled by a new in-crate engine (`servers/css_select`) covering type/`*`/`#id`/`.class`, `[attr]` with `=`, `~=`, `^=`, `$=`, `*=`, the `:first-child`, `:last-child`, `:nth-child(An+B)` and `:not(...)` pseudo-classes, the descendant/`>`/`+`/`~` combinators, and selector lists. The selector string is caller-supplied, so the engine enforces hard caps on length, list size, compound count, qualifier count and identifier length, forbids nested `:not()`, and reports anything malformed or outside that subset as `McpError::InvalidRequest` — the pre-existing error contract. Matching is one arena walk per call with right-to-left, set-based constraint evaluation, so no selector can trigger exponential backtracking. Element text keeps each descendant text node a separate fragment (trimmed, empties dropped, space-joined), preserving the previous extraction semantics.
+- `oxify-authn`: the optional `saml` XML reader is now `oxixml-quickxml-compat`, aliased to the `quick-xml` dependency name; `src/saml.rs` and the `saml` feature are unchanged.
+- Dependencies removed: `scraper` (and its `html5ever` / `selectors` / `cssparser` tree) and `quick-xml`. Added: `oxixml-html`, `oxixml-dom`, `oxixml-quickxml-compat`.
+
 ### Fixed
 - Pre-existing clippy lints across `oxify-model`, `oxify-authz`, `oxify-vector`, `oxify-engine`, `oxify-server`, `oxify-storage`, `oxify-connect-vision` (collapsible_match, sort_by_key, manual_checked_div, redundant bounds, deprecated pyo3 derive)
 

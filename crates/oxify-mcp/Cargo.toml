@@ -23,7 +23,8 @@ oxihttp = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 # Pure-Rust HTML parsing / CSS-selector extraction for the `web_scrape` tool.
-scraper = { workspace = true }
+oxixml-html = { workspace = true }
+oxixml-dom = { workspace = true }
 
 # Database support (optional) — Pure-Rust OxiSQL stack (replaces sqlx)
 oxisql-core = { workspace = true, optional = true }

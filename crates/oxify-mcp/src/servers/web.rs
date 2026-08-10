@@ -1,7 +1,9 @@
 //! Web MCP server - provides HTTP and web scraping operations
 
+use super::css_select::SelectorList;
 use crate::{McpServer, Result};
 use async_trait::async_trait;
+use oxixml_dom::{Document, NodeId, NodeKind};
 use serde_json::{json, Value};
 
 /// Built-in MCP server for web operations
@@ -272,29 +274,62 @@ impl McpServer for WebServer {
 ///
 /// # Errors
 ///
-/// Returns [`crate::McpError::InvalidRequest`] if `selector` is not a valid CSS selector.
-/// This never panics on malformed input. A syntactically valid selector that matches no
-/// elements is not an error — it yields an empty string.
+/// Returns [`crate::McpError::InvalidRequest`] if `selector` is not a valid CSS selector,
+/// uses syntax outside the supported subset, or exceeds one of the selector engine's
+/// hard size caps. This never panics on malformed input. A syntactically valid selector
+/// that matches no elements is not an error — it yields an empty string.
 fn extract_selected_text(html: &str, selector: &str) -> Result<String> {
-    let document = scraper::Html::parse_document(html);
-    let parsed = scraper::Selector::parse(selector).map_err(|e| {
-        crate::McpError::InvalidRequest(format!("Invalid CSS selector '{selector}': {e:?}"))
+    // Parse the selector before the document: a bad selector is rejected without
+    // spending anything on HTML parsing.
+    let selectors = SelectorList::parse(selector).map_err(|e| {
+        crate::McpError::InvalidRequest(format!(
+            "Invalid CSS selector '{}': {e}",
+            abbreviate(selector)
+        ))
     })?;
 
-    let text = document
-        .select(&parsed)
-        .map(|element| {
-            element
-                .text()
-                .map(str::trim)
-                .filter(|fragment| !fragment.is_empty())
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
+    let parsed = oxixml_html::parse_document(html);
+    let document = parsed.document();
+
+    let text = selectors
+        .match_elements(document, parsed.root())
+        .into_iter()
+        .map(|element| element_text(document, element))
         .collect::<Vec<_>>()
         .join("\n");
 
     Ok(text)
+}
+
+/// Shorten a caller-supplied selector for inclusion in an error message.
+///
+/// The selector arrives as an arbitrary JSON string, so echoing it back whole
+/// would let a caller inflate an error message without bound.
+fn abbreviate(selector: &str) -> String {
+    /// Number of characters of the offending selector kept in the message.
+    const MAX_ECHOED_CHARS: usize = 80;
+
+    let mut abbreviated: String = selector.chars().take(MAX_ECHOED_CHARS).collect();
+    if selector.chars().nth(MAX_ECHOED_CHARS).is_some() {
+        abbreviated.push_str("...");
+    }
+    abbreviated
+}
+
+/// The text of one element: its descendant text nodes, each trimmed, with empty
+/// fragments dropped and the rest joined by a single space.
+///
+/// Fragments are kept separate rather than concatenated, so `<p>a<b>b</b></p>`
+/// yields `"a b"` — markup that separates two words keeps them separated.
+fn element_text(document: &Document, element: NodeId) -> String {
+    document
+        .descendants(element)
+        .filter(|node| document.kind(*node) == Some(NodeKind::Text))
+        .filter_map(|node| document.character_data(node))
+        .map(str::trim)
+        .filter(|fragment| !fragment.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Launch a headless Chrome/Chromium instance, navigate to `url`, and capture a PNG
@@ -469,6 +504,128 @@ mod tests {
                 panic!("expected McpError::InvalidRequest for a malformed selector, got {other:?}")
             }
         }
+    }
+
+    /// Runs `selector` against `html`, requiring it to be accepted.
+    fn selected_text(html: &str, selector: &str) -> String {
+        extract_selected_text(html, selector)
+            .unwrap_or_else(|e| panic!("`{selector}` should be accepted, got: {e}"))
+    }
+
+    /// Runs `selector` against a trivial document, requiring it to be rejected as
+    /// `InvalidRequest`, and returns the message.
+    fn rejected_selector(selector: &str) -> String {
+        match extract_selected_text("<p>x</p>", selector) {
+            Err(crate::McpError::InvalidRequest(msg)) => msg,
+            other => panic!("`{selector}` should be InvalidRequest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_extract_selected_text_keeps_markup_separated_words_apart() {
+        // Each descendant text node is a separate fragment, so markup that splits
+        // two words keeps them from being run together.
+        assert_eq!(selected_text("<p>a<b>b</b>c</p>", "p"), "a b c");
+        assert_eq!(selected_text("<p>one <b>two</b></p>", "p"), "one two");
+    }
+
+    #[test]
+    fn test_extract_selected_text_drops_whitespace_only_fragments() {
+        let html = "<div>\n  <span>  kept  </span>\n  <span></span>\n</div>";
+        assert_eq!(selected_text(html, "div"), "kept");
+        assert_eq!(selected_text(html, "span"), "kept\n");
+    }
+
+    #[test]
+    fn test_extract_selected_text_ignores_comments_and_joins_elements_by_newline() {
+        let html = "<ul><li>one<!-- hidden --></li><li>two</li></ul>";
+        assert_eq!(selected_text(html, "li"), "one\ntwo");
+    }
+
+    #[test]
+    fn test_extract_selected_text_handles_quirky_html() {
+        // Unclosed tags, mixed-case markup and unquoted attributes: the HTML5
+        // parser repairs the tree, and selectors match case-insensitively.
+        let html = "<DIV CLASS=post><P>first<P>second</DIV>";
+        assert_eq!(selected_text(html, "div.post p"), "first\nsecond");
+        assert_eq!(selected_text(html, "DIV.post > P"), "first\nsecond");
+        assert_eq!(selected_text(html, "div.Post p"), "");
+    }
+
+    #[test]
+    fn test_extract_selected_text_supports_the_wider_selector_subset() {
+        let html = "<ul id=\"list\"><li class=\"a\">one</li><li>two</li><li>three</li></ul>";
+
+        assert_eq!(selected_text(html, "#list li:first-child"), "one");
+        assert_eq!(selected_text(html, "#list li:last-child"), "three");
+        assert_eq!(selected_text(html, "li:nth-child(2)"), "two");
+        assert_eq!(selected_text(html, "li:not(.a)"), "two\nthree");
+        assert_eq!(selected_text(html, ".a + li"), "two");
+        assert_eq!(selected_text(html, ".a ~ li"), "two\nthree");
+        assert_eq!(selected_text(html, "[id=list] > li, [class]"), "one\ntwo\nthree");
+        assert_eq!(selected_text(html, "*[id^=li][id$=st]"), "one two three");
+    }
+
+    #[test]
+    fn test_extract_selected_text_rejects_unsupported_and_malformed_selectors() {
+        for selector in [
+            "",
+            "   ",
+            ">",
+            "div >",
+            "div,",
+            "p::before",
+            "p:has(a)",
+            "p:is(a)",
+            "div[class",
+            "div[class|=a]",
+            "div[class='unterminated",
+            "p:nth-child(",
+            "p:not(:not(a))",
+            "\u{0}",
+            "🦀:🦀",
+        ] {
+            let msg = rejected_selector(selector);
+            assert!(
+                msg.contains("Invalid CSS selector"),
+                "message should keep the established prefix, got: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_extract_selected_text_bounds_the_echoed_selector() {
+        // A hostile caller must not be able to inflate the error message with a
+        // huge selector, nor split a multi-byte character while it is truncated.
+        let selector = "🦀".repeat(100 * 1024);
+
+        let msg = rejected_selector(&selector);
+        assert!(msg.contains("Invalid CSS selector"));
+        assert!(msg.contains("..."), "long selectors should be elided: {msg}");
+        assert!(
+            msg.len() < 1024,
+            "error message should stay small, got {} bytes",
+            msg.len()
+        );
+    }
+
+    #[test]
+    fn test_extract_selected_text_survives_adversarial_input() {
+        // Oversized input is shed by the length cap before anything is parsed.
+        let huge = format!("div{}{}", ":not(".repeat(10_000), ")".repeat(10_000));
+        assert!(huge.len() > 1024);
+        assert!(extract_selected_text("<p>x</p>", &huge).is_err());
+
+        // Short enough to reach the parser, and rejected there instead: nesting
+        // by the `:not()` rule, breadth by the selector-list cap.
+        assert!(extract_selected_text("<p>x</p>", "div:not(:not(:not(p)))").is_err());
+        let wide = ["a"; 64].join(",");
+        assert!(wide.len() < 1024);
+        assert!(extract_selected_text("<p>x</p>", &wide).is_err());
+
+        // A pathological attribute value in the *document* is just data.
+        let html = format!("<p data-x=\"{}\">t</p>", "y".repeat(100_000));
+        assert_eq!(selected_text(&html, "p[data-x^=yyy]"), "t");
     }
 
     // Real headless-browser screenshot capture. Compiled only with the `headless-browser`

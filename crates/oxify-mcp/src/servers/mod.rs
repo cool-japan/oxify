@@ -1,5 +1,9 @@
 //! Built-in MCP servers for common operations
 
+/// Bounded CSS selector engine backing the `web_scrape` tool. Private: it is an
+/// implementation detail of [`web`], not part of this crate's public API.
+mod css_select;
+
 pub mod database;
 pub mod filesystem;
 pub mod git;
