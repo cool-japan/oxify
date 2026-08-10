@@ -429,8 +429,8 @@ impl<'a> Scanner<'a> {
             };
             Nth { a, b }
         } else {
-            let offset = magnitude
-                .ok_or_else(|| SelectorError::new("expected an `An+B` expression"))?;
+            let offset =
+                magnitude.ok_or_else(|| SelectorError::new("expected an `An+B` expression"))?;
             Nth {
                 a: 0,
                 b: signed(sign, offset)?,
@@ -738,7 +738,9 @@ mod tests {
 
     #[test]
     fn dangling_combinators_and_commas_are_rejected() {
-        for input in ["> p", "+ p", "~ p", "p >", "p ~", "p,", ",p", "p,,q", "p >> q"] {
+        for input in [
+            "> p", "+ p", "~ p", "p >", "p ~", "p,", ",p", "p,,q", "p >> q",
+        ] {
             let _ = reject(input);
         }
     }

@@ -81,7 +81,15 @@ fn matches_complex(
     for (combinator, compound) in inner {
         next.clear();
         visited.clear();
-        if !expand(document, *combinator, compound, current, next, visited, false) {
+        if !expand(
+            document,
+            *combinator,
+            compound,
+            current,
+            next,
+            visited,
+            false,
+        ) {
             return false;
         }
         std::mem::swap(current, next);
@@ -376,7 +384,10 @@ mod tests {
     fn type_selector_is_case_insensitive_on_both_sides() {
         assert_eq!(select("<html><body><P>x</P></body></html>", "p"), ["p"]);
         assert_eq!(select("<html><body><p>x</p></body></html>", "P"), ["p"]);
-        assert_eq!(select("<html><body><DiV>x</DiV></body></html>", "dIv"), ["div"]);
+        assert_eq!(
+            select("<html><body><DiV>x</DiV></body></html>", "dIv"),
+            ["div"]
+        );
     }
 
     #[test]
@@ -419,7 +430,10 @@ mod tests {
     fn attribute_operators_behave_as_specified() {
         assert_eq!(select(FIXTURE, "[data-kind]"), ["div#p1", "div#p2"]);
         assert_eq!(select(FIXTURE, "[data-kind=article]"), ["div#p2"]);
-        assert_eq!(select(FIXTURE, "[data-kind~=article]"), ["div#p1", "div#p2"]);
+        assert_eq!(
+            select(FIXTURE, "[data-kind~=article]"),
+            ["div#p1", "div#p2"]
+        );
         assert_eq!(select(FIXTURE, "[data-kind~=x]"), ["div#p1"]);
         assert_eq!(select(FIXTURE, "[data-kind^=art]"), ["div#p1", "div#p2"]);
         assert_eq!(select(FIXTURE, "[data-kind$=cle]"), ["div#p2"]);
@@ -433,7 +447,10 @@ mod tests {
         assert_eq!(select(html, "[data-x$='']"), Vec::<String>::new());
         assert_eq!(select(html, "[data-x*='']"), Vec::<String>::new());
         // An exact test against the empty string is a real comparison, though.
-        assert_eq!(select("<html><body><p data-x>t</p></body></html>", "[data-x='']"), ["p"]);
+        assert_eq!(
+            select("<html><body><p data-x>t</p></body></html>", "[data-x='']"),
+            ["p"]
+        );
     }
 
     #[test]
@@ -475,7 +492,10 @@ mod tests {
 
     #[test]
     fn structural_pseudo_classes_count_element_siblings_only() {
-        assert_eq!(select(FIXTURE, "div.post > :first-child"), ["h2#h1", "p#t3"]);
+        assert_eq!(
+            select(FIXTURE, "div.post > :first-child"),
+            ["h2#h1", "p#t3"]
+        );
         assert_eq!(select(FIXTURE, "div.post > :last-child"), ["p#t2", "p#t3"]);
         assert_eq!(select(FIXTURE, "div.post > p:first-child"), ["p#t3"]);
     }
@@ -490,7 +510,10 @@ mod tests {
         assert_eq!(select(html, "li:nth-child(odd)"), ["li#a", "li#c", "li#e"]);
         assert_eq!(select(html, "li:nth-child(even)"), ["li#b", "li#d"]);
         assert_eq!(select(html, "li:nth-child(2n+1)"), ["li#a", "li#c", "li#e"]);
-        assert_eq!(select(html, "li:nth-child(n)"), ["li#a", "li#b", "li#c", "li#d", "li#e"]);
+        assert_eq!(
+            select(html, "li:nth-child(n)"),
+            ["li#a", "li#b", "li#c", "li#d", "li#e"]
+        );
         assert_eq!(select(html, "li:nth-child(-n+2)"), ["li#a", "li#b"]);
         assert_eq!(select(html, "li:nth-child(3n)"), ["li#c"]);
         assert_eq!(select(html, "li:nth-child(0)"), Vec::<String>::new());

@@ -54,7 +54,7 @@ hex = { workspace = true }
 # SAML 2.0 support (optional)
 # Pure-Rust XML reader: OxiXML's drop-in quick-xml shim, kept under the `quick-xml`
 # dependency name so `src/saml.rs` and the `saml` feature need no changes.
-quick-xml = { package = "oxixml-quickxml-compat", version = "0.1.1", features = [
+quick-xml = { package = "oxixml-quickxml-compat", version = "0.1.2", features = [
     "serialize",
 ], optional = true }
 oxiarc-deflate = { workspace = true, optional = true }

@@ -562,7 +562,10 @@ mod tests {
         assert_eq!(selected_text(html, "li:not(.a)"), "two\nthree");
         assert_eq!(selected_text(html, ".a + li"), "two");
         assert_eq!(selected_text(html, ".a ~ li"), "two\nthree");
-        assert_eq!(selected_text(html, "[id=list] > li, [class]"), "one\ntwo\nthree");
+        assert_eq!(
+            selected_text(html, "[id=list] > li, [class]"),
+            "one\ntwo\nthree"
+        );
         assert_eq!(selected_text(html, "*[id^=li][id$=st]"), "one two three");
     }
 
@@ -601,7 +604,10 @@ mod tests {
 
         let msg = rejected_selector(&selector);
         assert!(msg.contains("Invalid CSS selector"));
-        assert!(msg.contains("..."), "long selectors should be elided: {msg}");
+        assert!(
+            msg.contains("..."),
+            "long selectors should be elided: {msg}"
+        );
         assert!(
             msg.len() < 1024,
             "error message should stay small, got {} bytes",

@@ -341,7 +341,10 @@ mod tests {
         let value = "x".repeat(200_000);
         let html = format!("<html><body><div data-x=\"{value}\">t</div></body></html>");
 
-        assert_eq!(matched_tags(&html, "[data-x^=xxx]"), vec!["div".to_string()]);
+        assert_eq!(
+            matched_tags(&html, "[data-x^=xxx]"),
+            vec!["div".to_string()]
+        );
         assert_eq!(matched_tags(&html, "[data-x=short]"), Vec::<String>::new());
     }
 

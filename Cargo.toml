@@ -161,8 +161,8 @@ crossterm = "0.29"
 # arena tree; `oxixml-dom` supplies the node handles and navigation API the
 # `web_scrape` tool's CSS-selector engine walks. Unconditional (pure Rust, no
 # reason to feature-gate).
-oxixml-html = "0.1.1"
-oxixml-dom = "0.1.1"
+oxixml-html = "0.1.2"
+oxixml-dom = "0.1.2"
 
 # Headless browser automation — async-native Chrome DevTools Protocol (CDP) client.
 # The crate itself is pure Rust; it drives an external Chrome/Chromium *binary* over
