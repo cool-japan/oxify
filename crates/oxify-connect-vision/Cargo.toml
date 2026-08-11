@@ -26,7 +26,7 @@ imageproc = "0.27"
 ndarray = "0.17"
 
 # ONNX Runtime for Surya/PaddleOCR (Pure Rust — no C/C++ dependencies)
-oxionnx = { version = "0.1.5", features = ["ndarray"], optional = true }
+oxionnx = { version = "0.1.6", features = ["ndarray"], optional = true }
 
 # Tesseract OCR (using leptess which provides Tesseract bindings)
 leptess = { version = "0.14", optional = true }
