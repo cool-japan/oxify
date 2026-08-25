@@ -4,12 +4,18 @@
 //! before execution, including cycle detection, orphan nodes, and structural issues.
 
 use crate::{NodeId, NodeKind, Workflow};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, ValidationError>;
 
-#[derive(Error, Debug, Clone)]
+// `Serialize`/`Deserialize` alongside `Error`: `ValidationReport` is what the
+// wasm bindings and every other out-of-process consumer hand back as JSON, and
+// a report whose `warnings` cannot cross that boundary is a report that has to
+// be re-rendered as prose and re-parsed. `LintResult` and `SimulationResult`
+// already derive both; this makes the third of the three consistent.
+#[derive(Error, Debug, Clone, Serialize, Deserialize)]
 pub enum ValidationError {
     #[error("Workflow has no start node")]
     NoStartNode,
@@ -705,7 +711,7 @@ impl WorkflowValidator {
 }
 
 /// Validation report with detailed statistics
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidationReport {
     pub valid: bool,
     pub warnings: Vec<ValidationError>,
@@ -713,7 +719,7 @@ pub struct ValidationReport {
 }
 
 /// Validation statistics
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidationStats {
     pub total_nodes: usize,
     pub total_edges: usize,

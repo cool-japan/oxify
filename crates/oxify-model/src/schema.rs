@@ -208,13 +208,9 @@ impl<T> MigrationRegistry<T> {
                 .iter()
                 .find(|m| m.source_version() == current && m.target_version() > current);
 
-            match next_migration {
-                Some(migration) => {
-                    current = migration.target_version();
-                    path.push(migration.as_ref());
-                }
-                None => return None,
-            }
+            let migration = next_migration?;
+            current = migration.target_version();
+            path.push(migration.as_ref());
         }
 
         Some(path)

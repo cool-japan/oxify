@@ -93,12 +93,27 @@ deadpool = { version = "0.13.0", features = ["managed"] }
 
 # Utilities
 clap = { version = "4.6.1", features = ["derive"] }
-uuid = { version = "1.23.4", features = ["v4", "serde"] }
+# `js` is a no-op off wasm32: uuid target-gates its wasm-bindgen/js-sys
+# dependencies on `cfg(all(target_arch = "wasm32", target_os = "unknown"))`, so
+# host builds are byte-identical. Without it, `uuid` is a hard `compile_error!`
+# on wasm32-unknown-unknown ("specify a source of randomness"), which is the
+# target `oxify-model --features wasm` (wasm-bindgen bindings) exists for.
+uuid = { version = "1.23.4", features = ["v4", "serde", "js"] }
 chrono = { version = "0.4.45", features = ["serde"] }
 futures = "0.3"
 tokio-stream = "0.1"
 cron = "0.17"
 rand = "0.10"
+# Not used directly by any oxify crate — this entry exists solely so
+# `oxify-model` can enable `wasm_js` on the `getrandom 0.4` that arrives through
+# `rand`. A feature can only be turned on by a crate that depends on the thing
+# directly, and `getrandom 0.4` is a hard `compile_error!` on
+# wasm32-unknown-unknown without it. `oxify-model` takes this as a
+# target-gated dependency, so it never enters a host build's graph as a direct
+# dep. The `wasm_js` *feature* is sufficient on 0.4; the
+# `--cfg getrandom_backend="wasm_js"` rustflag that getrandom 0.3 additionally
+# requires is NOT needed here (verified both with and without it).
+getrandom = { version = "0.4", features = ["wasm_js"] }
 rayon = "1.12"
 num_cpus = "1.17"
 toml = "1.1"

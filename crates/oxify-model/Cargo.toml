@@ -10,6 +10,16 @@ repository = "https://github.com/cool-japan/oxify"
 categories = ["data-structures", "encoding", "config"]
 keywords = ["models", "workflow", "serialization", "types"]
 
+# `cdylib` is what `wasm-pack build --features wasm` (and any pyo3
+# extension-module build of the `python` feature) requires: without it wasm-pack
+# refuses the crate outright — "crate-type must be cdylib to compile to
+# wasm32-unknown-unknown" — which is why the wasm-bindgen surface in `src/wasm.rs`
+# had never actually been through wasm-bindgen codegen. `rlib` is kept alongside
+# it so every in-workspace dependant, the doc tests and the benches still link
+# against this crate as a normal Rust library.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -47,3 +57,13 @@ openapi = ["utoipa"]
 python = ["pyo3"]
 wasm = ["wasm-bindgen"]
 typescript = ["ts-rs"]
+
+# wasm32-unknown-unknown (the wasm-bindgen / wasm-pack target the `wasm` feature
+# exists for) has no OS entropy source, and both of these crates refuse to
+# compile there until a direct dependent names the JavaScript backend. Neither
+# is called from oxify-model code: `getrandom` arrives through `rand`, `uuid` is
+# re-declared only to add its `js` feature on this target. Target-gated, so no
+# host build sees them.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { workspace = true }
+uuid = { workspace = true }

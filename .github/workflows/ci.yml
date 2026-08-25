@@ -117,6 +117,53 @@ jobs:
           2>&1
 
   # ============================================================================
+  # Job: wasm — the browser target the `wasm` feature exists for
+  #
+  # `oxify-model`'s wasm-bindgen bindings (`src/wasm.rs`, feature `wasm`) also
+  # compile on x86_64, so `--all-features` above passes whether or not the crate
+  # is actually buildable for the browser. It was not: `getrandom 0.4` (via
+  # `rand`) and `uuid` are each a hard `compile_error!` on
+  # wasm32-unknown-unknown until a direct dependent names the JavaScript
+  # backend. Only a job on the real target catches that, so this is it.
+  #
+  # wasm32-wasip1 is checked alongside it because the two targets fail
+  # differently — wasip1 has OS entropy and built fine throughout.
+  # ============================================================================
+  wasm:
+    name: WASM Target Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown, wasm32-wasip1
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
+
+      - name: Check oxify-model for wasm32-unknown-unknown (browser)
+        run: >
+          cargo check
+          -p oxify-model
+          --features wasm
+          --target wasm32-unknown-unknown
+          2>&1
+
+      - name: Check oxify-model for wasm32-wasip1
+        run: >
+          cargo check
+          -p oxify-model
+          --features wasm
+          --target wasm32-wasip1
+          2>&1
+
+  # ============================================================================
   # Job: security — cargo-audit for known vulnerabilities
   # ============================================================================
   security:
@@ -154,7 +201,7 @@ jobs:
   docker:
     name: Docker Build & Push
     runs-on: ubuntu-latest
-    needs: [test, test-features, security]
+    needs: [test, test-features, wasm, security]
     if: >
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))

@@ -619,7 +619,22 @@ Defined DAGs (code-based) can be executed in parallel with vector search support
   - [x] Node types: LLM, Code, Retriever, IfElse, Switch, Tool, Loop
   - [x] WasmWorkflowUtils for utility functions (UUID, JSON/YAML conversion)
   - [x] 11 comprehensive tests
-  - [x] Compile with `wasm-pack build --features wasm`
+  - [x] Compile with `wasm-pack build --features wasm` — **true as of 2026-08-25, and it was not before.**
+    The line above had been checked off against a HOST build: `#[cfg(feature = "wasm")]` (not
+    `target_arch`) means the wasm-bindgen surface compiles on x86_64, so `--all-features` and
+    `--features wasm` both passed while the browser target had never been built once. Three
+    separate things were broken, each hiding the next:
+    - `wasm-pack` refused the crate outright — no `[lib] crate-type = ["cdylib", "rlib"]`;
+    - `getrandom 0.4` (via `rand`) is a hard `compile_error!` on wasm32-unknown-unknown without
+      its `wasm_js` feature, which only a direct dependent can enable;
+    - `uuid` is a hard `compile_error!` there without one of `js` / `rng-getrandom` / `rng-rand`.
+    Fixed by the `[lib]` block, workspace `uuid` gaining `js` (a no-op off wasm32 — uuid
+    target-gates its wasm-bindgen/js-sys deps), and a target-gated `getrandom`/`uuid` dependency
+    pair in `crates/oxify-model/Cargo.toml`. The `--cfg getrandom_backend="wasm_js"` rustflag that
+    `getrandom 0.3` needs is NOT required for 0.4 (verified with and without it).
+    **The reason it could rot unnoticed is now closed:** `.github/workflows/ci.yml`'s `wasm` job
+    builds `oxify-model` for wasm32-unknown-unknown AND wasm32-wasip1 on every push.
+    (wasm32-wasip1 was fine throughout — it has OS entropy.)
   - [x] TypeScript type definitions (.d.ts generation) ✅ COMPLETE
     - [x] generate_typescript_definitions() function
     - [x] Comprehensive type coverage for all workflow types
