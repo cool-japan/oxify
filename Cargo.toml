@@ -164,8 +164,8 @@ oxistore-blob-azure = "0.3.0"
 bytes = "1.12"
 
 # Compression (Pure Rust, OxiARC ecosystem)
-oxiarc-deflate = "0.4.1"
-oxiarc-archive = "0.4.1"
+oxiarc-deflate = "0.4.2"
+oxiarc-archive = "0.4.2"
 
 # TUI
 ratatui = "0.30"
