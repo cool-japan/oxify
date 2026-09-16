@@ -6,6 +6,8 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "GraphQL client connector for OxiFY - queries, mutations, custom auth, introspection"
+categories = ["api-bindings", "web-programming", "network-programming"]
+keywords = ["oxify", "graphql", "client", "connector", "api"]
 repository = "https://github.com/cool-japan/oxify"
 
 [dependencies]

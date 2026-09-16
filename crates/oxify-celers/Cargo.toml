@@ -6,6 +6,8 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Bridge OxiFY workflow execution to the CeleRS distributed task queue"
+categories = ["asynchronous", "network-programming", "concurrency"]
+keywords = ["oxify", "celers", "workflow", "task-queue", "distributed"]
 
 [dependencies]
 oxify-model  = { version = "0.2.0", path = "../oxify-model" }

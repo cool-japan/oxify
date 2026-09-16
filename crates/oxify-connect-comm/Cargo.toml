@@ -6,6 +6,8 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Communication connectors for OxiFY - Slack, SMTP, and more"
+categories = ["api-bindings", "email", "network-programming"]
+keywords = ["oxify", "slack", "smtp", "email", "connector"]
 repository = "https://github.com/cool-japan/oxify"
 
 [dependencies]

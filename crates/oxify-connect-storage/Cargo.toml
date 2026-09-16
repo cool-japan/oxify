@@ -6,6 +6,8 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Object storage connectors for OxiFY - S3, MinIO, GCS, Azure Blob"
+categories = ["api-bindings", "filesystem", "network-programming"]
+keywords = ["oxify", "s3", "object-storage", "gcs", "connector"]
 repository = "https://github.com/cool-japan/oxify"
 
 [dependencies]
