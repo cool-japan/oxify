@@ -2,6 +2,8 @@
 name = "oxify-examples"
 version = "0.2.0"
 edition = "2021"
+# Example workflows for OxiFY, not a crates.io crate (the workspace already excludes it).
+publish = false
 
 [[bin]]
 name = "simple_workflow"
